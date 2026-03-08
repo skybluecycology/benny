@@ -25,7 +25,7 @@ export default function WorkflowList() {
 
   const fetchWorkflows = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/workflows');
+      const response = await fetch('http://localhost:8005/api/workflows');
       const data = await response.json();
       setWorkflows(data);
     } catch (error) {
@@ -46,7 +46,7 @@ export default function WorkflowList() {
     if (!confirm('Delete this workflow?')) return;
     
     try {
-      await fetch(`http://localhost:8000/api/workflows/${id}`, {
+      await fetch(`http://localhost:8005/api/workflows/${id}`, {
         method: 'DELETE'
       });
       fetchWorkflows();

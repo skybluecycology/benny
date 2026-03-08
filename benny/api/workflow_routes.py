@@ -15,6 +15,8 @@ from langchain_core.messages import HumanMessage
 
 from ..core.workspace import get_workspace_path, list_workspaces, ensure_workspace_structure
 from ..graph.workflow import build_workflow_graph, WorkflowState
+from ..graph.swarm import build_swarm_graph, run_swarm_workflow, get_governance_url
+from ..core.state import create_swarm_state
 from ..persistence.checkpointer import SQLiteCheckpointer, TimeTravelDebugger
 from ..persistence.workflow_storage import WorkflowStorage
 from ..governance.lineage import track_workflow_start, track_workflow_complete
@@ -55,6 +57,8 @@ class WorkflowResponse(BaseModel):
     status: str
     workflow: str
     workspace: str
+    artifact_path: Optional[str] = None
+    governance_url: Optional[str] = None
 
 
 async def _execute_workflow_async(
@@ -113,12 +117,52 @@ async def _execute_workflow_async(
             executions[execution_id]["result"] = result.get("context", {}).get("final_response")
             executions[execution_id]["completed_at"] = end_time.isoformat()
             
-            # Track completion in lineage
             try:
                 nodes_executed = ["process_input", "call_llm", "format_output"]
                 track_workflow_complete(execution_id, request.workflow, nodes_executed, execution_time_ms)
             except Exception:
                 pass
+        
+    except Exception as e:
+        executions[execution_id]["status"] = "failed"
+        executions[execution_id]["error"] = str(e)
+        executions[execution_id]["failed_at"] = datetime.now().isoformat()
+
+
+async def _execute_swarm_async(
+    execution_id: str,
+    request: WorkflowRequest
+) -> None:
+    """Background task to execute swarm workflow"""
+    import os
+    try:
+        executions[execution_id]["status"] = "running"
+        executions[execution_id]["started_at"] = datetime.now().isoformat()
+        
+        # Get concurrency from env or params
+        max_concurrency = int(os.getenv("SWARM_MAX_CONCURRENCY", "1"))
+        if request.params and "max_concurrency" in request.params:
+            max_concurrency = request.params["max_concurrency"]
+        
+        # Execute the swarm workflow
+        result = await run_swarm_workflow(
+            request=request.message or "",
+            workspace=request.workspace,
+            model=request.model,
+            execution_id=execution_id,
+            max_concurrency=max_concurrency
+        )
+        
+        # Update execution state
+        executions[execution_id]["status"] = result.get("status", "completed")
+        executions[execution_id]["result"] = result.get("final_document")
+        executions[execution_id]["artifact_path"] = result.get("artifact_path")
+        executions[execution_id]["governance_url"] = result.get("governance_url")
+        executions[execution_id]["plan"] = result.get("plan")
+        executions[execution_id]["completed_at"] = datetime.now().isoformat()
+        
+        if result.get("errors"):
+            executions[execution_id]["errors"] = result["errors"]
         
     except Exception as e:
         executions[execution_id]["status"] = "failed"
@@ -147,14 +191,18 @@ async def execute_workflow(request: WorkflowRequest, background_tasks: Backgroun
         "created_at": datetime.now().isoformat()
     }
     
-    # Execute workflow in background
-    background_tasks.add_task(_execute_workflow_async, execution_id, request)
+    # Route to appropriate workflow handler
+    if request.workflow == "swarm":
+        background_tasks.add_task(_execute_swarm_async, execution_id, request)
+    else:
+        background_tasks.add_task(_execute_workflow_async, execution_id, request)
     
     return WorkflowResponse(
         execution_id=execution_id,
         status="pending",
         workflow=request.workflow,
-        workspace=request.workspace
+        workspace=request.workspace,
+        governance_url=get_governance_url(execution_id, request.workflow) if request.workflow == "swarm" else None
     )
 
 

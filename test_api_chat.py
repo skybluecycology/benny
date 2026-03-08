@@ -9,7 +9,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 def test_rag_chat_endpoint():
     print("Testing Benny API /rag/chat endpoint...")
     
-    url = "http://localhost:8000/api/rag/chat"
+    url = "http://localhost:8005/api/rag/chat"
     
     payload = {
         "query": "Hello, simply reply with the word 'Working'.",
@@ -54,7 +54,7 @@ def test_rag_chat_endpoint():
                 print(f"Response Text: {response.text}")
                 
     except requests.exceptions.ConnectionError:
-        print("CONNECTION ERROR: Could not connect to localhost:8000.")
+        print("CONNECTION ERROR: Could not connect to localhost:8005.")
     except Exception as e:
         print(f"ERROR: {str(e)}")
 

@@ -14,12 +14,12 @@ from litellm import completion
 LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
     "lemonade": {
         "name": "Lemonade",
-        "port": 8080,
-        "base_url": "http://localhost:8080/api/v1",
+        "port": 8000,
+        "base_url": "http://localhost:8000/api/v1",
         "api_key": "not-needed",
         "description": "AMD NPU accelerated inference",
-        "startup_cmd": "lemonade-server serve --port 8080",
-        "check_url": "http://localhost:8080/api/v1/models"
+        "startup_cmd": "lemonade-server serve --port 8000",
+        "check_url": "http://localhost:8000/api/v1/models"
     },
     "ollama": {
         "name": "Ollama",

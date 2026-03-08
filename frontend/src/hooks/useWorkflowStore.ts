@@ -9,10 +9,12 @@ interface WorkflowState {
   selectedEdge: string | null;
   executionStatus: Record<string, 'idle' | 'running' | 'success' | 'error'>;
   nodeOutputs: Record<string, any>;
+  swarmExecutionId: string | null;
   
   // Actions
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
+  setSwarmExecutionId: (id: string | null) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -36,9 +38,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   selectedEdge: null,
   executionStatus: {},
   nodeOutputs: {},
+  swarmExecutionId: null,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
+  setSwarmExecutionId: (id) => set({ swarmExecutionId: id }),
 
   onNodesChange: (changes) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) });

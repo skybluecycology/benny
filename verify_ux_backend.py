@@ -5,7 +5,7 @@ Quick verification script to test Workflow Studio UX fixes
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8005"
 
 def test_api_endpoints():
     """Test that all required API endpoints are working"""

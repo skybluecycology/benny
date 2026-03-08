@@ -9,6 +9,8 @@ import WorkflowList from './components/Studio/WorkflowList';
 import SourcePanel from './components/Studio/SourcePanel';
 import ResultPanel from './components/Studio/ResultPanel';
 import NotebookView from './components/Notebook/NotebookView';
+import SwarmStatePanel from './components/Studio/SwarmStatePanel';
+import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { Layers, Cpu, BookOpen } from 'lucide-react';
 
@@ -19,6 +21,12 @@ import WorkspaceSelector from './components/Shared/WorkspaceSelector';
 function App() {
   const [view, setView] = useState<View>('studio');
   const [showResults, setShowResults] = useState(false);
+  const swarmExecutionId = useWorkflowStore((state) => state.swarmExecutionId);
+  const [swarmConfig, setSwarmConfig] = useState({
+    model: 'ollama/llama3.2',
+    max_concurrency: 1,
+    workspace: 'default'
+  });
   const selectedNode = useWorkflowStore((state) => state.selectedNode);
 
   return (
@@ -75,11 +83,16 @@ function App() {
             </div>
           </div>
 
-          {/* Studio Sidebar - Workflows + Node Palette */}
+          {/* Studio Sidebar - Workflows + Node Palette + Swarm */}
           {view === 'studio' && (
             <div className="studio-sidebar">
               <WorkspaceSelector />
               <WorkflowList />
+              <SwarmConfigPanel 
+                config={swarmConfig}
+                onChange={setSwarmConfig}
+              />
+              <SwarmStatePanel executionId={swarmExecutionId} />
               <NodePalette />
             </div>
           )}

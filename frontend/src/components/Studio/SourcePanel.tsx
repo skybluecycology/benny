@@ -26,7 +26,7 @@ export default function SourcePanel() {
 
   const fetchFiles = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/files?workspace=${currentWorkspace}`);
+      const response = await fetch(`http://localhost:8005/api/files?workspace=${currentWorkspace}`);
       const data = await response.json();
       setFiles(data.data_in || []);
     } catch (error) {
@@ -53,7 +53,7 @@ export default function SourcePanel() {
     formData.append('file', file);
 
     try {
-      await fetch(`http://localhost:8000/api/files/upload?workspace=${currentWorkspace}`, {
+      await fetch(`http://localhost:8005/api/files/upload?workspace=${currentWorkspace}`, {
         method: 'POST',
         body: formData
       });
@@ -67,7 +67,7 @@ export default function SourcePanel() {
 
   const deleteFile = async (filename: string) => {
     try {
-      await fetch(`http://localhost:8000/api/files/${filename}?workspace=${currentWorkspace}`, {
+      await fetch(`http://localhost:8005/api/files/${filename}?workspace=${currentWorkspace}`, {
         method: 'DELETE'
       });
       fetchFiles();
@@ -81,7 +81,7 @@ export default function SourcePanel() {
   
   const downloadFile = async (filename: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/files/${currentWorkspace}/data_in/${filename}`);
+      const response = await fetch(`http://localhost:8005/api/files/${currentWorkspace}/data_in/${filename}`);
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
@@ -112,7 +112,7 @@ export default function SourcePanel() {
   const ingestFiles = async () => {
     setIngesting(true);
     try {
-      await fetch('http://localhost:8000/api/rag/ingest', {
+      await fetch('http://localhost:8005/api/rag/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace: currentWorkspace })

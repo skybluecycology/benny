@@ -109,7 +109,7 @@ def smart_output(
     content: str, 
     filename: str, 
     workspace_id: str = "default",
-    server_url: str = "http://localhost:8000"
+    server_url: str = "http://localhost:8005"
 ) -> str:
     """
     Return content directly if small, otherwise save and return URL reference.

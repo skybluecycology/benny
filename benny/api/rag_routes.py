@@ -31,6 +31,7 @@ class QueryRequest(BaseModel):
     workspace: str = "default"
     top_k: int = 5
     provider: Optional[str] = "fastflowlm"
+    model: Optional[str] = None
 
 
 def extract_text_from_file(file_path: Path) -> str:
@@ -250,13 +251,19 @@ ANSWER:"""
             
 
             # Determine model name
-            model_name = "default"
-            if provider_name == "ollama":
-                model_name = "llama3"
-            elif provider_name == "lemonade":
-                model_name = "gemma-3-4b"
-            elif provider_name == "fastflowlm":
-                model_name = "gemma3:4b"
+            if request.model:
+                # Lemonade models are often registered as e.g 'amd/Qwen3...' but the backend
+                # expects just the base name when chatting.
+                model_name = request.model.split('/')[-1]
+            else:
+                if provider_name == "ollama":
+                    model_name = "llama3"
+                elif provider_name == "lemonade":
+                    model_name = "amd/Qwen3-8B-Hybrid-quantized_int4-float16-cpu-onnx"
+                elif provider_name == "fastflowlm":
+                    model_name = "gemma3:4b"
+                else:
+                    model_name = "default"
 
             # Use httpx for direct API call to avoid litellm dependency issues
             api_base = provider_config["base_url"]
@@ -284,7 +291,7 @@ ANSWER:"""
             
             print(f"DEBUG: Calling {chat_url} with model {model_name}")
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     chat_url,
                     json=payload,
@@ -302,9 +309,10 @@ ANSWER:"""
                     debug_response = {"error": error_msg}
 
         except Exception as llm_error:
-            print(f"LLM Exception: {str(llm_error)}")
-            answer = f"Connection error with {request.provider}: {str(llm_error)}. Please check if the service is running."
-            debug_response = {"exception": str(llm_error)}
+            error_details = str(llm_error) if str(llm_error) else repr(llm_error)
+            print(f"LLM Exception: {error_details}")
+            answer = f"Connection error with {request.provider}: {error_details}. Please check if the service is running or if the model timed out preparing the response."
+            debug_response = {"exception": error_details}
 
         return {
             "answer": answer,

@@ -9,7 +9,7 @@ interface Message {
 }
 
 export default function NotebookView() {
-  const { currentWorkspace, activeLLMProvider } = useWorkspaceStore();
+  const { currentWorkspace, activeLLMProvider, activeLLMModels } = useWorkspaceStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,13 +23,14 @@ export default function NotebookView() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/rag/chat', {
+      const response = await fetch('http://localhost:8005/api/rag/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: input,
           workspace: currentWorkspace,
-          provider: activeLLMProvider
+          provider: activeLLMProvider,
+          model: activeLLMModels[activeLLMProvider]
         })
       });
 
@@ -95,9 +96,9 @@ export default function NotebookView() {
             </div>
           ))}
           {loading && (
-            <div className="message message-loading">
-              <Loader className="animate-spin" size={20} />
-              <span>Thinking...</span>
+            <div className="message message-loading" style={{ opacity: 0.8, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Loader className="animate-spin" size={16} />
+              <span>{activeLLMProvider} is thinking...</span>
             </div>
           )}
         </div>

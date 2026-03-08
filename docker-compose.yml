@@ -62,7 +62,7 @@ services:
     image: marquezproject/marquez-web:0.47.0
     container_name: benny-marquez-web
     ports:
-      - "3001:3000" # UI (shifted to avoid frontend conflict)
+      - "3010:3000" # UI (shifted to avoid frontend conflict)
     environment:
       - MARQUEZ_HOST=marquez-api
       - MARQUEZ_PORT=5000

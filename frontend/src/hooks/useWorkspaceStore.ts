@@ -8,6 +8,8 @@ interface WorkspaceState {
   setCurrentWorkspace: (workspace: string) => void;
   activeLLMProvider: string;
   setActiveLLMProvider: (provider: string) => void;
+  activeLLMModels: Record<string, string>;
+  setActiveLLMModel: (provider: string, model: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -16,7 +18,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   fetchWorkspaces: async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/workspaces');
+      const response = await fetch('http://localhost:8005/api/workspaces');
       if (response.ok) {
         const data = await response.json();
         // Assuming data is { workspaces: string[] } or just string[]
@@ -37,7 +39,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   createWorkspace: async (name: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/workspaces/${name}`, {
+      const response = await fetch(`http://localhost:8005/api/workspaces/${name}`, {
         method: 'POST'
       });
       
@@ -57,8 +59,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ currentWorkspace: workspace });
   },
 
-  activeLLMProvider: 'fastflowlm',
+  activeLLMProvider: 'lemonade',
   setActiveLLMProvider: (provider: string) => {
     set({ activeLLMProvider: provider });
+  },
+
+  activeLLMModels: { lemonade: 'amd/Qwen3-8B-Hybrid-quantized_int4-float16-cpu-onnx' },
+  setActiveLLMModel: (provider: string, model: string) => {
+    set((state) => ({
+      activeLLMModels: {
+        ...state.activeLLMModels,
+        [provider]: model
+      }
+    }));
   }
 }));

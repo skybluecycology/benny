@@ -26,9 +26,9 @@ SERVICE_COMMANDS = {
         "check": "http://localhost:11434/v1/models"
     },
     "lemonade": {
-        "start": "lemonade-server serve --port 8080",
+        "start": "lemonade-server serve --port 8000",
         "stop": 'taskkill /FI "WINDOWTITLE eq lemonade*" /F',
-        "check": "http://localhost:8080/api/v1/models"
+        "check": "http://localhost:8000/api/v1/models"
     },
     "fastflowlm": {
         "start": None,  # Manual start required

@@ -8,7 +8,7 @@ if "%1"=="stop" goto :stop_stack
 if "%1"=="help" goto :help
 
 REM Default LLM Provider
-set LLM_PROVIDER=fastflow
+set LLM_PROVIDER=lemonade
 if not "%1"=="" set LLM_PROVIDER=%1
 
 echo.
@@ -28,7 +28,7 @@ call manage_llm.bat start-%LLM_PROVIDER%
 
 REM 3. Start Backend
 echo [3/4] Starting Backend Server...
-start "Benny Backend" cmd /k "uvicorn benny.api.server:app --reload --port 8000"
+start "Benny Backend" cmd /k "uvicorn benny.api.server:app --reload --port 8005"
 
 REM 4. Start Frontend
 echo [4/4] Starting Frontend...
@@ -38,8 +38,8 @@ cd ..
 
 echo.
 echo ✅ All services shutdown logic initialized.
-echo    - Marquez:  http://localhost:3001
-echo    - Backend:  http://localhost:8000/docs
+echo    - Marquez:  http://localhost:3010
+echo    - Backend:  http://localhost:8005/docs
 echo    - Frontend: http://localhost:5173 (usually)
 echo.
 goto :eof

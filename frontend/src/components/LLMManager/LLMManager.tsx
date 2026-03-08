@@ -4,7 +4,7 @@ import { Play, Square, RefreshCw, Check, Zap } from 'lucide-react';
 
 export default function LLMManager() {
   const { providers, loading, error, refresh, startProvider, stopProvider } = useLLMStatus(10000);
-  const { activeLLMProvider, setActiveLLMProvider } = useWorkspaceStore();
+  const { activeLLMProvider, setActiveLLMProvider, activeLLMModels, setActiveLLMModel } = useWorkspaceStore();
 
   if (loading && Object.keys(providers).length === 0) {
     return (
@@ -36,7 +36,7 @@ export default function LLMManager() {
           marginBottom: '20px',
           color: 'var(--accent-error)'
         }}>
-          ⚠️ {error} - Make sure the Benny API server is running on port 8000
+          ⚠️ {error} - Make sure the Benny API server is running on port 8005
         </div>
       )}
 
@@ -96,24 +96,42 @@ export default function LLMManager() {
 
             {provider.running && provider.models?.data && (
               <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase' }}>
-                  Available Models
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Available Models</span>
+                  {activeLLMProvider === key && activeLLMModels[key] && (
+                    <span style={{ color: 'var(--accent-primary)' }}>Selected: {activeLLMModels[key].split('/').pop()}</span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {provider.models.data.slice(0, 5).map((model: any) => (
-                    <span 
-                      key={model.id} 
-                      style={{
-                        fontSize: '11px',
-                        padding: '4px 8px',
-                        background: 'var(--bg-input)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontFamily: 'Fira Code, monospace'
-                      }}
-                    >
-                      {model.id}
-                    </span>
-                  ))}
+                  {provider.models.data.map((model: any) => {
+                    const isSelected = activeLLMModels[key] === model.id;
+                    const isProviderActive = activeLLMProvider === key;
+                    
+                    return (
+                      <button 
+                        key={model.id}
+                        onClick={() => {
+                          setActiveLLMModel(key, model.id);
+                          if (!isProviderActive) setActiveLLMProvider(key);
+                        }}
+                        style={{
+                          fontSize: '11px',
+                          padding: '4px 8px',
+                          background: isSelected ? 'var(--accent-primary)' : 'var(--bg-input)',
+                          color: isSelected ? 'white' : 'inherit',
+                          border: `1px solid ${isSelected ? 'var(--accent-primary)' : 'transparent'}`,
+                          borderRadius: 'var(--radius-sm)',
+                          fontFamily: 'Fira Code, monospace',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          opacity: isProviderActive ? 1 : 0.7
+                        }}
+                        title={model.id}
+                      >
+                        {model.id}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -35,7 +35,7 @@ def write_file(
         
         return (
             f"✅ Written to {filename}\n"
-            f"📥 Download: http://localhost:8000/api/files/{workspace}/{subdir}/{filename}"
+            f"📥 Download: http://localhost:8005/api/files/{workspace}/{subdir}/{filename}"
         )
     except Exception as e:
         return f"❌ Write error: {str(e)}"
