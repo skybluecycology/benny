@@ -23,7 +23,7 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
   // Default to the active model from LLM Management
-  const activeModel = activeLLMModels[activeLLMProvider] || 'ollama/llama3.2';
+  const activeModel = activeLLMModels[activeLLMProvider] || 'Qwen3-8B-Hybrid';
   const [swarmConfig, setSwarmConfig] = useState({
     model: activeModel,
     max_concurrency: 1,

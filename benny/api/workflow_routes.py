@@ -48,7 +48,7 @@ class WorkflowRequest(BaseModel):
     workflow: str
     workspace: str = "default"
     message: Optional[str] = None
-    model: str = "ollama/llama3.2"
+    model: str = "Qwen3-8B-Hybrid"
     params: Optional[Dict[str, Any]] = None
 
 

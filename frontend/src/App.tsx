@@ -23,7 +23,7 @@ function App() {
   const [showResults, setShowResults] = useState(false);
   const swarmExecutionId = useWorkflowStore((state) => state.swarmExecutionId);
   const [swarmConfig, setSwarmConfig] = useState({
-    model: 'ollama/llama3.2',
+    model: 'Qwen3-8B-Hybrid',
     max_concurrency: 1,
     workspace: 'default'
   });
@@ -105,8 +105,7 @@ function App() {
             </div>
           )}
 
-          {/* LLM view - show node palette as fallback */}
-          {view === 'llm' && <NodePalette />}
+          {/* LLM view - no sidebar content needed */}
         </div>
 
         {/* Main Content */}
