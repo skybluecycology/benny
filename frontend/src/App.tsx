@@ -113,7 +113,7 @@ function App() {
         <div className="main-content">
           {view === 'studio' && (
             <>
-              <ExecutionBar />
+              <ExecutionBar onNavigateToLLM={() => setView('llm')} />
               <div className="canvas-container">
                 <WorkflowCanvas />
               </div>

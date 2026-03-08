@@ -3,9 +3,14 @@ import { Play, RotateCcw, Save, Loader, Zap } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import WorkflowExportImport from './WorkflowExportImport';
+import ActiveLLMBadge from './ActiveLLMBadge';
 
-export default function ExecutionBar() {
-  const { currentWorkspace } = useWorkspaceStore();
+interface ExecutionBarProps {
+  onNavigateToLLM?: () => void;
+}
+
+export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
+  const { currentWorkspace, activeLLMProvider, activeLLMModels } = useWorkspaceStore();
   const {
     clearExecution,
     nodes,
@@ -17,8 +22,10 @@ export default function ExecutionBar() {
 
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
+  // Default to the active model from LLM Management
+  const activeModel = activeLLMModels[activeLLMProvider] || 'ollama/llama3.2';
   const [swarmConfig, setSwarmConfig] = useState({
-    model: 'ollama/llama3.2',
+    model: activeModel,
     max_concurrency: 1,
     workspace: currentWorkspace
   });
@@ -151,7 +158,10 @@ export default function ExecutionBar() {
 
   return (
     <div className="top-bar">
-      <h1>🔷 Workflow Studio</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <h1>🔷 Workflow Studio</h1>
+        <ActiveLLMBadge onNavigateToLLM={onNavigateToLLM} />
+      </div>
       
       <div className="execution-controls">
         <button 

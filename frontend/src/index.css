@@ -1172,7 +1172,6 @@ body {
   max-width: 400px;
 }
 
-
 /* ----------------------------------------------------------------------------- 
    Workspace Selector
    ----------------------------------------------------------------------------- */
@@ -1320,13 +1319,21 @@ body {
 .swarm-status-id {
   font-size: 10px;
   color: var(--text-muted);
-  font-family: 'Fira Code', monospace;
+  font-family: "Fira Code", monospace;
 }
 
-.status-success { color: var(--accent-success); }
-.status-error { color: var(--accent-error); }
-.status-running { color: var(--primary); }
-.status-pending { color: var(--text-muted); }
+.status-success {
+  color: var(--accent-success);
+}
+.status-error {
+  color: var(--accent-error);
+}
+.status-running {
+  color: var(--primary);
+}
+.status-pending {
+  color: var(--text-muted);
+}
 
 .spin {
   animation: spin 1s linear infinite;
@@ -1498,7 +1505,7 @@ body {
 }
 
 .swarm-artifact-path {
-  font-family: 'Fira Code', monospace;
+  font-family: "Fira Code", monospace;
   color: var(--accent-data);
 }
 
@@ -1607,3 +1614,78 @@ body {
   margin-bottom: 0;
 }
 
+/* ----------------------------------------------------------------------------- 
+   Active LLM Badge (Studio Top Bar)
+   ----------------------------------------------------------------------------- */
+.active-llm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.active-llm-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-active);
+  color: var(--text-primary);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 12px rgba(139, 92, 250, 0.15);
+}
+
+.active-llm-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  transition: background var(--transition-normal);
+}
+
+.active-llm-status-dot.running {
+  background: var(--accent-success);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  animation: llmDotPulse 2s ease-in-out infinite;
+}
+
+.active-llm-status-dot.stopped {
+  background: var(--accent-error);
+}
+
+@keyframes llmDotPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.active-llm-provider {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.active-llm-separator {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.active-llm-model {
+  font-family: "Fira Code", monospace;
+  font-size: 11px;
+  color: var(--accent-llm);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

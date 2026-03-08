@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { X, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
+import { useLLMStatus } from '../../hooks/useLLMStatus';
+import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 
 interface ConfigPanelProps {
   isOpen: boolean;
@@ -15,6 +17,11 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
   const deleteNode = useWorkflowStore((state) => state.deleteNode);
   const getConnectedNodes = useWorkflowStore((state) => state.getConnectedNodes);
   const nodeOutputs = useWorkflowStore((state) => state.nodeOutputs);
+  const { providers } = useLLMStatus(10000);
+  const { activeLLMProvider, activeLLMModels } = useWorkspaceStore();
+
+  // Build dynamic model options from running providers
+  const runningProviders = Object.entries(providers).filter(([, p]) => p.running && p.models?.data);
 
   const node = nodes.find((n) => n.id === nodeId);
   const output = nodeId ? nodeOutputs[nodeId] : null;
@@ -117,15 +124,23 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
                     title="Select LLM model"
                     aria-label="Select LLM model"
                   >
+                    {/* Dynamic models from running providers */}
+                    {runningProviders.map(([key, provider]) => (
+                      <optgroup key={key} label={`${provider.name} (Running)`}>
+                        {provider.models.data.map((model: any) => {
+                          const isActive = activeLLMProvider === key && activeLLMModels[key] === model.id;
+                          return (
+                            <option key={model.id} value={model.id}>
+                              {model.id}{isActive ? ' ★' : ''}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    ))}
                     <optgroup label="Cloud Models">
                       <option value="gpt-4-turbo">GPT-4 Turbo (OpenAI)</option>
                       <option value="claude-3-sonnet">Claude 3 Sonnet (Anthropic)</option>
                       <option value="gpt-3.5-turbo">GPT-3.5 Turbo (OpenAI)</option>
-                    </optgroup>
-                    <optgroup label="Local Models">
-                      <option value="ollama/llama3.2">Llama 3.2 (Ollama)</option>
-                      <option value="ollama/deepseek-r1:8b">DeepSeek R1 (Ollama)</option>
-                      <option value="openai/deepseek-r1:8b">DeepSeek R1 (FastFlowLM)</option>
                     </optgroup>
                   </select>
                 </div>

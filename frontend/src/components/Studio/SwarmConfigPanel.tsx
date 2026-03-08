@@ -1,4 +1,6 @@
 import { Settings2 } from 'lucide-react';
+import { useLLMStatus } from '../../hooks/useLLMStatus';
+import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 
 interface SwarmConfig {
   model: string;
@@ -12,9 +14,15 @@ interface SwarmConfigPanelProps {
 }
 
 export default function SwarmConfigPanel({ config, onChange }: SwarmConfigPanelProps) {
+  const { providers } = useLLMStatus(10000);
+  const { activeLLMProvider, activeLLMModels } = useWorkspaceStore();
+
   const handleChange = (key: keyof SwarmConfig, value: string | number) => {
     onChange({ ...config, [key]: value });
   };
+
+  // Build dynamic model options from running providers
+  const runningProviders = Object.entries(providers).filter(([, p]) => p.running && p.models?.data);
 
   return (
     <div className="swarm-config-panel">
@@ -24,26 +32,52 @@ export default function SwarmConfigPanel({ config, onChange }: SwarmConfigPanelP
       </div>
       
       <div className="swarm-config-content">
-        {/* Model Selector */}
+        {/* Model Selector — Dynamic from LLM Management */}
         <div className="form-group">
-          <label className="form-label" htmlFor="swarm-model">LLM Model</label>
+          <label className="form-label" htmlFor="swarm-model">
+            LLM Model
+            {activeLLMProvider && providers[activeLLMProvider]?.running && (
+              <span style={{ 
+                marginLeft: '8px', 
+                fontSize: '10px', 
+                color: 'var(--accent-success)',
+                fontWeight: 400 
+              }}>
+                ● {providers[activeLLMProvider]?.name} active
+              </span>
+            )}
+          </label>
           <select
             id="swarm-model"
             className="form-select"
             value={config.model}
             onChange={(e) => handleChange('model', e.target.value)}
           >
-            <optgroup label="Local Models">
-              <option value="ollama/llama3.2">Llama 3.2 (Ollama)</option>
-              <option value="ollama/gemma:2b">Gemma 2B (Ollama)</option>
-              <option value="openai/gemma3:4b">Gemma 3 4B (FastFlowLM)</option>
-              <option value="ollama/deepseek-r1:8b">DeepSeek R1 (Ollama)</option>
-            </optgroup>
+            {/* Dynamic models from running providers */}
+            {runningProviders.map(([key, provider]) => (
+              <optgroup key={key} label={`${provider.name} (port ${provider.port}) — Running`}>
+                {provider.models.data.map((model: any) => {
+                  const isActive = activeLLMProvider === key && activeLLMModels[key] === model.id;
+                  return (
+                    <option key={model.id} value={model.id}>
+                      {model.id}{isActive ? ' ★' : ''}
+                    </option>
+                  );
+                })}
+              </optgroup>
+            ))}
+
+            {/* Static fallback for cloud models */}
             <optgroup label="Cloud Models">
               <option value="gpt-4-turbo">GPT-4 Turbo</option>
               <option value="claude-3-sonnet">Claude 3 Sonnet</option>
             </optgroup>
           </select>
+          {runningProviders.length === 0 && (
+            <div className="form-hint" style={{ color: 'var(--accent-warning, #f59e0b)' }}>
+              No local LLM providers running. Start one from the LLMs tab.
+            </div>
+          )}
         </div>
 
         {/* Concurrency Slider */}
