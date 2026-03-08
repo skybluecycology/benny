@@ -15,6 +15,7 @@ from .file_routes import router as file_router
 from .rag_routes import router as rag_router
 from .notebook_routes import router as notebook_router
 from .chat_routes import router as chat_router
+from .studio_executor import router as studio_router
 
 
 
@@ -42,6 +43,7 @@ app.include_router(file_router, prefix="/api", tags=["File Management"])
 app.include_router(rag_router, prefix="/api", tags=["RAG"])
 app.include_router(notebook_router, prefix="/api", tags=["Notebooks"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
+app.include_router(studio_router, prefix="/api", tags=["Studio"])
 
 
 

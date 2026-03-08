@@ -35,8 +35,28 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
       alert('Please add nodes to your workflow first');
       return;
     }
+
+    // Check if workflow has a trigger node — prompt for message
+    const hasTrigger = nodes.some(n => n.type === 'trigger');
+    let message = '';
+    if (hasTrigger) {
+      const prompted = prompt(
+        'Enter your message for this workflow:',
+        'Tell me how I should consider AI when looking at the frolov document'
+      );
+      if (prompted === null) return; // cancelled
+      message = prompted;
+    }
     
     setExecuting(true);
+
+    // Mark all nodes as "running"
+    const updatedNodes = nodes.map(n => ({
+      ...n,
+      data: { ...n.data, status: 'running' }
+    }));
+    setNodes(updatedNodes);
+
     try {
       const response = await fetch('http://localhost:8005/api/workflows/execute', {
         method: 'POST',
@@ -44,20 +64,54 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
         body: JSON.stringify({ 
           nodes, 
           edges,
-          workspace: currentWorkspace
+          workspace: currentWorkspace,
+          message
         })
       });
       
       if (response.ok) {
         const result = await response.json();
         console.log('Execution result:', result);
-        alert('Workflow executed successfully!');
+
+        // Update node statuses based on results
+        const resultMap: Record<string, any> = {};
+        for (const nr of result.node_results || []) {
+          resultMap[nr.node_id] = nr;
+        }
+
+        const finalNodes = nodes.map(n => {
+          const nr = resultMap[n.id];
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              status: nr ? nr.status : 'success',
+              executionOutput: nr?.output
+            }
+          };
+        });
+        setNodes(finalNodes);
+
+        // Show result summary
+        const artifactMsg = result.artifact_path 
+          ? `\n\n📄 Output: ${result.artifact_path}` 
+          : '';
+        const errorNodes = (result.node_results || []).filter((r: any) => r.status === 'error');
+        if (errorNodes.length > 0) {
+          alert(`Workflow completed with ${errorNodes.length} error(s).${artifactMsg}\n\nErrors:\n${errorNodes.map((e: any) => `• ${e.node_id}: ${e.error}`).join('\n')}`);
+        } else {
+          alert(`✅ Workflow executed successfully!${artifactMsg}`);
+        }
       } else {
-        alert('Execution failed');
+        const errText = await response.text();
+        alert('Execution failed: ' + errText);
+        // Mark all as error
+        setNodes(nodes.map(n => ({ ...n, data: { ...n.data, status: 'error' } })));
       }
     } catch (error) {
       console.error('Execution error:', error);
       alert('Execution failed: ' + (error as Error).message);
+      setNodes(nodes.map(n => ({ ...n, data: { ...n.data, status: 'error' } })));
     } finally {
       setExecuting(false);
     }

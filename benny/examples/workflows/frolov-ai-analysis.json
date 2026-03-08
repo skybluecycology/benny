@@ -1,0 +1,77 @@
+{
+  "id": "frolov-ai-analysis",
+  "name": "Frolov AI Analysis",
+  "description": "RAG chat about the Frolov document — outputs a .md analysis",
+  "nodes": [
+    {
+      "id": "trigger-1",
+      "type": "trigger",
+      "position": { "x": 100, "y": 200 },
+      "data": {
+        "label": "Chat Input",
+        "icon": "💬",
+        "config": {
+          "triggerType": "chat"
+        }
+      }
+    },
+    {
+      "id": "data-search-1",
+      "type": "data",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Search KB",
+        "icon": "🔍",
+        "config": {
+          "operation": "search",
+          "source": "knowledge"
+        }
+      }
+    },
+    {
+      "id": "llm-1",
+      "type": "llm",
+      "position": { "x": 700, "y": 200 },
+      "data": {
+        "label": "AI Analysis",
+        "icon": "🤖",
+        "config": {
+          "model": "Qwen3-8B-Hybrid",
+          "systemPrompt": "You are an expert research analyst. Analyze the provided document excerpts and answer the user's question in detail. Structure your response with clear headings, bullet points, and actionable insights. Always cite the source documents. Write in a professional but accessible tone.",
+          "temperature": 0.7,
+          "maxTokens": 2000
+        }
+      }
+    },
+    {
+      "id": "data-write-1",
+      "type": "data",
+      "position": { "x": 1000, "y": 200 },
+      "data": {
+        "label": "Write Report",
+        "icon": "📝",
+        "config": {
+          "operation": "write",
+          "path": "frolov_ai_analysis.md"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-trigger-search",
+      "source": "trigger-1",
+      "target": "data-search-1"
+    },
+    {
+      "id": "e-search-llm",
+      "source": "data-search-1",
+      "target": "llm-1"
+    },
+    {
+      "id": "e-llm-write",
+      "source": "llm-1",
+      "target": "data-write-1"
+    }
+  ]
+}
