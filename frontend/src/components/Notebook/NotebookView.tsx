@@ -30,7 +30,8 @@ export default function NotebookView() {
           query: input,
           workspace: currentWorkspace,
           provider: activeLLMProvider,
-          model: activeLLMModels[activeLLMProvider]
+          model: activeLLMModels[activeLLMProvider],
+          top_k: 20
         })
       });
 

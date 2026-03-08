@@ -28,8 +28,8 @@ const nodeCategories = [
   {
     title: 'AI / LLM',
     items: [
-      { type: 'llm', label: 'Chat Model', icon: Brain },
-      { type: 'llm', label: 'Agent', icon: Bot },
+      { type: 'llm', label: 'LLM', icon: Brain },
+      { type: 'llm', label: 'Agent (with skills)', icon: Bot },
       { type: 'tool', label: 'Tool Executor', icon: Wrench },
     ],
   },

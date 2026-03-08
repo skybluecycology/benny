@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useLLMStatus } from '../../hooks/useLLMStatus';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+
+interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+}
 
 interface ConfigPanelProps {
   isOpen: boolean;
@@ -11,6 +18,7 @@ interface ConfigPanelProps {
 
 export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
   const [activeTab, setActiveTab] = useState<'settings' | 'input' | 'output'>('settings');
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
   const nodes = useWorkflowStore((state) => state.nodes);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const setSelectedNode = useWorkflowStore((state) => state.setSelectedNode);
@@ -18,7 +26,27 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
   const getConnectedNodes = useWorkflowStore((state) => state.getConnectedNodes);
   const nodeOutputs = useWorkflowStore((state) => state.nodeOutputs);
   const { providers } = useLLMStatus(10000);
-  const { activeLLMProvider, activeLLMModels } = useWorkspaceStore();
+  const { currentWorkspace, activeLLMProvider, activeLLMModels } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (isOpen && nodeId) {
+      const node = nodes.find(n => n.id === nodeId);
+      if (node && node.type === 'llm') {
+        const fetchSkills = async () => {
+          try {
+            const res = await fetch(`http://localhost:8005/api/skills?workspace=${currentWorkspace || 'default'}`);
+            if (res.ok) {
+              const data = await res.json();
+              setAvailableSkills(data.skills || []);
+            }
+          } catch (e) {
+            console.error('Failed to fetch skills:', e);
+          }
+        };
+        fetchSkills();
+      }
+    }
+  }, [isOpen, nodeId, currentWorkspace, nodes]);
 
   // Build dynamic model options from running providers
   const runningProviders = Object.entries(providers).filter(([, p]) => p.running && p.models?.data);
@@ -153,6 +181,55 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
                     value={(node.data.config as {systemPrompt?: string})?.systemPrompt || ''}
                     onChange={(e) => handleConfigChange('systemPrompt', e.target.value)}
                   />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Attached Skills</label>
+                  <div className="skills-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                    {availableSkills.length === 0 ? (
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', textAlign: 'center' }}>No skills available</div>
+                    ) : (
+                      // Group by category
+                      Object.entries(
+                        availableSkills.reduce((acc, skill) => {
+                          const cat = skill.category || 'custom';
+                          if (!acc[cat]) acc[cat] = [];
+                          acc[cat].push(skill);
+                          return acc;
+                        }, {} as Record<string, Skill[]>)
+                      ).map(([category, skills]) => (
+                        <div key={category} style={{ marginBottom: '8px' }}>
+                          <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', marginBottom: '4px' }}>
+                            {category}
+                          </div>
+                          {skills.map(skill => {
+                            const attachedSkills = ((node.data.config as any)?.skills || []) as string[];
+                            const isAttached = attachedSkills.includes(skill.id);
+                            return (
+                              <label key={skill.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', padding: '4px' }}>
+                                <input 
+                                  type="checkbox"
+                                  checked={isAttached}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    const currentSkills = new Set(attachedSkills);
+                                    if (checked) currentSkills.add(skill.id);
+                                    else currentSkills.delete(skill.id);
+                                    handleConfigChange('skills', Array.from(currentSkills) as any);
+                                  }}
+                                  style={{ marginTop: '4px' }}
+                                />
+                                <div>
+                                  <div style={{ fontSize: '13px', color: '#fff' }}>{skill.name}</div>
+                                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>{skill.description}</div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </>
             )}

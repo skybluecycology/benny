@@ -168,63 +168,138 @@ async def execute_data_node(node: StudioNode, context: Dict, workspace: str) -> 
     return {"error": f"Unknown data operation: {operation}"}
 
 
-async def execute_llm_node(node: StudioNode, context: Dict) -> Dict:
-    """Execute an LLM node — call Lemonade/Qwen3-8B-Hybrid"""
+async def execute_llm_node(node: StudioNode, context: Dict, workspace: str) -> Dict:
+    """
+    Execute an LLM Agent node with tool-calling capabilities.
+    The agent receives attached skills and autonomously decides to call them.
+    """
+    from ..core.skill_registry import registry
+    import json
+
     config = node.data.get("config") or {}
     model_name = config.get("model", "Qwen3-8B-Hybrid")
-    system_prompt = config.get("systemPrompt", "You are a helpful AI assistant. Answer based on the provided context.")
+    system_prompt = config.get("systemPrompt", "You are a helpful AI assistant.")
+    attached_skills = config.get("skills", [])  # List of skill IDs
 
-    # Build the prompt from context
+    # Get tool schemas for the attached skills
+    tools = None
+    if attached_skills:
+        tool_schemas = registry.get_tool_schemas(attached_skills, workspace)
+        if tool_schemas:
+            tools = tool_schemas
+
+    # Build initial messages array
+    messages = [
+        {"role": "system", "content": system_prompt}
+    ]
+
     user_message = context.get("message", "")
     rag_context = context.get("context_text", "")
-
+    
     if rag_context:
-        content = f"{system_prompt}\n\nCONTEXT FROM DOCUMENTS:\n{rag_context}\n\nUSER QUESTION:\n{user_message}\n\nANSWER:"
+        messages.append({
+            "role": "user", 
+            "content": f"CONTEXT FROM PREVIOUS NODES:\n{rag_context}\n\nUSER QUESTION:\n{user_message}"
+        })
     else:
-        content = f"{system_prompt}\n\nUSER QUESTION:\n{user_message}\n\nANSWER:"
+        messages.append({"role": "user", "content": user_message})
 
-    # Determine which provider to use based on model name
-    provider_config = None
-    for pname, pconf in LOCAL_PROVIDERS.items():
-        if pname == "lemonade":
-            provider_config = pconf
-            break
-
+    # Determine provider config (using Lemonade as primary local provider)
+    provider_config = LOCAL_PROVIDERS.get("lemonade", LOCAL_PROVIDERS.get("ollama"))
     if not provider_config:
-        provider_config = LOCAL_PROVIDERS.get("lemonade", LOCAL_PROVIDERS.get("ollama"))
-
+        return {"error": "No local provider configured"}
+        
     api_base = provider_config["base_url"]
     chat_url = f"{api_base}/chat/completions"
+    
+    # Tool-calling loop (max 5 iterations to prevent infinite loops)
+    max_steps = 5
+    current_step = 0
+    total_tokens = 0
+    executed_tools = []
 
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0.7
-    }
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        while current_step < max_steps:
+            current_step += 1
+            
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": config.get("temperature", 0.7)
+            }
+            if tools:
+                payload["tools"] = tools
 
-    try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                chat_url,
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
+            try:
+                response = await client.post(
+                    chat_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+            except Exception as e:
+                return {"error": f"LLM connection error: {str(e)}", "response": None}
 
-            if response.status_code == 200:
-                data = response.json()
-                answer = data["choices"][0]["message"]["content"]
-                return {
-                    "response": answer,
-                    "model": model_name,
-                    "tokens": data.get("usage", {}).get("total_tokens")
-                }
-            else:
-                return {
-                    "error": f"LLM returned status {response.status_code}: {response.text}",
-                    "response": None
-                }
-    except Exception as e:
-        return {"error": str(e), "response": None}
+            if response.status_code != 200:
+                # FastFlowLM models might not support tools properly.
+                # If tool-calling fails, try a fallback without tools.
+                if tools and ("tool" in response.text.lower() or "function" in response.text.lower()):
+                    payload.pop("tools")
+                    response = await client.post(chat_url, json=payload, headers={"Content-Type": "application/json"})
+                    if response.status_code != 200:
+                        return {"error": f"LLM error: {response.status_code} {response.text}", "response": None}
+                else:
+                    return {"error": f"LLM error: {response.status_code} {response.text}", "response": None}
+
+            data = response.json()
+            message = data["choices"][0]["message"]
+            total_tokens += data.get("usage", {}).get("total_tokens", 0)
+
+            # Record assistant message
+            messages.append(message)
+
+            # Check if LLM wants to call tools
+            if "tool_calls" in message and message["tool_calls"]:
+                tool_calls = message["tool_calls"]
+                
+                # Execute each tool call
+                for tc in tool_calls:
+                    func_name = tc["function"]["name"]
+                    call_id = tc["id"]
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
+
+                    # Run the skill via registry
+                    result_str = registry.execute_skill(func_name, workspace, **args)
+                    executed_tools.append({"name": func_name, "args": args})
+
+                    # Add tool response to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "name": func_name,
+                        "content": result_str
+                    })
+                
+                # Loop continues to send tool results to LLM
+                continue
+
+            # If no tool calls, this is the final answer
+            answer = message.get("content", "")
+            return {
+                "response": answer,
+                "model": model_name,
+                "tokens": total_tokens,
+                "tool_executions": executed_tools
+            }
+
+        # If loop maxes out
+        return {
+            "error": "Agent execution max steps reached",
+            "response": messages[-1].get("content", ""),
+            "tool_executions": executed_tools
+        }
 
 
 @router.post("/workflows/execute", response_model=StudioExecuteResponse)
@@ -262,7 +337,7 @@ async def execute_studio_workflow(request: StudioExecuteRequest):
                     artifact_path = output.get("path")
 
             elif node.type == "llm":
-                output = await execute_llm_node(node, context)
+                output = await execute_llm_node(node, context, request.workspace)
                 # Propagate LLM output forward for downstream nodes
                 if output.get("response"):
                     context["llm_output"] = output["response"]

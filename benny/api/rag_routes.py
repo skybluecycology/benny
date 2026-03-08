@@ -29,7 +29,7 @@ class IngestRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     workspace: str = "default"
-    top_k: int = 5
+    top_k: int = 20
     provider: Optional[str] = "fastflowlm"
     model: Optional[str] = None
 
@@ -44,8 +44,36 @@ def extract_text_from_file(file_path: Path) -> str:
     elif ext == '.pdf':
         doc = fitz.open(file_path)
         text = ""
+        is_scanned = True
+        
         for page in doc:
-            text += page.get_text()
+            page_text = page.get_text()
+            if page_text.strip():
+                is_scanned = False
+            text += page_text
+            
+        if is_scanned and not text.strip():
+            print(f"File {file_path.name} is scanned. Running OCR...")
+            import pytesseract
+            from PIL import Image
+            import io
+            import sys
+            
+            if sys.platform == 'win32':
+                pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+                
+            text = ""
+            # Limit OCR to max 25 pages to avoid extreme API timeouts for massive books
+            # In a production system, this should run asynchronously.
+            limit = min(25, len(doc))
+            for i in range(limit):
+                print(f"OCRing page {i+1}/{limit}...", end="\r", flush=True)
+                page = doc[i]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                text += pytesseract.image_to_string(img) + "\n\n"
+            print(f"\\nFinished OCR. Extracted {len(text)} chars.\\n")
+            
         doc.close()
         return text
     
@@ -206,16 +234,69 @@ async def chat_rag(request: QueryRequest):
         sources = []
         
         if collection.count() > 0:
-            results = collection.query(
-                query_texts=[request.query],
-                n_results=min(request.top_k, collection.count())
-            )
+            import re
+            from pathlib import Path
+            all_data = collection.get(include=['metadatas'])
+            available_sources = set(meta.get('source', 'Unknown') for meta in all_data['metadatas'] if 'source' in meta)
             
-            if results['documents']:
-                for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
+            mentioned_sources = []
+            query_lower = request.query.lower()
+            for source in available_sources:
+                source_stem = Path(source).stem.lower()
+                words = [w for w in set(re.split(r'[^a-zA-Z0-9]', source_stem)) if len(w) > 3]
+                for w in words:
+                    if w in query_lower:
+                        mentioned_sources.append(source)
+                        break
+                        
+            results_list = []
+            
+            if mentioned_sources:
+                k_per_source = max(3, request.top_k // len(mentioned_sources))
+                for source in mentioned_sources:
+                    try:
+                        res = collection.query(
+                            query_texts=[request.query],
+                            n_results=min(k_per_source, collection.count()),
+                            where={"source": source}
+                        )
+                        if res['documents'] and res['documents'][0]:
+                            for doc, meta in zip(res['documents'][0], res['metadatas'][0]):
+                                results_list.append((doc, meta))
+                    except Exception:
+                        pass
+                
+                # add a few general query chunks too
+                try:
+                    gen_res = collection.query(
+                        query_texts=[request.query],
+                        n_results=min(3, collection.count())
+                    )
+                    if gen_res['documents'] and gen_res['documents'][0]:
+                        for doc, meta in zip(gen_res['documents'][0], gen_res['metadatas'][0]):
+                            results_list.append((doc, meta))
+                except Exception:
+                    pass
+            else:
+                try:
+                    res = collection.query(
+                        query_texts=[request.query],
+                        n_results=min(request.top_k, collection.count())
+                    )
+                    if res['documents'] and res['documents'][0]:
+                        for doc, meta in zip(res['documents'][0], res['metadatas'][0]):
+                            results_list.append((doc, meta))
+                except Exception:
+                    pass
+
+            seen_docs = set()
+            for doc, meta in results_list:
+                if doc not in seen_docs:
+                    seen_docs.add(doc)
                     source = meta.get('source', 'Unknown')
                     context_text += f"[Source: {source}]\n{doc}\n\n"
                     sources.append(source)
+
         
         # 2. Build Prompt
         system_prompt = """You are a helpful AI assistant for the user's workspace.

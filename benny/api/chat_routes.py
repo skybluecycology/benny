@@ -35,7 +35,7 @@ class ChatRequest(BaseModel):
     notebook_id: str
     message: str
     temperature: float = 0.7
-    top_k: int = 5  # Number of RAG chunks to retrieve
+    top_k: int = 20  # Number of RAG chunks to retrieve
 
 
 class ChatResponse(BaseModel):
@@ -89,25 +89,73 @@ def retrieve_context(notebook_id: str, query: str, top_k: int, workspace: str = 
             return []
         
         # Query ChromaDB
-        results = collection.query(
-            query_texts=[query],
-            n_results=min(top_k, collection.count())
-        )
+        import re
+        from pathlib import Path
+        all_data = collection.get(include=['metadatas'])
+        available_sources = set(meta.get('source', 'Unknown') for meta in all_data['metadatas'] if 'source' in meta)
         
+        mentioned_sources = []
+        query_lower = query.lower()
+        for source in available_sources:
+            source_stem = Path(source).stem.lower()
+            words = [w for w in set(re.split(r'[^a-zA-Z0-9]', source_stem)) if len(w) > 3]
+            for w in words:
+                if w in query_lower:
+                    mentioned_sources.append(source)
+                    break
+                    
+        results_list = []
+        
+        if mentioned_sources:
+            k_per_source = max(3, top_k // len(mentioned_sources))
+            for source in mentioned_sources:
+                try:
+                    res = collection.query(
+                        query_texts=[query],
+                        n_results=min(k_per_source, collection.count()),
+                        where={"source": source}
+                    )
+                    if res['documents'] and res['documents'][0]:
+                        for doc, meta, distance in zip(res['documents'][0], res['metadatas'][0], res['distances'][0]):
+                            results_list.append((doc, meta, distance))
+                except Exception:
+                    pass
+            
+            try:
+                gen_res = collection.query(
+                    query_texts=[query],
+                    n_results=min(3, collection.count())
+                )
+                if gen_res['documents'] and gen_res['documents'][0]:
+                    for doc, meta, distance in zip(gen_res['documents'][0], gen_res['metadatas'][0], gen_res['distances'][0]):
+                        results_list.append((doc, meta, distance))
+            except Exception:
+                pass
+        else:
+            try:
+                res = collection.query(
+                    query_texts=[query],
+                    n_results=min(top_k, collection.count())
+                )
+                if res['documents'] and res['documents'][0]:
+                    for doc, meta, distance in zip(res['documents'][0], res['metadatas'][0], res['distances'][0]):
+                        results_list.append((doc, meta, distance))
+            except Exception:
+                pass
+
         # Format results as source citations
         citations = []
-        for doc, meta, distance in zip(
-            results['documents'][0],
-            results['metadatas'][0],
-            results['distances'][0]
-        ):
-            citation = SourceCitation(
-                source=meta.get('source', 'Unknown'),
-                chunk_index=meta.get('chunk_index', 0),
-                relevance=round((1 - distance) * 100, 1),
-                text=doc
-            )
-            citations.append(citation)
+        seen_docs = set()
+        for doc, meta, distance in results_list:
+            if doc not in seen_docs:
+                seen_docs.add(doc)
+                citation = SourceCitation(
+                    source=meta.get('source', 'Unknown'),
+                    chunk_index=meta.get('chunk_index', 0),
+                    relevance=round((1 - distance) * 100, 1),
+                    text=doc
+                )
+                citations.append(citation)
         
         return citations
         

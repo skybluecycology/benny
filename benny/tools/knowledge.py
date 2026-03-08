@@ -24,7 +24,7 @@ def get_chromadb_client(workspace_id: str = "default") -> chromadb.PersistentCli
 def search_knowledge_workspace(
     query: str,
     workspace: str = "default",
-    top_k: int = 5
+    top_k: int = 20
 ) -> str:
     """
     Search the workspace knowledge base using semantic similarity.

@@ -36,6 +36,25 @@ def extract_pdf_text(pdf_path: str, workspace: str = "default") -> str:
             text = page.get_text()
             if text.strip():
                 text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
+                
+        if not text_parts:
+            # Try OCR
+            import pytesseract
+            from PIL import Image
+            import io
+            import sys
+            
+            if sys.platform == 'win32':
+                pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+                
+            limit = min(25, len(doc))
+            for i in range(limit):
+                page = doc[i]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                ocr_text = pytesseract.image_to_string(img)
+                if ocr_text.strip():
+                    text_parts.append(f"--- Page {i + 1} (OCR) ---\n{ocr_text}")
         
         doc.close()
         

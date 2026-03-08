@@ -32,13 +32,15 @@ def ensure_workspace_structure(workspace_id: str = "default") -> dict:
     
     Structure:
         workspace/{id}/
+        ├── agents/        # Saved agent configurations
         ├── chromadb/      # Vector store
         ├── data_in/       # Input files
         ├── data_out/      # Generated artifacts
-        └── reports/       # Final outputs
+        ├── reports/       # Final outputs
+        └── skills/        # Custom skill definitions
     """
     base = get_workspace_path(workspace_id)
-    subdirs = ["chromadb", "data_in", "data_out", "reports"]
+    subdirs = ["agents", "chromadb", "data_in", "data_out", "reports", "skills"]
     
     created = []
     for subdir in subdirs:

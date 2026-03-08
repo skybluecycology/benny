@@ -27,7 +27,9 @@ export default function WorkflowList() {
     try {
       const response = await fetch('http://localhost:8005/api/workflows');
       const data = await response.json();
-      setWorkflows(data);
+      // Handle format where workflows are inside a "value" array
+      const workflowList = Array.isArray(data) ? data : (data.value || []);
+      setWorkflows(workflowList);
     } catch (error) {
       console.error('Failed to fetch workflows:', error);
     } finally {

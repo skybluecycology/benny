@@ -1,7 +1,7 @@
 {
   "id": "frolov-ai-analysis",
-  "name": "Frolov AI Analysis",
-  "description": "RAG chat about the Frolov document — outputs a .md analysis",
+  "name": "Frolov AI Agent (Skills)",
+  "description": "Agent uses search_kb and write_file skills to analyze the Frolov document",
   "nodes": [
     {
       "id": "trigger-1",
@@ -16,62 +16,27 @@
       }
     },
     {
-      "id": "data-search-1",
-      "type": "data",
-      "position": { "x": 400, "y": 200 },
-      "data": {
-        "label": "Search KB",
-        "icon": "🔍",
-        "config": {
-          "operation": "search",
-          "source": "knowledge"
-        }
-      }
-    },
-    {
-      "id": "llm-1",
+      "id": "agent-1",
       "type": "llm",
-      "position": { "x": 700, "y": 200 },
+      "position": { "x": 500, "y": 200 },
       "data": {
-        "label": "AI Analysis",
+        "label": "Frolov Analyst Agent",
         "icon": "🤖",
         "config": {
           "model": "Qwen3-8B-Hybrid",
-          "systemPrompt": "You are an expert research analyst. Analyze the provided document excerpts and answer the user's question in detail. Structure your response with clear headings, bullet points, and actionable insights. Always cite the source documents. Write in a professional but accessible tone.",
+          "systemPrompt": "You are an expert research analyst. The user will ask you about the Frolov document. You MUST use the 'search_kb' tool to find relevant excerpts from the knowledge base. Then, write your detailed analysis to a file named 'frolov_agent_analysis.md' using the 'write_file' tool. Formulate your response with clear headings, bullet points, and actionable insights. Do not guess information.",
           "temperature": 0.7,
-          "maxTokens": 2000
-        }
-      }
-    },
-    {
-      "id": "data-write-1",
-      "type": "data",
-      "position": { "x": 1000, "y": 200 },
-      "data": {
-        "label": "Write Report",
-        "icon": "📝",
-        "config": {
-          "operation": "write",
-          "path": "frolov_ai_analysis.md"
+          "maxTokens": 2000,
+          "skills": ["search_kb", "write_file"]
         }
       }
     }
   ],
   "edges": [
     {
-      "id": "e-trigger-search",
+      "id": "e-trigger-agent",
       "source": "trigger-1",
-      "target": "data-search-1"
-    },
-    {
-      "id": "e-search-llm",
-      "source": "data-search-1",
-      "target": "llm-1"
-    },
-    {
-      "id": "e-llm-write",
-      "source": "llm-1",
-      "target": "data-write-1"
+      "target": "agent-1"
     }
   ]
 }
