@@ -32,9 +32,10 @@ class QueryRequest(BaseModel):
     top_k: int = 20
     provider: Optional[str] = "fastflowlm"
     model: Optional[str] = None
+    selected_sources: Optional[List[str]] = None
 
 
-def extract_text_from_file(file_path: Path) -> str:
+def extract_text_from_file(file_path: Path, log_fn=print) -> str:
     """Extract text from various file types"""
     ext = file_path.suffix.lower()
     
@@ -53,7 +54,7 @@ def extract_text_from_file(file_path: Path) -> str:
             text += page_text
             
         if is_scanned and not text.strip():
-            print(f"File {file_path.name} is scanned. Running OCR...")
+            log_fn(f"File {file_path.name} is scanned. Running OCR...")
             import pytesseract
             from PIL import Image
             import io
@@ -67,12 +68,12 @@ def extract_text_from_file(file_path: Path) -> str:
             # In a production system, this should run asynchronously.
             limit = min(25, len(doc))
             for i in range(limit):
-                print(f"OCRing page {i+1}/{limit}...", end="\r", flush=True)
+                log_fn(f"OCRing page {i+1}/{limit}...")
                 page = doc[i]
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
                 text += pytesseract.image_to_string(img) + "\n\n"
-            print(f"\\nFinished OCR. Extracted {len(text)} chars.\\n")
+            log_fn(f"Finished OCR. Extracted {len(text)} chars.")
             
         doc.close()
         return text
@@ -82,7 +83,7 @@ def extract_text_from_file(file_path: Path) -> str:
 
 
 @router.post("/rag/ingest")
-async def ingest_files(request: IngestRequest):
+def ingest_files(request: IngestRequest):
     """Ingest files from data_in into ChromaDB"""
     try:
         data_in_path = get_workspace_path(request.workspace, "data_in")
@@ -117,29 +118,43 @@ async def ingest_files(request: IngestRequest):
         
         # Ingest files
         ingested = []
+        log_file = get_workspace_path(request.workspace) / "ingest.log"
+        with open(log_file, "w") as f:
+            f.write("Starting ingestion process...\n")
+        
+        def write_log(msg: str):
+            print(msg)
+            with open(log_file, "a") as f:
+                f.write(msg + "\n")
+                
         for file_path in file_paths:
             try:
-                text = extract_text_from_file(file_path)
+                write_log(f"Processing {file_path.name}...")
+                text = extract_text_from_file(file_path, log_fn=write_log)
                 
                 # Simple chunking (split by paragraphs)
                 chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
                 
                 # Add to ChromaDB
-                for i, chunk in enumerate(chunks):
-                    collection.add(
-                        documents=[chunk],
-                        metadatas=[{
-                            "source": file_path.name,
-                            "chunk_index": i
-                        }],
-                        ids=[f"{file_path.stem}_{i}"]
-                    )
+                write_log(f"Adding {len(chunks)} chunks to ChromaDB database...")
+                if chunks:
+                    for i, chunk in enumerate(chunks):
+                        collection.add(
+                            documents=[chunk],
+                            metadatas=[{
+                                "source": file_path.name,
+                                "chunk_index": i
+                            }],
+                            ids=[f"{file_path.stem}_{i}"]
+                        )
                 
                 ingested.append({
                     "file": file_path.name,
                     "chunks": len(chunks)
                 })
+                write_log(f"Finished {file_path.name} successfully.")
             except Exception as e:
+                write_log(f"Error processing {file_path.name}: {str(e)}")
                 ingested.append({
                     "file": file_path.name,
                     "error": str(e)
@@ -156,6 +171,23 @@ async def ingest_files(request: IngestRequest):
         raise
     except Exception as e:
         raise HTTPException(500, f"Ingestion failed: {str(e)}")
+
+
+@router.get("/rag/logs")
+async def get_rag_logs(workspace: str = "default"):
+    """Get the latest ingestion logs"""
+    try:
+        log_file = get_workspace_path(workspace) / "ingest.log"
+        if not log_file.exists():
+            return {"logs": ["No ingestion logs found for this workspace."]}
+            
+        with open(log_file, "r") as f:
+            lines = f.readlines()
+            
+        # Return last 50 lines to prevent huge payload
+        return {"logs": [line.strip() for line in lines[-50:]]}
+    except Exception as e:
+        return {"logs": [f"Error reading logs: {str(e)}"]}
 
 
 @router.get("/rag/status")
@@ -240,14 +272,20 @@ async def chat_rag(request: QueryRequest):
             available_sources = set(meta.get('source', 'Unknown') for meta in all_data['metadatas'] if 'source' in meta)
             
             mentioned_sources = []
-            query_lower = request.query.lower()
-            for source in available_sources:
-                source_stem = Path(source).stem.lower()
-                words = [w for w in set(re.split(r'[^a-zA-Z0-9]', source_stem)) if len(w) > 3]
-                for w in words:
-                    if w in query_lower:
-                        mentioned_sources.append(source)
-                        break
+            
+            if request.selected_sources and len(request.selected_sources) > 0:
+                # Explicitly user-selected sources
+                mentioned_sources = [s for s in request.selected_sources if s in available_sources]
+            else:
+                # Smart guessing based on query
+                query_lower = request.query.lower()
+                for source in available_sources:
+                    source_stem = Path(source).stem.lower()
+                    words = [w for w in set(re.split(r'[^a-zA-Z0-9]', source_stem)) if len(w) > 3]
+                    for w in words:
+                        if w in query_lower:
+                            mentioned_sources.append(source)
+                            break
                         
             results_list = []
             
@@ -302,7 +340,9 @@ async def chat_rag(request: QueryRequest):
         system_prompt = """You are a helpful AI assistant for the user's workspace.
 Answer questions based on the provided context.
 If the answer is not in the context, say so, but you can use general knowledge to help explain if relevant.
-Always cite your sources when using the context."""
+CRITICAL: You MUST cite your sources directly inline in the text when you use information from the context. 
+Use the exact explicit format: [Source: filename.ext] right after the relevant statement.
+Example: The revenue increased by 20% [Source: financial_report.pdf]."""
 
         user_prompt = f"""CONTEXT FROM DOCUMENTS:
 {context_text if context_text else "No specific documents found."}

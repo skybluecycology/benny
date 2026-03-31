@@ -9,7 +9,7 @@ interface Message {
 }
 
 export default function NotebookView() {
-  const { currentWorkspace, activeLLMProvider, activeLLMModels } = useWorkspaceStore();
+  const { currentWorkspace, activeLLMProvider, activeLLMModels, selectedDocuments } = useWorkspaceStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,7 +31,8 @@ export default function NotebookView() {
           workspace: currentWorkspace,
           provider: activeLLMProvider,
           model: activeLLMModels[activeLLMProvider],
-          top_k: 20
+          top_k: 20,
+          selected_sources: selectedDocuments
         })
       });
 
@@ -86,16 +87,47 @@ export default function NotebookView() {
       {/* Chat messages */}
       {messages.length > 0 && (
         <div className="chat-messages">
-          {messages.map((msg, idx) => (
+          {messages.map((msg, idx) => {
+            // Parse inline citations like [Source: filename.pdf]
+            let contentElements: React.ReactNode[] = [msg.content];
+            if (msg.role === 'assistant') {
+              const parts = msg.content.split(/(\[Source:\s*[^\]]+\])/);
+              contentElements = parts.map((part, i) => {
+                const match = part.match(/\[Source:\s*([^\]]+)\]/);
+                if (match && match[1]) {
+                  return (
+                    <span key={i} className="source-citation" style={{ 
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      background: 'rgba(139, 92, 246, 0.15)',
+                      color: 'var(--primary)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      margin: '0 4px',
+                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      cursor: 'help'
+                    }} title={`Source: ${match[1]}`}>
+                      {match[1]}
+                    </span>
+                  );
+                }
+                return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
+              });
+            }
+
+            return (
             <div key={idx} className={`message message-${msg.role}`}>
-              <div className="message-content">{msg.content}</div>
+              <div className="message-content">{contentElements}</div>
               {msg.sources && msg.sources.length > 0 && (
                 <div className="message-sources">
                   Sources: {msg.sources.join(', ')}
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           {loading && (
             <div className="message message-loading" style={{ opacity: 0.8, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Loader className="animate-spin" size={16} />

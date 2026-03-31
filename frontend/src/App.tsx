@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import WorkflowCanvas from './components/Studio/WorkflowCanvas';
 import NodePalette from './components/Studio/NodePalette';
@@ -9,10 +9,11 @@ import WorkflowList from './components/Studio/WorkflowList';
 import SourcePanel from './components/Studio/SourcePanel';
 import ResultPanel from './components/Studio/ResultPanel';
 import NotebookView from './components/Notebook/NotebookView';
+import DocumentViewer from './components/Notebook/DocumentViewer';
 import SwarmStatePanel from './components/Studio/SwarmStatePanel';
 import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
-import { Layers, Cpu, BookOpen } from 'lucide-react';
+import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight } from 'lucide-react';
 
 type View = 'studio' | 'notebook' | 'llm';
 
@@ -28,65 +29,117 @@ function App() {
     workspace: 'default'
   });
   const selectedNode = useWorkflowStore((state) => state.selectedNode);
+  const [isLeftPaneOpen, setIsLeftPaneOpen] = useState(true);
+  const [isRightPaneOpen, setIsRightPaneOpen] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(380);
+  const [isDraggingRight, setIsDraggingRight] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(280);
+  const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingRight) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth >= 250 && newWidth <= window.innerWidth * 0.6) {
+          setRightPanelWidth(newWidth);
+        }
+      } else if (isDraggingLeft) {
+        const newWidth = e.clientX - 64; // nav rail is 64px width
+        if (newWidth >= 200 && newWidth <= window.innerWidth * 0.5) {
+          setLeftPanelWidth(newWidth);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingRight(false);
+      setIsDraggingLeft(false);
+    };
+
+    if (isDraggingRight || isDraggingLeft) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ew-resize';
+    } else {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isDraggingRight, isDraggingLeft]);
 
   return (
     <ReactFlowProvider>
       <div className="app-layout">
-        {/* Left Sidebar - Navigation + Content */}
-        <div className="sidebar">
-          {/* Navigation */}
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '10px',
-              marginBottom: '16px' 
-            }}>
-              <div style={{
-                width: '32px',
-                height: '32px',
-                background: 'var(--gradient-primary)',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 'bold'
-              }}>B</div>
-              <span style={{ fontSize: '18px', fontWeight: '600' }}>Benny</span>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button 
-                className={`btn btn-${view === 'studio' ? 'gradient' : 'ghost'}`}
-                onClick={() => setView('studio')}
-                style={{ flex: '1 1 calc(50% - 4px)' }}
-              >
-                <Layers size={16} />
-                Studio
-              </button>
-              <button 
-                className={`btn btn-${view === 'notebook' ? 'gradient' : 'ghost'}`}
-                onClick={() => setView('notebook')}
-                style={{ flex: '1 1 calc(50% - 4px)' }}
-              >
-                <BookOpen size={16} />
-                Notebook
-              </button>
-              <button 
-                className={`btn btn-${view === 'llm' ? 'gradient' : 'ghost'}`}
-                onClick={() => setView('llm')}
-                style={{ flex: '1 1 100%' }}
-              >
-                <Cpu size={16} />
-                LLMs
-              </button>
-            </div>
-          </div>
+        {/* 1. Global Navigation Rail */}
+        <div className="nav-rail">
+          <div style={{
+            width: '40px',
+            height: '40px',
+            background: 'var(--gradient-primary)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontWeight: 'bold',
+            marginBottom: '24px',
+            fontSize: '20px'
+          }}>B</div>
+          
+          <button 
+            className={`nav-rail-item ${view === 'studio' ? 'active' : ''}`}
+            onClick={() => setView('studio')}
+            title="Studio"
+          >
+            <Layers size={20} />
+          </button>
+          
+          <button 
+            className={`nav-rail-item ${view === 'notebook' ? 'active' : ''}`}
+            onClick={() => {
+              setView('notebook');
+              setIsRightPaneOpen(true);
+            }}
+            title="Notebook"
+          >
+            <BookOpen size={20} />
+          </button>
+          
+          <button 
+            className={`nav-rail-item ${view === 'llm' ? 'active' : ''}`}
+            onClick={() => setView('llm')}
+            title="LLM Config"
+          >
+            <Cpu size={20} />
+          </button>
 
+          <div style={{ flex: 1 }} />
+          
+          <button 
+            className="nav-rail-item"
+            onClick={() => setIsLeftPaneOpen(!isLeftPaneOpen)}
+            title="Toggle Sidebar"
+          >
+            {isLeftPaneOpen ? <PanelLeftClose size={20} /> : <PanelLeft size={20} />}
+          </button>
+        </div>
+
+        {/* 2. Left Contextual Sidebar */}
+        <div className={`context-sidebar ${!isLeftPaneOpen ? 'collapsed' : ''}`}>
           {/* Studio Sidebar - Workflows + Node Palette + Swarm */}
           {view === 'studio' && (
-            <div className="studio-sidebar">
-              <WorkspaceSelector />
+            <div className="studio-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
+                  <WorkspaceSelector />
+              </div>
               <WorkflowList />
               <SwarmConfigPanel 
                 config={swarmConfig}
@@ -99,16 +152,23 @@ function App() {
 
           {/* Notebook Sidebar - Sources */}
           {view === 'notebook' && (
-            <div className="notebook-sidebar">
-              <WorkspaceSelector />
+            <div className="notebook-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
+                  <WorkspaceSelector />
+              </div>
               <SourcePanel />
             </div>
           )}
-
-          {/* LLM view - no sidebar content needed */}
         </div>
 
-        {/* Main Content */}
+        {isLeftPaneOpen && (
+          <div 
+            className="resize-handle left-resize-handle"
+            onMouseDown={() => setIsDraggingLeft(true)}
+          />
+        )}
+
+        {/* 3. Main Content (Canvas) */}
         <div className="main-content">
           {view === 'studio' && (
             <>
@@ -118,25 +178,74 @@ function App() {
               </div>
             </>
           )}
-          
-          {view === 'notebook' && <NotebookView />}
+
+          {view === 'notebook' && (
+             <div className="canvas-container" style={{ background: 'var(--surface)' }}>
+               <DocumentViewer />
+             </div>
+          )}
           
           {view === 'llm' && <LLMManager />}
+
+          {(view === 'studio' || view === 'notebook') && (
+            <button 
+              className="btn btn-gradient"
+              onClick={() => setIsRightPaneOpen(!isRightPaneOpen)}
+              style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 100, borderRadius: '50%', width: '40px', height: '40px', padding: 0 }}
+              title="Toggle Right Panel"
+            >
+              {isRightPaneOpen ? <PanelRightClose size={20} /> : <PanelRight size={20} />}
+            </button>
+          )}
         </div>
 
-        {/* Right Panel - Config or Results */}
-        {view === 'studio' && selectedNode && (
-          <ConfigPanel 
-            isOpen={!!selectedNode} 
-            nodeId={selectedNode} 
-          />
-        )}
-        
-        {view === 'studio' && showResults && (
-          <ResultPanel 
-            isOpen={showResults}
-            onClose={() => setShowResults(false)}
-          />
+        {/* 4. Right Panel (Config / Chat / Results) */}
+        {(view === 'studio' || view === 'notebook') && (
+          <>
+            {isRightPaneOpen && (
+              <div 
+                className="resize-handle right-resize-handle"
+                onMouseDown={() => setIsDraggingRight(true)}
+              />
+            )}
+            <div 
+              className={`right-panel ${!isRightPaneOpen ? 'collapsed' : ''}`}
+              style={{ 
+                width: isRightPaneOpen ? `${rightPanelWidth}px` : '0px',
+                minWidth: isRightPaneOpen ? `${rightPanelWidth}px` : '0px',
+                transition: isDraggingRight ? 'none' : 'width var(--transition-normal), min-width var(--transition-normal)'
+              }}
+            >
+               <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                 <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                     {view === 'studio' ? 'Configuration' : 'Notebook Chat'}
+                 </h2>
+                 <button className="btn-icon btn-ghost" onClick={() => setIsRightPaneOpen(false)}>
+                     <PanelRightClose size={16} />
+                 </button>
+             </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+                {view === 'studio' && selectedNode && (
+                  <ConfigPanel 
+                    isOpen={!!selectedNode} 
+                    nodeId={selectedNode} 
+                  />
+                )}
+                
+                {view === 'studio' && showResults && (
+                  <ResultPanel 
+                    isOpen={showResults}
+                    onClose={() => setShowResults(false)}
+                  />
+                )}
+
+                {view === 'notebook' && (
+                    <NotebookView />
+                )}
+            </div>
+          </div>
+          </>
         )}
       </div>
     </ReactFlowProvider>

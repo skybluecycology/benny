@@ -16,7 +16,6 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     nodes,
     edges,
     setNodes,
-    setEdges,
     setSwarmExecutionId
   } = useWorkflowStore();
 

@@ -10,6 +10,10 @@ interface WorkspaceState {
   setActiveLLMProvider: (provider: string) => void;
   activeLLMModels: Record<string, string>;
   setActiveLLMModel: (provider: string, model: string) => void;
+  activeDocument: { name: string, subdir: 'data_in' | 'data_out' | 'rag_status' } | null;
+  setActiveDocument: (doc: { name: string, subdir: 'data_in' | 'data_out' | 'rag_status' } | null) => void;
+  selectedDocuments: string[];
+  toggleSelectedDocument: (name: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -71,6 +75,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ...state.activeLLMModels,
         [provider]: model
       }
+    }));
+  },
+
+  activeDocument: null,
+  setActiveDocument: (doc) => {
+    set({ activeDocument: doc });
+  },
+
+  selectedDocuments: [],
+  toggleSelectedDocument: (name: string) => {
+    set((state) => ({
+      selectedDocuments: state.selectedDocuments.includes(name)
+        ? state.selectedDocuments.filter((doc) => doc !== name)
+        : [...state.selectedDocuments, name]
     }));
   }
 }));

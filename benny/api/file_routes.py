@@ -3,14 +3,113 @@ File Routes - Upload, list, and manage workspace files
 """
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from pathlib import Path
 from typing import List
 import shutil
+import httpx
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
 
 from ..core.workspace import get_workspace_path, get_workspace_files
 
 
+class UrlIngestRequest(BaseModel):
+    url: str
+    workspace: str = "default"
+
 router = APIRouter()
+
+@router.post("/files/download-url")
+async def download_url(request: UrlIngestRequest):
+    """Download content from a URL, parse HTML to Markdown, and save to data_in"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(request.url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+            
+        content_type = response.headers.get("content-type", "").lower()
+        target_dir = get_workspace_path(request.workspace, "data_in")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        if "text/html" in content_type:
+            soup = BeautifulSoup(response.text, "html.parser")
+            title = soup.title.string if soup.title else "Downloaded Document"
+            import re
+            safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title).strip('_')
+            if not safe_title:
+                safe_title = "Downloaded_Document"
+                
+            # Convert HTML to Markdown using markdownify
+            markdown_content = md(str(soup), heading_style="ATX")
+            
+            file_name = f"{safe_title}.md"
+            file_path = target_dir / file_name
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(markdown_content)
+                
+            return {
+                "status": "downloaded",
+                "filename": file_name,
+                "path": str(file_path),
+                "is_markdown": True
+            }
+        else:
+            # Save raw file if not HTML
+            file_name = request.url.split("/")[-1] or "downloaded_file.txt"
+            if not any(file_name.lower().endswith(ext) for ext in ['.txt', '.md', '.pdf']):
+                file_name += ".txt"
+                
+            file_path = target_dir / file_name
+            with open(file_path, "wb") as f:
+                f.write(response.content)
+                
+            return {
+                "status": "downloaded",
+                "filename": file_name,
+                "path": str(file_path),
+                "is_markdown": False
+            }
+    except Exception as e:
+        raise HTTPException(500, f"URL download failed: {str(e)}")
+
+@router.post("/files/download-gutenberg")
+async def download_gutenberg(request: UrlIngestRequest):
+    """Download a TXT from Gutenberg, extract Title and save as Markdown"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(request.url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+            
+        text = response.text
+        
+        # Look for the Title in Gutenberg txt format, e.g., "Title: The Dog\r\n"
+        import re
+        match = re.search(r"Title:\s*([^\r\n]+)", text)
+        title = match.group(1).strip() if match else "Gutenberg_Book"
+        
+        safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title).strip('_')
+        if not safe_title:
+            safe_title = "Gutenberg_Book"
+            
+        target_dir = get_workspace_path(request.workspace, "data_in")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        file_name = f"{safe_title}.md"
+        file_path = target_dir / file_name
+        
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"# {title}\n\n{text}")
+            
+        return {
+            "status": "downloaded",
+            "filename": file_name,
+            "path": str(file_path),
+            "is_markdown": True
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Gutenberg download failed: {str(e)}")
 
 
 @router.post("/files/upload")

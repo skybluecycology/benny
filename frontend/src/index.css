@@ -96,22 +96,97 @@ body {
   display: flex;
   height: 100vh;
   width: 100vw;
+  overflow: hidden;
 }
 
-.sidebar {
-  width: 260px;
+/* 1. Global Navigation Rail (Leftmost) */
+.nav-rail {
+  width: 64px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
   flex-shrink: 0;
+  z-index: 50;
 }
 
+.nav-rail-item {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: all var(--transition-fast);
+}
+
+.nav-rail-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-rail-item.active {
+  background: rgba(139, 92, 250, 0.15);
+  color: var(--accent-llm);
+}
+
+/* 2. Contextual Sidebar (Left, Collapsible) */
+.context-sidebar {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  z-index: 40;
+}
+
+/* 3. Main Center Canvas */
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+  background: var(--bg-canvas);
+}
+
+/* 4. Right Panel (Collapsible) */
+.right-panel {
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  z-index: 40;
+}
+
+/* Resize Handles */
+.resize-handle {
+  width: 6px;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 100;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.resize-handle:hover, .resize-handle:active {
+  background: var(--accent-llm);
+}
+
+.right-resize-handle {
+  margin-left: -3px;
+  margin-right: -3px;
+  position: relative;
 }
 
 /* ----------------------------------------------------------------------------- 
