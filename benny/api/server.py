@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-# Force reload trigger
 from contextlib import asynccontextmanager
 from .llm_routes import router as llm_router
 from .workflow_routes import router as workflow_router
@@ -17,7 +16,27 @@ from .notebook_routes import router as notebook_router
 from .chat_routes import router as chat_router
 from .studio_executor import router as studio_router
 from .skill_routes import router as skill_router
+from .graph_routes import router as graph_router
 
+
+@asynccontextmanager
+async def lifespan(app):
+    """Initialize services on startup, cleanup on shutdown."""
+    # Startup
+    try:
+        from benny.core.graph_db import init_schema
+        init_schema()
+        print("✅ Neo4j schema initialized")
+    except Exception as e:
+        print(f"⚠️ Neo4j not available: {e}")
+    yield
+    # Shutdown
+    try:
+        from benny.core.graph_db import close_driver
+        close_driver()
+        print("🔌 Neo4j driver closed")
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -25,7 +44,8 @@ app = FastAPI(
     description="Deterministic Graph Workflow Platform with Multi-Model AI Orchestration",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # CORS for frontend development
@@ -46,7 +66,7 @@ app.include_router(notebook_router, prefix="/api", tags=["Notebooks"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(studio_router, prefix="/api", tags=["Studio"])
 app.include_router(skill_router, prefix="/api", tags=["Skills"])
-
+app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
 
 
 @app.get("/")
@@ -75,3 +95,4 @@ if workspace_path.exists():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8005, reload=True)
+

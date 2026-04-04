@@ -68,7 +68,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ activeLLMProvider: provider });
   },
 
-  activeLLMModels: { lemonade: 'amd/Qwen3-8B-Hybrid-quantized_int4-float16-cpu-onnx' },
+  activeLLMModels: { lemonade: 'DeepSeek-R1-Distill-Llama-8B-FLM' },
   setActiveLLMModel: (provider: string, model: string) => {
     set((state) => ({
       activeLLMModels: {

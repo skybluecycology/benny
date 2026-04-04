@@ -9,82 +9,31 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 from ..core.workspace import get_workspace_path
+from ..core.extraction import extract_structured_text
 from ..tools.knowledge import get_chromadb_client
-from ..core.models import LOCAL_PROVIDERS, configure_local_provider
-from ..core.models import LOCAL_PROVIDERS, configure_local_provider
-import httpx
-import json
+from ..core.models import LOCAL_PROVIDERS
 
+import httpx
 
 router = APIRouter()
 
 
 class IngestRequest(BaseModel):
     workspace: str = "default"
-    notebook_id: Optional[str] = None  # If provided, use notebook-scoped collection
-    files: Optional[List[str]] = None  # If None, ingest all files
-
+    files: Optional[List[str]] = None
+    notebook_id: Optional[str] = None
 
 
 class QueryRequest(BaseModel):
     query: str
     workspace: str = "default"
-    top_k: int = 20
-    provider: Optional[str] = "fastflowlm"
-    model: Optional[str] = None
+    top_k: int = 5
     selected_sources: Optional[List[str]] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
-
-def extract_text_from_file(file_path: Path, log_fn=print) -> str:
-    """Extract text from various file types"""
-    ext = file_path.suffix.lower()
-    
-    if ext == '.txt' or ext == '.md':
-        return file_path.read_text(encoding='utf-8')
-    
-    elif ext == '.pdf':
-        doc = fitz.open(file_path)
-        text = ""
-        is_scanned = True
-        
-        for page in doc:
-            page_text = page.get_text()
-            if page_text.strip():
-                is_scanned = False
-            text += page_text
-            
-        if is_scanned and not text.strip():
-            log_fn(f"File {file_path.name} is scanned. Running OCR...")
-            import pytesseract
-            from PIL import Image
-            import io
-            import sys
-            
-            if sys.platform == 'win32':
-                pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-                
-            text = ""
-            # Limit OCR to max 25 pages to avoid extreme API timeouts for massive books
-            # In a production system, this should run asynchronously.
-            limit = min(25, len(doc))
-            for i in range(limit):
-                log_fn(f"OCRing page {i+1}/{limit}...")
-                page = doc[i]
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                text += pytesseract.image_to_string(img) + "\n\n"
-            log_fn(f"Finished OCR. Extracted {len(text)} chars.")
-            
-        doc.close()
-        return text
-    
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
-
-
-@router.post("/rag/ingest")
 def ingest_files(request: IngestRequest):
-    """Ingest files from data_in into ChromaDB"""
+    """Ingest files from data_in into ChromaDB using structured extraction (Docling)."""
     try:
         data_in_path = get_workspace_path(request.workspace, "data_in")
         
@@ -98,7 +47,7 @@ def ingest_files(request: IngestRequest):
             file_paths = list(data_in_path.glob("*.*"))
         
         # Filter for supported types
-        supported = ['.txt', '.md', '.pdf']
+        supported = ['.txt', '.md', '.pdf', '.docx', '.pptx', '.html']
         file_paths = [f for f in file_paths if f.suffix.lower() in supported]
         
         if not file_paths:
@@ -120,7 +69,7 @@ def ingest_files(request: IngestRequest):
         ingested = []
         log_file = get_workspace_path(request.workspace) / "ingest.log"
         with open(log_file, "w") as f:
-            f.write("Starting ingestion process...\n")
+            f.write("Starting structured ingestion process with Docling...\n")
         
         def write_log(msg: str):
             print(msg)
@@ -129,8 +78,8 @@ def ingest_files(request: IngestRequest):
                 
         for file_path in file_paths:
             try:
-                write_log(f"Processing {file_path.name}...")
-                text = extract_text_from_file(file_path, log_fn=write_log)
+                write_log(f"Processing {file_path.name} with structured extraction...")
+                text = extract_structured_text(file_path, log_fn=write_log)
                 
                 # Simple chunking (split by paragraphs)
                 chunks = [c.strip() for c in text.split('\n\n') if c.strip()]

@@ -68,7 +68,7 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     # Local models for privacy and cost savings
     "local_lemonade": {
-        "model": "openai/Gemma-3-4b-it-FLM",
+        "model": "openai/DeepSeek-R1-Distill-Llama-8B-FLM",
         "provider": "lemonade",
         "cost_per_1k": 0.0,
         "use_for": ["offline", "sensitive_data", "testing"]

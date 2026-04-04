@@ -12,7 +12,10 @@ import NotebookView from './components/Notebook/NotebookView';
 import DocumentViewer from './components/Notebook/DocumentViewer';
 import SwarmStatePanel from './components/Studio/SwarmStatePanel';
 import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
+import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
+import SynthesisPanel from './components/Notebook/SynthesisPanel';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
+import { useWorkspaceStore } from './hooks/useWorkspaceStore';
 import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight } from 'lucide-react';
 
 type View = 'studio' | 'notebook' | 'llm';
@@ -35,6 +38,8 @@ function App() {
   const [isDraggingRight, setIsDraggingRight] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+  const [graphKey, setGraphKey] = useState(0); // used to force re-fetch in graph canvas
+  const { currentWorkspace } = useWorkspaceStore();
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -157,6 +162,7 @@ function App() {
                   <WorkspaceSelector />
               </div>
               <SourcePanel />
+              <SynthesisPanel onGraphUpdated={() => setGraphKey(k => k + 1)} />
             </div>
           )}
         </div>
@@ -180,8 +186,13 @@ function App() {
           )}
 
           {view === 'notebook' && (
-             <div className="canvas-container" style={{ background: 'var(--surface)' }}>
-               <DocumentViewer />
+             <div className="canvas-container notebook-split" style={{ background: 'var(--surface)' }}>
+               <div className="notebook-doc-pane">
+                 <DocumentViewer />
+               </div>
+               <div className="notebook-graph-pane">
+                 <KnowledgeGraphCanvas key={graphKey} workspace={currentWorkspace} />
+               </div>
              </div>
           )}
           

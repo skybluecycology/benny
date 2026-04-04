@@ -20,7 +20,7 @@ echo.
 
 REM 1. Start Marquez (OpenLineage)
 echo [1/4] Starting Marquez (OpenLineage)...
-docker-compose up -d marquez-db marquez-api marquez-web
+docker-compose up -d neo4j marquez-db marquez-api marquez-web
 
 REM 2. Start LLM Provider
 echo [2/4] Starting LLM Service (%LLM_PROVIDER%)...

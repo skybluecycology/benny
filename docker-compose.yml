@@ -140,6 +140,23 @@ services:
   # Lemonade (AMD NPU): lemonade-server serve --port 8080
   # FastFlowLM (Intel NPU): Manual start on port 52625
 
+  # ============================================
+  # Neo4j Knowledge Graph (Synthesis Engine)
+  # ============================================
+  neo4j:
+    image: neo4j:5
+    container_name: benny-neo4j
+    ports:
+      - "7474:7474" # HTTP interface
+      - "7687:7687" # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - benny-network
+    restart: unless-stopped
+
 networks:
   benny-network:
     driver: bridge
@@ -152,4 +169,5 @@ volumes:
     name: benny-n8n
   ollama_data:
     name: benny-ollama
-
+  neo4j_data:
+    name: benny-neo4j

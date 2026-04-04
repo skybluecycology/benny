@@ -7,6 +7,13 @@ from .knowledge import (
 )
 from .files import read_file, write_file, list_files
 from .data import extract_pdf_text, query_csv
+from .graph_tools import (
+    query_knowledge_graph,
+    get_concept_neighbors,
+    add_knowledge_triple,
+    find_structural_analogies,
+    search_similar_concepts
+)
 
 __all__ = [
     "search_knowledge_workspace",
@@ -16,5 +23,11 @@ __all__ = [
     "write_file",
     "list_files",
     "extract_pdf_text",
-    "query_csv"
+    "query_csv",
+    "query_knowledge_graph",
+    "get_concept_neighbors",
+    "add_knowledge_triple",
+    "find_structural_analogies",
+    "search_similar_concepts"
 ]
+
