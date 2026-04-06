@@ -64,7 +64,14 @@ export default function LLMManager() {
             
             <p className="provider-description">{provider.description}</p>
             
+            {(provider as any).error && !provider.running && (
+              <p style={{ fontSize: '10px', color: 'var(--accent-error)', marginTop: '4px' }}>
+                ⚠️ {(provider as any).error}
+              </p>
+            )}
+            
             <div className="provider-controls">
+
               <button 
                 className={`btn btn-sm ${activeLLMProvider === key ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setActiveLLMProvider(key)}
@@ -149,7 +156,8 @@ export default function LLMManager() {
       }}>
         <h3 style={{ marginBottom: '12px', fontSize: '16px' }}>🚀 Quick Start</h3>
         <ul style={{ color: 'var(--text-secondary)', lineHeight: '1.8', paddingLeft: '20px' }}>
-          <li><strong>Ollama</strong>: Click Start or run <code>ollama serve</code> in terminal</li>
+          <li><strong>Ollama</strong>: Click Start or run <code>ollama serve</code></li>
+          <li><strong>LM Studio</strong>: Start LM Studio, load a model, and ensure Local Server is running on port 1234</li>
           <li><strong>Lemonade</strong>: Requires AMD NPU - run <code>lemonade-server serve</code></li>
           <li><strong>FastFlowLM</strong>: Requires Intel NPU - start manually on port 52625</li>
         </ul>

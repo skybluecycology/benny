@@ -167,8 +167,13 @@ async def call_llm(prompt: str, provider: str = "lemonade", model: str = None) -
             model_name = "DeepSeek-R1-Distill-Llama-8B-FLM"
         elif provider == "fastflowlm":
             model_name = "gemma3:4b"
+        elif provider == "lmstudio":
+            # If no model provided, we'll try to use the first one from status later 
+            # Or use a generic fallback. For LM Studio, it's safer to use the selected one.
+            model_name = model or "default"
         else:
             model_name = "default"
+
 
     payload = {
         "model": model_name,

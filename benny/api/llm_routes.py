@@ -34,21 +34,46 @@ SERVICE_COMMANDS = {
         "start": None,  # Manual start required
         "stop": None,
         "check": "http://localhost:52625/v1/models"
+    },
+    "lmstudio": {
+        "start": None,  # Usually started manually by user
+        "stop": None,
+        "check": "http://127.0.0.1:1234/v1/models"
     }
 }
 
 
+
+
 async def check_provider_status(url: str) -> Dict[str, Any]:
     """Check if a provider is running"""
+    headers = {
+        "User-Agent": "Benny/1.0",
+        "Accept": "application/json"
+    }
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(url)
-            return {
-                "running": resp.status_code == 200,
-                "models": resp.json() if resp.status_code == 200 else None
-            }
-    except:
-        return {"running": False, "models": None}
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return {
+                    "running": True,
+                    "models": resp.json()
+                }
+            
+            # Fallback for some local servers that might use different IP resolution
+            if "127.0.0.1" in url:
+                alt_url = url.replace("127.0.0.1", "localhost")
+                resp = await client.get(alt_url, headers=headers)
+                if resp.status_code == 200:
+                    return {
+                        "running": True,
+                        "models": resp.json()
+                    }
+                    
+        return {"running": False, "models": None, "error": f"Status {resp.status_code}" if 'resp' in locals() else "Timeout"}
+    except Exception as e:
+        return {"running": False, "models": None, "error": str(e)}
+
 
 
 @router.get("/status")

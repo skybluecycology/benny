@@ -9,8 +9,10 @@
 | Provider       | Best For                        | Startup Command                     |
 | -------------- | ------------------------------- | ----------------------------------- |
 | **Ollama**     | General use, wide model support | `docker-compose up -d ollama`       |
+| **LM Studio**   | Easy GUI, great for testing     | Start via Desktop app (port 1234)   |
 | **Lemonade**   | AMD NPU acceleration            | `lemonade-server serve --port 8080` |
 | **FastFlowLM** | Intel NPU acceleration          | Manual start on port 52625          |
+
 
 ---
 
@@ -134,6 +136,31 @@ Invoke-RestMethod -Uri "http://localhost:52625/v1/models"
 
 ---
 
+## Option 4: LM Studio (Desktop)
+
+Popular GUI for running local LLMs on Windows/Mac/Linux.
+
+### Prerequisites
+
+1. Download LM Studio from [https://lmstudio.ai](https://lmstudio.ai)
+2. Load a model (e.g., **Gemma 4**, Llama 3, etc.)
+3. Start the "Local Server" inside LM Studio
+
+### API Endpoint
+
+- **URL**: http://localhost:1234/v1
+- **API Key**: `not-needed`
+- **Port**: 1234 (Default)
+
+### Test Connection
+
+```bash
+curl http://localhost:1234/v1/models
+```
+
+---
+
+
 ## Configuration in Benny
 
 ### Python Configuration
@@ -149,6 +176,10 @@ configure_local_provider("ollama", port=11434)
 
 # Option 3: FastFlowLM
 configure_local_provider("fastflowlm", port=52625)
+
+# Option 4: LM Studio
+configure_local_provider("lmstudio", port=1234)
+
 ```
 
 ### Environment Variables
@@ -165,6 +196,11 @@ export OPENAI_API_KEY=not-needed
 # For FastFlowLM
 export OPENAI_API_BASE=http://localhost:52625/v1
 export OPENAI_API_KEY=not-needed
+
+# For LM Studio
+export OPENAI_API_BASE=http://localhost:1234/v1
+export OPENAI_API_KEY=not-needed
+
 ```
 
 ---
@@ -230,6 +266,8 @@ docker exec benny-ollama ollama list
 | Ollama (GPU)     | ~50-100ms/token | 8GB VRAM | Production local |
 | Lemonade (NPU)   | ~30-80ms/token  | Low      | AMD laptops      |
 | FastFlowLM (NPU) | ~30-80ms/token  | Low      | Intel laptops    |
+| LM Studio (GPU)  | ~30-100ms/token | 8GB VRAM | Desktop/NVIDIA   |
+
 
 ---
 

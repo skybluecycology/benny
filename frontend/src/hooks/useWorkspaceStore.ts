@@ -68,7 +68,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ activeLLMProvider: provider });
   },
 
-  activeLLMModels: { lemonade: 'DeepSeek-R1-Distill-Llama-8B-FLM' },
+  activeLLMModels: { 
+    lemonade: 'DeepSeek-R1-Distill-Llama-8B-FLM',
+    lmstudio: 'Gemma 4'
+  },
+
   setActiveLLMModel: (provider: string, model: string) => {
     set((state) => ({
       activeLLMModels: {

@@ -38,8 +38,19 @@ LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "description": "Intel NPU accelerated inference",
         "startup_cmd": None,  # Manual start required
         "check_url": "http://localhost:52625/v1/models"
+    },
+    "lmstudio": {
+        "name": "LM Studio",
+        "port": 1234,
+        "base_url": "http://127.0.0.1:1234/v1",
+        "api_key": "not-needed",
+        "description": "Popular local LLM desktop application",
+        "startup_cmd": None,  # Usually started manually by user
+        "check_url": "http://127.0.0.1:1234/v1/models"
     }
+
 }
+
 
 
 # =============================================================================
@@ -84,8 +95,15 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "provider": "fastflowlm",
         "cost_per_1k": 0.0,
         "use_for": ["intel_npu", "offline", "testing", "reasoning"]
+    },
+    "local_lmstudio": {
+        "model": "openai/Gemma 4",
+        "provider": "lmstudio",
+        "cost_per_1k": 0.0,
+        "use_for": ["offline", "sensitive_data", "testing", "reasoning"]
     }
 }
+
 
 
 def configure_local_provider(provider: str = "ollama", port: Optional[int] = None) -> Dict[str, Any]:
