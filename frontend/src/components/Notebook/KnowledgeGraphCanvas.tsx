@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import ForceGraph3D from '3d-force-graph';
-import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2 } from 'lucide-react';
+import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search } from 'lucide-react';
 
 interface GraphNode {
   id: string;
   name: string;
   labels: string[];
   domain: string;
+  node_type?: string;
   created_at: string;
-  // Force-graph internal
   x?: number;
   y?: number;
   z?: number;
@@ -22,6 +22,9 @@ interface GraphEdge {
   description: string;
   pattern: string;
   source_doc: string;
+  section?: string;
+  citation?: string;
+  confidence?: number;
   created_at: string;
   timestamp: string;
 }
@@ -43,9 +46,16 @@ const EDGE_COLORS: Record<string, string> = {
   ANALOGOUS_TO: '#f59e0b',
 };
 
+// Dynamic color assignments for Entity Typing Category Maps
 const NODE_COLORS: Record<string, string> = {
   Concept: '#8b5cf6',
   Source: '#06b6d4',
+  Theory: '#ec4899',
+  Technology: '#10b981',
+  Person: '#f59e0b',
+  Organization: '#3b82f6',
+  Event: '#f43f5e',
+  Location: '#eab308'
 };
 
 export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'default' }: KnowledgeGraphCanvasProps) {
@@ -57,6 +67,15 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: GraphNode } | null>(null);
+  
+  // Filtering & Isolation States
+  const [searchQuery, setSearchQuery] = useState('');
+  const focusRef = useRef({ 
+    node: null as GraphNode | null, 
+    search: '', 
+    links: new Set<any>(), 
+    neighbors: new Set<string>() 
+  });
 
   const fetchGraph = useCallback(async () => {
     setLoading(true);
@@ -87,11 +106,37 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     fetchGraph();
   }, [fetchGraph]);
 
+  // Propagate search & select states into the active ref immediately to restyle WebGL dynamically
+  useEffect(() => {
+    if (!graphRef.current) return;
+    
+    focusRef.current.search = searchQuery.toLowerCase();
+    focusRef.current.node = selectedNode;
+    focusRef.current.neighbors.clear();
+    focusRef.current.links.clear();
+
+    if (selectedNode) {
+      focusRef.current.neighbors.add(selectedNode.id);
+      graphData.edges.forEach((edge: any) => {
+        if (edge.source.id === selectedNode.id || edge.target.id === selectedNode.id) {
+          focusRef.current.neighbors.add(edge.source.id);
+          focusRef.current.neighbors.add(edge.target.id);
+          focusRef.current.links.add(edge);
+        }
+      });
+    }
+
+    graphRef.current
+      .nodeColor(graphRef.current.nodeColor())
+      .linkColor(graphRef.current.linkColor())
+      .nodeOpacity(graphRef.current.nodeOpacity())
+      .linkOpacity(graphRef.current.linkOpacity());
+  }, [searchQuery, selectedNode, graphData]);
+
   // Render 3D force graph
   useEffect(() => {
     if (!containerRef.current || graphData.nodes.length === 0) return;
 
-    // Clean up any existing graph instance
     if (graphRef.current) {
       graphRef.current._destructor?.();
       containerRef.current.innerHTML = '';
@@ -99,43 +144,83 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
 
     const graph = ForceGraph3D()(containerRef.current)
       .backgroundColor('rgba(0,0,0,0)')
-      .nodeLabel((node: any) => `<div style="background:rgba(15,15,30,0.9);padding:6px 10px;border-radius:6px;color:#e2e8f0;font-size:12px;border:1px solid rgba(139,92,246,0.3)"><strong>${node.name}</strong><br/><span style="opacity:0.7">${(node.labels || []).join(', ')}</span></div>`)
+      
+      // Node Coloring with Entity Typing
       .nodeColor((node: any) => {
-        const label = (node.labels || [])[0] || 'Concept';
-        return NODE_COLORS[label] || '#8b5cf6';
+        if (focusRef.current.search && !node.name.toLowerCase().includes(focusRef.current.search)) return '#1f2937';
+        if (focusRef.current.node && !focusRef.current.neighbors.has(node.id)) return '#1f2937';
+        
+        const typeLabel = node.node_type || (node.labels || [])[0] || 'Concept';
+        return NODE_COLORS[typeLabel] || NODE_COLORS['Concept'];
       })
-      .nodeVal((node: any) => {
-        const label = (node.labels || [])[0] || 'Concept';
-        return label === 'Source' ? 3 : 6;
+      
+      // Node Opacity & Highlighting
+      .nodeOpacity((node: any) => {
+         if (focusRef.current.search && !node.name.toLowerCase().includes(focusRef.current.search)) return 0.1;
+         if (focusRef.current.node && !focusRef.current.neighbors.has(node.id)) return 0.1;
+         return 0.95;
       })
-      .nodeOpacity(0.92)
-      .linkColor((link: any) => EDGE_COLORS[link.type] || '#4a5568')
-      .linkWidth(1.5)
-      .linkOpacity(0.6)
-      .linkDirectionalArrowLength(4)
+      
+      .nodeLabel((node: any) => {
+        const typeLabel = node.node_type || (node.labels || [])[0] || 'Concept';
+        return `<div style="background:rgba(15,15,30,0.9);padding:6px 10px;border-radius:6px;color:#e2e8f0;font-size:12px;border:1px solid rgba(139,92,246,0.3)">
+          <strong>${node.name}</strong><br/>
+          <span style="opacity:0.7">${typeLabel}</span>
+        </div>`;
+      })
+      .nodeVal((node: any) => ((node.labels || [])[0] === 'Source' ? 3 : 6))
+      
+      // Edge Style Logic & Confidence Dampening
+      .linkColor((link: any) => {
+         if (focusRef.current.node && !focusRef.current.links.has(link)) return '#1f2937';
+         return EDGE_COLORS[link.type] || '#4a5568';
+      })
+      .linkOpacity((link: any) => {
+         if (focusRef.current.node && !focusRef.current.links.has(link)) return 0.05;
+         const baseOpacity = link.confidence !== undefined ? Math.max(0.2, link.confidence) : 0.6;
+         return baseOpacity;
+      })
+      .linkWidth((link: any) => (focusRef.current.links.has(link) ? 2.5 : 1.0))
+      .linkDirectionalArrowLength((link: any) => (focusRef.current.node && !focusRef.current.links.has(link) ? 0 : 4))
       .linkDirectionalArrowRelPos(1)
-      .linkLabel((link: any) => `<div style="background:rgba(15,15,30,0.9);padding:4px 8px;border-radius:4px;color:#e2e8f0;font-size:11px;border:1px solid rgba(99,102,241,0.3)">${link.predicate || link.type}</div>`)
+      
+      // Interactive Citation Hover Details!
+      .linkLabel((link: any) => {
+        const citationStr = link.citation ? `<div style="margin-top:4px; font-style:italic; font-size:10px; opacity:0.8; max-width:200px; white-space:normal">"${link.citation}"</div>` : '';
+        const sectionStr = link.section ? `<div style="margin-top:2px; font-size:9px; color:#a78bfa">${link.section}</div>` : '';
+        const confStr = link.confidence !== undefined ? `<div style="margin-top:4px; font-size:9px; color:#10b981">Confidence: ${Math.round(link.confidence * 100)}%</div>` : '';
+        
+        return `<div style="background:rgba(15,15,30,0.95);padding:6px 10px;border-radius:6px;color:#e2e8f0;font-size:11px;border:1px solid rgba(99,102,241,0.4);max-width:220px">
+          <strong>${link.predicate || link.type}</strong>
+          ${confStr}
+          ${sectionStr}
+          ${citationStr}
+        </div>`;
+      })
+      
       .onNodeClick((node: any) => {
         setSelectedNode(node as GraphNode);
         if (onConceptClick) onConceptClick(node.name);
+        
+        // Dynamic camera zoom into the selected target neighbourhood
+        const distance = 100;
+        const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+        graphRef.current.cameraPosition(
+          { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+          node, 1500
+        );
       })
       .onNodeRightClick((node: any, event: MouseEvent) => {
         event.preventDefault();
-        setContextMenu({
-          x: event.clientX,
-          y: event.clientY,
-          node: node as GraphNode
-        });
+        setContextMenu({ x: event.clientX, y: event.clientY, node: node as GraphNode });
+      })
+      .onBackgroundClick(() => {
+         setSelectedNode(null); // Escape focus isolation clicking the background
       })
       .width(containerRef.current.clientWidth)
       .height(containerRef.current.clientHeight);
 
-    // Convert edges to link format
-    const links = graphData.edges.map(e => ({
-      ...e,
-      source: e.source,
-      target: e.target,
-    }));
+    const links = graphData.edges.map(e => ({ ...e, source: e.source, target: e.target }));
 
     graph.graphData({
       nodes: graphData.nodes.map(n => ({ ...n })),
@@ -144,7 +229,6 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
 
     graphRef.current = graph;
 
-    // Resize observer
     const resizeObserver = new ResizeObserver(() => {
       if (containerRef.current) {
         graph.width(containerRef.current.clientWidth);
@@ -153,22 +237,16 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     });
     resizeObserver.observe(containerRef.current);
 
-    return () => {
-      resizeObserver.disconnect();
-    };
+    return () => resizeObserver.disconnect();
   }, [graphData, onConceptClick]);
 
   const handleCrossDomain = async (concept: string, domain: string) => {
     setContextMenu(null);
     try {
-      const res = await fetch('http://localhost:8005/api/graph/cross-domain', {
+      const res = await fetch(`http://localhost:8005/api/graph/cross-domain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          concept,
-          target_domain: domain,
-          workspace
-        })
+        body: JSON.stringify({ concept, target_domain: domain, workspace })
       });
       if (res.ok) {
         const data = await res.json();
@@ -181,16 +259,26 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
 
   return (
     <div className={`knowledge-graph-canvas ${isFullscreen ? 'fullscreen' : ''}`}>
-      {/* Toolbar */}
-      <div className="graph-toolbar">
-        <div className="graph-toolbar-left">
+      {/* Interactive Toolbar */}
+      <div className="graph-toolbar" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="graph-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Share2 size={14} style={{ color: 'var(--primary)' }} />
           <span className="graph-toolbar-title">Knowledge Graph</span>
+          
+          <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '2px 8px' }}>
+             <Search size={12} style={{ opacity: 0.5, marginRight: '6px' }} />
+             <input 
+               type="text" 
+               placeholder="Search cluster..." 
+               value={searchQuery}
+               onChange={(e) => setSearchQuery(e.target.value)}
+               style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '11px', outline: 'none', width: '120px' }}
+             />
+          </div>
+          
           {stats && (
-            <span className="graph-toolbar-stats">
+            <span className="graph-toolbar-stats" style={{ marginLeft: '8px' }}>
               {stats.concepts} concepts · {stats.relationships} relations
-              {stats.conflicts > 0 && <span className="conflict-badge"> · {stats.conflicts} ⚠️</span>}
-              {stats.analogies > 0 && <span className="analogy-badge"> · {stats.analogies} 🔗</span>}
             </span>
           )}
         </div>
@@ -204,14 +292,8 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
         </div>
       </div>
 
-      {/* 3D Canvas */}
-      <div 
-        ref={containerRef} 
-        className="graph-3d-container"
-        onClick={() => setContextMenu(null)}
-      />
+      <div ref={containerRef} className="graph-3d-container" onClick={() => setContextMenu(null)} />
 
-      {/* Empty state */}
       {graphData.nodes.length === 0 && !loading && (
         <div className="graph-empty-state">
           <Share2 size={32} style={{ opacity: 0.4 }} />
@@ -220,65 +302,38 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
         </div>
       )}
 
-      {/* Legend */}
-      <div className="graph-legend">
-        <div className="legend-item">
-          <span className="legend-dot" style={{ background: NODE_COLORS.Concept }} />
-          <span>Concept</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-dot" style={{ background: NODE_COLORS.Source }} />
-          <span>Source</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-line" style={{ background: EDGE_COLORS.RELATES_TO }} />
-          <span>Relates</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-line" style={{ background: EDGE_COLORS.CONFLICTS_WITH }} />
-          <span>Conflict</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-line" style={{ background: EDGE_COLORS.ANALOGOUS_TO }} />
-          <span>Analogy</span>
-        </div>
+      {/* Semantic Legend */}
+      <div className="graph-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', maxWidth: '400px' }}>
+        {Object.entries(NODE_COLORS).map(([type, color]) => (
+           <div key={type} className="legend-item" style={{ cursor: 'pointer' }} onClick={() => setSearchQuery(searchQuery === type ? '' : type)}>
+             <span className="legend-dot" style={{ background: color }} />
+             <span style={{ opacity: searchQuery && searchQuery !== type.toLowerCase() ? 0.5 : 1 }}>{type}</span>
+           </div>
+        ))}
       </div>
 
-      {/* Context Menu */}
       {contextMenu && (
-        <div 
-          className="graph-context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
+        <div className="graph-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="context-menu-title">{contextMenu.node.name}</div>
-          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Physics')}>
-            <Zap size={12} /> Show in Physics
-          </button>
-          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Music Theory')}>
-            <Zap size={12} /> Show in Music Theory
-          </button>
-          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Biology')}>
-            <Zap size={12} /> Show in Biology
-          </button>
-          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Economics')}>
-            <Zap size={12} /> Show in Economics
-          </button>
-          <button onClick={() => { setContextMenu(null); }}>
-            <AlertTriangle size={12} /> View Conflicts
-          </button>
-          <button onClick={() => { setContextMenu(null); }}>
-            <Clock size={12} /> Timeline
-          </button>
+          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Physics')}><Zap size={12} /> Show in Physics</button>
+          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Biology')}><Zap size={12} /> Show in Biology</button>
+          <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Economics')}><Zap size={12} /> Show in Economics</button>
+          <button onClick={() => setContextMenu(null)}><AlertTriangle size={12} /> View Conflicts</button>
         </div>
       )}
 
-      {/* Selected node info */}
       {selectedNode && (
-        <div className="graph-node-info">
-          <strong>{selectedNode.name}</strong>
-          <span>{(selectedNode.labels || []).join(', ')}</span>
-          {selectedNode.domain && <span>Domain: {selectedNode.domain}</span>}
-          <button className="btn-ghost" onClick={() => setSelectedNode(null)}>×</button>
+        <div className="graph-node-info" style={{ background: 'rgba(15, 15, 20, 0.95)', border: '1px solid var(--border-color)', backdropFilter: 'blur(8px)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+             <strong style={{ fontSize: '14px', color: 'var(--primary)' }}>{selectedNode.name}</strong>
+             <button className="btn-ghost" onClick={() => setSelectedNode(null)}>×</button>
+          </div>
+          <span style={{ background: 'rgba(139,92,246,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', color: '#a78bfa', display: 'inline-block', marginBottom: '4px' }}>
+             {selectedNode.node_type || (selectedNode.labels || [])[0] || 'Concept'}
+          </span>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+             <em>Sub-graph isolated. Click background to reset visualization.</em>
+          </div>
         </div>
       )}
     </div>

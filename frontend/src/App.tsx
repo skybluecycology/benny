@@ -38,6 +38,7 @@ function App() {
   const [isDraggingRight, setIsDraggingRight] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+  const [isDocPaneOpen, setIsDocPaneOpen] = useState(true);
   const [graphKey, setGraphKey] = useState(0); // used to force re-fetch in graph canvas
   const { currentWorkspace } = useWorkspaceStore();
 
@@ -186,11 +187,31 @@ function App() {
           )}
 
           {view === 'notebook' && (
-             <div className="canvas-container notebook-split" style={{ background: 'var(--surface)' }}>
-               <div className="notebook-doc-pane">
-                 <DocumentViewer />
-               </div>
+             <div className="canvas-container notebook-split" style={{ background: 'var(--surface)', position: 'relative' }}>
+               {isDocPaneOpen && (
+                 <div className="notebook-doc-pane" style={{ transition: 'all 0.3s ease' }}>
+                   <DocumentViewer />
+                 </div>
+               )}
                <div className="notebook-graph-pane">
+                 <button 
+                   className="btn-icon"
+                   onClick={() => setIsDocPaneOpen(!isDocPaneOpen)}
+                   style={{
+                     position: 'absolute',
+                     top: '16px',
+                     left: '16px',
+                     zIndex: 100,
+                     background: 'var(--surface)',
+                     border: '1px solid var(--border-color)',
+                     borderRadius: '8px',
+                     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                     padding: '6px'
+                   }}
+                   title={isDocPaneOpen ? "Collapse Document Reading Pane" : "Expand Document Reading Pane"}
+                 >
+                   {isDocPaneOpen ? <PanelLeftClose size={18} /> : <BookOpen size={18} />}
+                 </button>
                  <KnowledgeGraphCanvas key={graphKey} workspace={currentWorkspace} />
                </div>
              </div>

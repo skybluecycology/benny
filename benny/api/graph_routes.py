@@ -264,6 +264,8 @@ async def ingest_files_to_graph(request: IngestFilesRequest):
         }
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Batch file ingestion failed: {str(e)}")
 
 
@@ -339,7 +341,7 @@ async def _process_content_to_graph(
         )
         if sec_triples:
             for t in sec_triples:
-                t.append(title)
+                t["section_title"] = title
             triples.extend(sec_triples)
             
     if not triples:
@@ -371,17 +373,31 @@ async def _process_content_to_graph(
     stored = []
     all_concepts = set()
     for t in triples:
-        subj = t[0]
-        pred = t[1]
-        obj = t[2]
-        sec_title = t[3] if len(t) > 3 else source_name
+        if not isinstance(t, dict):
+            continue
+            
+        subj = t.get("subject", "")
+        pred = t.get("predicate", "")
+        obj = t.get("object", "")
+        subj_type = t.get("subject_type", "Concept")
+        obj_type = t.get("object_type", "Concept")
+        citation = t.get("citation", "")
+        confidence = float(t.get("confidence", 1.0))
+        sec_title = t.get("section_title", source_name)
+        
+        if not subj or not pred or not obj:
+            continue
         
         try:
             result = add_triple(
                 subject=subj, predicate=pred, obj=obj,
                 workspace=workspace,
                 source_name=source_name,
-                section=f"{source_name} - {sec_title}"
+                section=f"{source_name} - {sec_title}",
+                subject_type=subj_type,
+                object_type=obj_type,
+                citation=citation,
+                confidence=confidence
             )
             stored.append(result)
             all_concepts.add(subj)

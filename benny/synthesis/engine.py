@@ -29,10 +29,17 @@ Rules:
 - Extract as many triples as you can find.  Be thorough.
 - If the text mentions a source document name, include triples that reference it.
 
-Return ONLY a JSON array of triples, like:
+Return ONLY a JSON array of objects, like:
 [
-  ["Dopamine", "drives", "reward-seeking behavior"],
-  ["Social media notifications", "trigger", "dopamine spikes"]
+  {{
+    "subject": "Dopamine",
+    "subject_type": "Biology",
+    "predicate": "drives",
+    "object": "reward-seeking behavior",
+    "object_type": "Concept",
+    "citation": "Dopamine is responsible for...",
+    "confidence": 0.95
+  }}
 ]
 
 TEXT:
@@ -47,18 +54,26 @@ Your goal is to extract the core points, arguments, or mechanisms made in this s
 {direction_prompt}
 
 Rules for Extraction:
-1. Extract the points strictly as Knowledge Graph relations: (Subject, Predicate, Object).
-2. Subject and Object must be clear noun phrases.
-3. Predicate must be an active verb phrase (e.g., "requires", "causes", "improves").
-4. Filter out any noise; only extract points structurally relevant to the direction (if provided).
+1. Extract the points strictly as Knowledge Graph relations map.
+2. Filter out any noise; only extract points structurally relevant to the direction (if provided).
+3. "subject_type" and "object_type" should categorize the entity (e.g., Person, Theory, Technology, Organization, Location, Event, Concept).
+4. "citation" must be the exact short sentence/excerpt from the text that justifies the claim.
+5. "confidence" should be a score from 0.0 to 1.0 (1.0 = proven/stated as fact, 0.5 = hypothesized).
 
 TEXT SECTION: {section_title}
 {text}
 
-Output ONLY a raw JSON array of arrays (no other text or explanations):
+Output ONLY a JSON array of objects. Example format:
 [
-  ["Subject", "Predicate", "Object"],
-  ["Another Subject", "Predicate", "Another Object"]
+  {{
+    "subject": "Dopamine",
+    "subject_type": "Biology",
+    "predicate": "drives",
+    "object": "Reward-Seeking Behavior",
+    "object_type": "Concept",
+    "citation": "Dopamine is responsible for the reward-seeking loop in mammalian brains.",
+    "confidence": 0.9
+  }}
 ]
 
 JSON:"""
@@ -223,11 +238,11 @@ async def extract_triples(
     if not isinstance(triples, list):
         return []
     
-    # Validate each triple is a list of 3 strings
+    # Validate each triple is a dict with required fields
     valid = []
     for t in triples:
-        if isinstance(t, (list, tuple)) and len(t) == 3:
-            valid.append([str(t[0]), str(t[1]), str(t[2])])
+        if isinstance(t, dict) and "subject" in t and "predicate" in t and "object" in t:
+            valid.append(t)
     
     return valid
 
@@ -269,8 +284,8 @@ async def extract_directed_triples_from_section(
     
     valid = []
     for t in triples:
-        if isinstance(t, (list, tuple)) and len(t) == 3:
-            valid.append([str(t[0]), str(t[1]), str(t[2])])
+        if isinstance(t, dict) and "subject" in t and "predicate" in t and "object" in t:
+            valid.append(t)
     
     return valid
 

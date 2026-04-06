@@ -119,13 +119,17 @@ def add_triple(
     source_name: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     timestamp: Optional[str] = None,
-    section: Optional[str] = None
+    section: Optional[str] = None,
+    subject_type: str = "Concept",
+    object_type: str = "Concept",
+    citation: str = "",
+    confidence: float = 1.0
 ) -> dict:
     """
     Add a knowledge triple to the graph.
     
-    Creates or merges Subject and Object as Concept nodes, 
-    then creates a RELATES_TO edge with the predicate.
+    Creates or merges Subject and Object as Concept nodes (with types), 
+    then creates a RELATES_TO edge with the predicate, citation, and confidence.
     """
     driver = get_driver()
     meta_json = json.dumps(metadata or {})
@@ -133,15 +137,19 @@ def add_triple(
     with driver.session() as session:
         result = session.run("""
             MERGE (s:Concept {name: $subject, workspace: $workspace})
-            ON CREATE SET s.created_at = datetime(), s.domain = ''
+            ON CREATE SET s.created_at = datetime(), s.domain = '', s.node_type = $subject_type
+            ON MATCH SET s.node_type = $subject_type
             MERGE (o:Concept {name: $obj, workspace: $workspace})
-            ON CREATE SET o.created_at = datetime(), o.domain = ''
+            ON CREATE SET o.created_at = datetime(), o.domain = '', o.node_type = $object_type
+            ON MATCH SET o.node_type = $object_type
             
             CREATE (s)-[r:RELATES_TO {
                 predicate: $predicate,
                 source: $source_name,
                 metadata: $metadata,
                 section: $section,
+                citation: $citation,
+                confidence: $confidence,
                 created_at: datetime(),
                 timestamp: $timestamp
             }]->(o)
@@ -150,7 +158,8 @@ def add_triple(
         """, subject=subject, predicate=predicate, obj=obj,
              workspace=workspace, source_name=source_name or "",
              metadata=meta_json, timestamp=timestamp or "",
-             section=section or "")
+             section=section or "", citation=citation, confidence=confidence,
+             subject_type=subject_type, object_type=object_type)
         
         record = result.single()
         return {
@@ -290,7 +299,7 @@ def get_full_graph(workspace: str = "default") -> dict:
             MATCH (n {workspace: $workspace})
             WHERE n:Concept OR n:Source
             RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
-                   n.domain AS domain, n.created_at AS created_at
+                   n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type
         """, workspace=workspace)
         
         nodes = []
@@ -300,7 +309,8 @@ def get_full_graph(workspace: str = "default") -> dict:
                 "name": rec["name"],
                 "labels": rec["labels"],
                 "domain": rec["domain"] or "",
-                "created_at": str(rec["created_at"]) if rec["created_at"] else ""
+                "created_at": str(rec["created_at"]) if rec["created_at"] else "",
+                "node_type": rec["node_type"] or "Concept"
             }
             nodes.append(node)
         
@@ -310,7 +320,8 @@ def get_full_graph(workspace: str = "default") -> dict:
             RETURN elementId(a) AS source, elementId(b) AS target, type(r) AS type,
                    r.predicate AS predicate, r.description AS description,
                    r.pattern AS pattern, r.source AS source_doc,
-                   r.created_at AS created_at, r.timestamp AS timestamp
+                   r.created_at AS created_at, r.timestamp AS timestamp,
+                   r.section AS section, r.citation AS citation, r.confidence AS confidence
         """, workspace=workspace)
         
         edges = []
@@ -323,6 +334,9 @@ def get_full_graph(workspace: str = "default") -> dict:
                 "description": rec["description"] or "",
                 "pattern": rec["pattern"] or "",
                 "source_doc": rec["source_doc"] or "",
+                "section": rec["section"] or "",
+                "citation": rec["citation"] or "",
+                "confidence": rec["confidence"] if rec["confidence"] is not None else 1.0,
                 "created_at": str(rec["created_at"]) if rec["created_at"] else "",
                 "timestamp": rec["timestamp"] or ""
             }
