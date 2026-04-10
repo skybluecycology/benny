@@ -141,6 +141,17 @@ async def upload_file(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
+        # Emit lineage for non-PDF uploads (PDFs go through /api/etl/stage-and-convert which has its own tracking)
+        try:
+            track_file_conversion(
+                input_path=f"upload/{file.filename}",
+                output_path=f"{subdir}/{file.filename}",
+                workspace=workspace,
+                job_name="file_upload"
+            )
+        except Exception as lineage_err:
+            print(f"Warning: Failed to emit lineage for upload: {lineage_err}")
+
         return {
             "status": "uploaded",
             "filename": file.filename,

@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -35,6 +36,14 @@ from ..core.workspace import get_workspace_path, load_manifest
 from ..core.extraction import extract_structured_text
 from ..core.schema import (
     KnowledgeTriple, SynthesisConfig, IngestionEvent, IngestionEventType
+)
+from ..core.task_manager import task_manager
+from ..governance.lineage import (
+    track_workflow_start, 
+    track_workflow_complete, 
+    track_llm_call,
+    track_tool_execution,
+    track_aer
 )
 
 logger = logging.getLogger(__name__)
@@ -440,6 +449,22 @@ async def _background_ingest_files(
         data={"files": files, "total": len(files)}
     ))
 
+    # Register in TaskManager for Mesh Visibility
+    task_manager.create_task(workspace, "graph_ingest", task_id=run_id)
+    track_workflow_start(
+        run_id, 
+        "graph_ingest", 
+        workspace, 
+        inputs=files,
+        outputs=[f"graph_run_{run_id}"]
+    )
+    task_manager.add_aer_entry(
+        run_id,
+        intent=f"Ingesting {len(files)} files into Knowledge Graph",
+        observation="Initialization complete",
+        plan="1. Structured extraction 2. Parallel Triple extraction 3. Conflict detection 4. Batch Neo4j store 5. Embedding"
+    )
+
     try:
         data_in_path = get_workspace_path(workspace, "data_in")
 
@@ -478,6 +503,10 @@ async def _background_ingest_files(
                 "status": file_result.get("status"),
                 "triples": file_result.get("triples_extracted", 0)
             })
+            
+            # Update TaskManager Progress
+            progress = int((file_idx + 1) / len(files) * 100)
+            task_manager.update_task(run_id, progress=progress, message=f"Processed {file_idx+1}/{len(files)}: {filename}")
 
         await event_callback(IngestionEvent(
             event=IngestionEventType.COMPLETED,
@@ -488,6 +517,15 @@ async def _background_ingest_files(
                 "details": results
             }
         ))
+        
+        task_manager.update_task(run_id, status="completed", progress=100, message="Graph ingestion successful")
+        track_workflow_complete(
+            run_id, 
+            "graph_ingest", 
+            ["extraction", "synthesis", "neo4j_store"], 
+            0,
+            outputs=[f"graph_run_{run_id}"]
+        )
 
     except Exception as e:
         logger.error("Background ingestion failed: %s", e, exc_info=True)
@@ -524,6 +562,7 @@ async def _process_content_to_graph(
 
     pk_source = f"{model or 'default'}-{source_name}"
     partition_key = hashlib.sha256(pk_source.encode()).hexdigest()
+    content_hash = hashlib.sha256(text.encode()).hexdigest()
 
     # Step 0a: Check Neo4j connectivity
     conn = verify_connectivity()
@@ -547,10 +586,19 @@ async def _process_content_to_graph(
         version="1.0.0",
         artifact_path=str(get_workspace_path(workspace, f"runs/{run_id}"))
     )
+    
+    # Track metadata in TaskManager registry
+    task_manager.update_task(run_id, content_hash=content_hash, partition_key=partition_key)
 
     # Step 1: Parallel Extraction of Triples
     sections = _split_markdown_into_segments(text)
     logger.info("Hierarchical parallel parsing initiated for %s: %d sections found.", source_name, len(sections))
+
+    # Trace AER for extraction
+    try:
+        track_aer(run_id, "graph_ingest", f"Extracting triples from {source_name}", f"Split into {len(sections)} sections")
+    except Exception as e:
+        logger.warning("Lineage tracking failed (extraction): %s", e)
 
     # Filter microscopic sections early
     active_sections = [s for s in sections if len(s['text'].strip()) >= synthesis_config.min_section_chars]
@@ -568,6 +616,7 @@ async def _process_content_to_graph(
     )
 
     if not triples:
+        task_manager.add_aer_entry(run_id, "Extraction finished", f"No triples found for {source_name}")
         return {"status": "no_triples_found", "triples_extracted": 0}
 
     # Step 2: Check for conflicts against existing graph
@@ -576,10 +625,10 @@ async def _process_content_to_graph(
         graph = get_full_graph(workspace, show_all=True)
         for edge in graph.get("edges", []):
             if edge.get("type") == "RELATES_TO":
-                src_name = next((n["name"] for n in graph["nodes"] if n["id"] == edge["source"]), "")
-                tgt_name = next((n["name"] for n in graph["nodes"] if n["id"] == edge["target"]), "")
-                if src_name and tgt_name:
-                    existing.append([src_name, edge.get("predicate", ""), tgt_name])
+                src_node = next((n for n in graph["nodes"] if n["id"] == edge["source"]), None)
+                tgt_node = next((n for n in graph["nodes"] if n["id"] == edge["target"]), None)
+                if src_node and tgt_node:
+                    existing.append([src_node["name"], edge.get("predicate", ""), tgt_node["name"]])
     except Exception:
         pass
 
@@ -591,7 +640,17 @@ async def _process_content_to_graph(
             provider=provider,
             model=model,
             timeout=llm_timeout,
-            config=synthesis_config
+            config=synthesis_config,
+            run_id=run_id
+        )
+        
+        # Track conflict detection as a tool execution nested under the ingest workflow
+        track_tool_execution(
+            parent_run_id=run_id,
+            tool_name="conflict_detection",
+            tool_args={"existing_count": len(existing), "new_count": len(triples)},
+            success=True,
+            parent_job_name="graph_ingest"
         )
 
     if event_callback:
@@ -612,6 +671,15 @@ async def _process_content_to_graph(
         source_name=source_name,
         run_id=run_id
     )
+    
+    # Track Neo4j batch storage as a tool execution
+    track_tool_execution(
+        parent_run_id=run_id,
+        tool_name="neo4j_batch_storage",
+        tool_args={"workspace": workspace, "source": source_name, "count": len(triples)},
+        success=stored_result.get("count", 0) > 0,
+        parent_job_name="graph_ingest"
+    )
     logger.info("[SUCCESS] Batched %d triples into Neo4j successfully.", stored_result['count'])
 
     if event_callback:
@@ -622,6 +690,12 @@ async def _process_content_to_graph(
             message=f"Stored {stored_result['count']} triples",
             data={"count": stored_result["count"]}
         ))
+
+    # Track AER for storage
+    try:
+        track_aer(run_id, "graph_ingest", f"Storing triples for {source_name}", f"Committed {stored_result['count']} triples to Neo4j database")
+    except Exception as e:
+        logger.warning("Lineage tracking failed (storage): %s", e)
 
     # Step 3b: Save Artifacts to Workspace Disk
     try:
@@ -636,10 +710,12 @@ async def _process_content_to_graph(
         meta = {
             "run_id": run_id,
             "partition_key": partition_key,
+            "content_hash": content_hash,
             "model": model,
             "source": source_name,
             "triples_count": len(triples),
-            "conflicts_count": len(conflicts)
+            "conflicts_count": len(conflicts),
+            "timestamp": datetime.now().isoformat()
         }
         with open(run_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
@@ -763,6 +839,17 @@ async def synthesize(request: SynthesizeRequest):
         manifest = load_manifest(request.workspace)
         llm_timeout = manifest.llm_timeout
 
+        # Register Synthesis Task
+        task_id = str(uuid.uuid4())
+        task_manager.create_task(request.workspace, "synthesis", task_id=task_id)
+        track_workflow_start(task_id, "synthesis", request.workspace)
+        task_manager.add_aer_entry(
+            task_id,
+            intent="Finding structural analogies across knowledge graph segments",
+            observation=f"Graph summary built ({len(lines)} relationships)",
+            plan="1. LLM pattern match 2. Isomorphism verification 3. Analogy persistence"
+        )
+
         analogies = await find_synthesis(
             graph_summary=graph_summary,
             provider=request.provider,
@@ -783,8 +870,12 @@ async def synthesize(request: SynthesizeRequest):
             except Exception:
                 pass
 
+        task_manager.update_task(task_id, status="completed", progress=100, message=f"Found {len(analogies)} analogies")
+        track_workflow_complete(task_id, "synthesis", ["pattern_match", "graph_update"], 0)
+
         return {
             "status": "synthesized",
+            "run_id": task_id,
             "analogies_found": len(analogies),
             "analogies": analogies
         }

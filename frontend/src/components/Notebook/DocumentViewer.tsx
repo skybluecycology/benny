@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 import { FileText, Loader, FileCode } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,12 +22,16 @@ export default function DocumentViewer() {
       setError(null);
       try {
         if (activeDocument.subdir === 'rag_status') {
-          const res = await fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`);
+          const res = await fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`, {
+            headers: { ...GOVERNANCE_HEADERS }
+          });
           if (!res.ok) throw new Error('Failed to fetch ChromaDB status');
           const data = await res.json();
           setContent(JSON.stringify(data, null, 2));
         } else {
-          const response = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${activeDocument.subdir}/${activeDocument.name}`);
+          const response = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${activeDocument.subdir}/${activeDocument.name}`, {
+            headers: { ...GOVERNANCE_HEADERS }
+          });
           if (!response.ok) throw new Error('Failed to fetch document');
           
           const text = await response.text();

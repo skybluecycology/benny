@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader, User, Bot, FileText, AlertCircle } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -39,7 +39,10 @@ export const NotebookChat: React.FC = () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/rag/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({
           query: userMessage,
           workspace: currentWorkspace,

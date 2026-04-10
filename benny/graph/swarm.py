@@ -102,7 +102,7 @@ def get_skill_content(skill_name: str) -> Optional[str]:
 # NODE: PLANNER (Bricoleur)
 # =============================================================================
 
-def planner_node(state: SwarmState) -> Dict[str, Any]:
+async def planner_node(state: SwarmState) -> Dict[str, Any]:
     """
     Planner node - decomposes request into tasks.
     Acts as a "bricoleur" by looking for existing skills first.
@@ -264,7 +264,7 @@ def dispatcher_node(state: SwarmState) -> List[Send]:
 # NODE: EXECUTOR (Code Execution Pattern)
 # =============================================================================
 
-def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Executor node - executes a single task.
     Implements Code Execution pattern: generates executable approach.

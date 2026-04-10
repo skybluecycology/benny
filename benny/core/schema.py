@@ -5,6 +5,7 @@ Global Schema - Pydantic models for workspace manifests, governance, and synthes
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional, Literal
 from enum import Enum
+from datetime import datetime
 
 
 # =============================================================================
@@ -128,3 +129,45 @@ class WorkspaceManifest(BaseModel):
                 "synthesis": {"max_context_tokens": 2000, "min_confidence": 0.5}
             }
         }
+
+
+# =============================================================================
+# AGENT GOVERNANCE
+# =============================================================================
+
+class AgentManifest(BaseModel):
+    """Formalized class blueprint for an agent node."""
+    name: str
+    persona: str
+    tools_allowed: List[str] = Field(default_factory=list)
+    memory_collections: List[str] = Field(default_factory=list)
+    token_budget: int = 0
+    access_scope: str = "workspace"
+
+
+# =============================================================================
+# TASK MANAGEMENT
+# =============================================================================
+
+class TaskStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Task(BaseModel):
+    """Audit record for a long-running process."""
+    task_id: str
+    workspace: str
+    type: str  # indexing, synthesis, etl, workflow
+    status: TaskStatus = TaskStatus.QUEUED
+    progress: int = 0  # 0-100
+    total_steps: int = 0
+    current_step: int = 0
+    message: str = ""
+    aer_log: List[Dict[str, Any]] = Field(default_factory=list, description="Agent Execution Record narrative")
+    lineage_run_id: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())

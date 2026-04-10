@@ -214,9 +214,9 @@ def adaptive_truncate(text: str, max_tokens: int = 1500) -> str:
 async def call_llm(
     prompt: str,
     provider: str = "lemonade",
-    model: str = None,
     timeout: Optional[float] = None,
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    run_id: Optional[str] = None
 ) -> str:
     """
     Consolidated LLM call with retry and exponential backoff.
@@ -247,7 +247,8 @@ async def call_llm(
                 model=full_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                timeout=timeout
+                timeout=timeout,
+                run_id=run_id
             )
         except Exception as e:
             last_error = e
@@ -393,7 +394,8 @@ async def extract_triples(
     provider: str = "lemonade",
     model: str = None,
     timeout: Optional[float] = None,
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    run_id: Optional[str] = None
 ) -> List[KnowledgeTriple]:
     """
     Extract knowledge triples from text using the configured LLM.
@@ -403,7 +405,7 @@ async def extract_triples(
     safe_text = adaptive_truncate(text, cfg.max_context_tokens)
     prompt = TRIPLE_EXTRACTION_PROMPT.format(text=safe_text)
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
     raw_triples = _parse_json_from_llm(raw)
     return _validate_and_convert_triples(raw_triples, config=cfg)
 
@@ -440,7 +442,7 @@ async def extract_directed_triples_from_section(
         text=safe_text
     )
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
     raw_triples = _parse_json_from_llm(raw)
     return _validate_and_convert_triples(raw_triples, section_title=section_title, config=cfg)
 
@@ -450,11 +452,10 @@ async def parallel_extract_triples(
     direction: str = "",
     provider: str = "lemonade",
     model: str = None,
-    parallel_limit: int = 4,
-    inference_delay: float = 0.5,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
-    event_callback: Optional[Any] = None
+    event_callback: Optional[Any] = None,
+    run_id: Optional[str] = None
 ) -> List[KnowledgeTriple]:
     """
     Process multiple document sections in parallel for high-performance ingestion.
@@ -483,7 +484,8 @@ async def parallel_extract_triples(
                 model=model,
                 inference_delay=inference_delay,
                 timeout=timeout,
-                config=cfg
+                config=cfg,
+                run_id=run_id
             )
 
     # Launch parallel tasks
@@ -522,7 +524,8 @@ async def detect_conflicts(
     provider: str = "lemonade",
     model: str = None,
     timeout: Optional[float] = None,
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    run_id: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """Detect logical conflicts between existing and new triples."""
     cfg = config or SynthesisConfig()
@@ -549,7 +552,7 @@ async def detect_conflicts(
     )
 
     try:
-        raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg)
+        raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
         conflicts = _parse_json_from_llm(raw)
 
         if not isinstance(conflicts, list):
@@ -570,13 +573,14 @@ async def find_synthesis(
     provider: str = "lemonade",
     model: str = None,
     timeout: Optional[float] = None,
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    run_id: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """Find structural isomorphisms in the knowledge graph."""
     cfg = config or SynthesisConfig()
     prompt = SYNTHESIS_PROMPT.format(graph_summary=graph_summary)
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
     analogies = _parse_json_from_llm(raw)
 
     if not isinstance(analogies, list):
@@ -590,9 +594,9 @@ async def cross_domain_analogy(
     relationships: str,
     target_domain: str,
     provider: str = "lemonade",
-    model: str = None,
     timeout: Optional[float] = None,
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    run_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """Map a concept into a different domain."""
     cfg = config or SynthesisConfig()
@@ -602,7 +606,7 @@ async def cross_domain_analogy(
         target_domain=target_domain
     )
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
     result = _parse_json_from_llm(raw)
 
     if isinstance(result, dict):

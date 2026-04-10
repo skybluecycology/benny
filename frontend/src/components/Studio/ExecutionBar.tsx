@@ -4,7 +4,7 @@ import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import WorkflowExportImport from './WorkflowExportImport';
 import ActiveLLMBadge from './ActiveLLMBadge';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface ExecutionBarProps {
   onNavigateToLLM?: () => void;
@@ -60,7 +60,10 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/workflows/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ 
           nodes, 
           edges,
@@ -125,7 +128,10 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/workflow/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ 
           workflow: 'swarm',
           workspace: currentWorkspace,
@@ -187,7 +193,10 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/workflows`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({
           name,
           description: '',

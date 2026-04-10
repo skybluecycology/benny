@@ -12,6 +12,9 @@ from litellm import completion
 
 from ..core.workspace import get_workspace_path
 from ..tools.knowledge import get_chromadb_client
+from ..core.models import call_model, get_model_config
+from ..governance.lineage import track_workflow_start, track_workflow_complete, track_llm_call
+import uuid
 
 
 router = APIRouter()
@@ -220,8 +223,22 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
         # Build prompt with context and history
         prompt = build_prompt(request.message, context, history)
         
+        # Unified Audit Tracking
+        run_id = f"chat_{str(uuid.uuid4())[:12]}"
+        track_workflow_start(
+            run_id, 
+            "notebook_chat", 
+            workspace,
+            inputs=[f"session_{request.session_id}"] + ([c.get("title") for c in context] if context else []),
+            outputs=[f"chat_reply_{run_id}"]
+        )
+
         # Call LLM
         try:
+            # We use call_model to get automatic auditing if we can,
+            # but since chat_routes uses completion directly, we'll keep it for now 
+            # and just call track_llm_call manually to ensure full visibility.
+            
             response = completion(
                 model="openai/gpt-3.5-turbo",  # Uses OPENAI_API_BASE env var
                 messages=[{"role": "user", "content": prompt}],
@@ -229,6 +246,23 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
             )
             
             assistant_message = response.choices[0].message.content
+            
+            # Record LLM call to Governance Log
+            track_llm_call(
+                parent_run_id=run_id,
+                model="gpt-3.5-turbo",
+                provider="openai",
+                usage=response.get("usage"),
+                parent_job_name="notebook_chat"
+            )
+            
+            track_workflow_complete(
+                run_id, 
+                "notebook_chat", 
+                ["rag_retrieval", "generation"], 
+                0,
+                outputs=[f"chat_reply_{run_id}"]
+            )
             
         except Exception as e:
             # Fallback if LLM fails

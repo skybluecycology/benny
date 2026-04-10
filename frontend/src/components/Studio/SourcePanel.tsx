@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Upload, File, FileText, Trash2, Loader, Download, Terminal, Link, Book } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface SourceFile {
   name: string;
@@ -33,7 +33,9 @@ export default function DataManagementPanel() {
     if (ingesting || showLogs) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/rag/logs?workspace=${currentWorkspace}`);
+          const res = await fetch(`${API_BASE_URL}/api/rag/logs?workspace=${currentWorkspace}`, {
+            headers: { ...GOVERNANCE_HEADERS }
+          });
           const data = await res.json();
           setIngestLogs(data.logs || []);
           logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,7 +58,9 @@ export default function DataManagementPanel() {
 
   const fetchIndexedStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`);
+      const response = await fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (!response.ok) return;
       const data = await response.json();
       setIndexedFiles(data.sources || data.documents || []);
@@ -68,7 +72,9 @@ export default function DataManagementPanel() {
 
   const fetchFiles = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files?workspace=${currentWorkspace}`);
+      const response = await fetch(`${API_BASE_URL}/api/files?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       const data = await response.json();
       setInFiles(data.data_in || []);
       setOutFiles(data.data_out || []);
@@ -107,6 +113,7 @@ export default function DataManagementPanel() {
         if (file.name.toLowerCase().endsWith('.pdf')) {
           const res = await fetch(`${API_BASE_URL}/api/etl/stage-and-convert?workspace=${currentWorkspace}`, {
             method: 'POST',
+            headers: { ...GOVERNANCE_HEADERS },
             body: formData
           });
           const data = await res.json();
@@ -114,6 +121,7 @@ export default function DataManagementPanel() {
         } else {
           await fetch(`${API_BASE_URL}/api/files/upload?workspace=${currentWorkspace}`, {
             method: 'POST',
+            headers: { ...GOVERNANCE_HEADERS },
             body: formData
           });
           uploadedCurrent.push(file.name);
@@ -152,7 +160,8 @@ export default function DataManagementPanel() {
   const deleteFile = async (filename: string, subdir: string) => {
     try {
       await fetch(`${API_BASE_URL}/api/files/${filename}?workspace=${currentWorkspace}&subdir=${subdir}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { ...GOVERNANCE_HEADERS }
       });
       fetchFiles();
       const newActive = new Set(activeSources);
@@ -172,7 +181,10 @@ export default function DataManagementPanel() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/files/download-url`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ url, workspace: currentWorkspace })
       });
       if (!res.ok) throw new Error("Download failed");
@@ -192,13 +204,15 @@ export default function DataManagementPanel() {
         try {
           await fetch(`${API_BASE_URL}/api/rag/ingest`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...GOVERNANCE_HEADERS
+            },
             body: JSON.stringify({ 
               workspace: currentWorkspace,
               files: [uploadedFile],
               batch_size: batchSize
             })
-
           });
           alert('File imported and indexed successfully!');
         } catch (error) {
@@ -220,7 +234,10 @@ export default function DataManagementPanel() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/files/download-gutenberg`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ url, workspace: currentWorkspace })
       });
       if (!res.ok) throw new Error("Download failed");
@@ -240,13 +257,15 @@ export default function DataManagementPanel() {
         try {
           await fetch(`${API_BASE_URL}/api/rag/ingest`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...GOVERNANCE_HEADERS
+            },
             body: JSON.stringify({ 
               workspace: currentWorkspace,
               files: [uploadedFile],
               batch_size: batchSize
             })
-
           });
           alert('Gutenberg Book imported and indexed successfully!');
         } catch (error) {
@@ -261,7 +280,9 @@ export default function DataManagementPanel() {
   
   const downloadFile = async (filename: string, subdir: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${subdir}/${filename}`);
+      const response = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${subdir}/${filename}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
@@ -295,7 +316,10 @@ export default function DataManagementPanel() {
     try {
       await fetch(`${API_BASE_URL}/api/rag/ingest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ 
           workspace: currentWorkspace,
           files: Array.from(activeSources),

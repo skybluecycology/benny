@@ -2,6 +2,7 @@
 Benny API Server - FastAPI application with CORS and routers
 """
 
+import json
 import builtins
 
 # Monkey-patch print to prevent UnicodeEncodeError on Windows CP1252 consoles
@@ -16,10 +17,12 @@ def _safe_print(*args, **kwargs):
 
 builtins.print = _safe_print
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
+import os
 
 from contextlib import asynccontextmanager
 from .llm_routes import router as llm_router
@@ -33,6 +36,7 @@ from .studio_executor import router as studio_router
 from .skill_routes import router as skill_router
 from .graph_routes import router as graph_router
 from .workspace_routes import router as workspace_router
+from .task_routes import router as task_router
 
 
 @asynccontextmanager
@@ -55,6 +59,43 @@ async def lifespan(app):
         pass
 
 
+# =============================================================================
+# GOVERNANCE CONFIG
+# =============================================================================
+
+# Whitelist of paths that DO NOT require governance auth 
+# (e.g. Health, Docs, and SSE Progress Streams which lack standard header support)
+GOVERNANCE_WHITELIST = [
+    "/",
+    "/api/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/api/graph/ingest/events"
+]
+
+class GovHeaderMiddleware(BaseHTTPMiddleware):
+    """
+    Cognitive Mesh Governance Middleware - Enforces X-Benny-API-Key requirement.
+    """
+    async def dispatch(self, request: Request, call_next):
+        # 1. Configurable Whitelist Check
+        path = request.url.path
+        if any(path.startswith(w) for w in GOVERNANCE_WHITELIST):
+            return await call_next(request)
+            
+        # 2. Hardcoded Key Enforcement (Security Tier 1)
+        api_key = request.headers.get("X-Benny-API-Key")
+        if api_key != "benny-mesh-2026-auth":
+            return Response(
+                content=json.dumps({"detail": f"Governance violation: Invalid or missing X-Benny-API-Key at {path}"}),
+                status_code=403,
+                media_type="application/json"
+            )
+            
+        return await call_next(request)
+
+
 app = FastAPI(
     title="Benny API",
     description="Deterministic Graph Workflow Platform with Multi-Model AI Orchestration",
@@ -64,10 +105,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for frontend development
+# Add Governance Middleware
+app.add_middleware(GovHeaderMiddleware)
+
+# Restricted CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,6 +129,7 @@ app.include_router(studio_router, prefix="/api", tags=["Studio"])
 app.include_router(skill_router, prefix="/api", tags=["Skills"])
 app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
 app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace Settings"])
+app.include_router(task_router, prefix="/api", tags=["Task Governance"])
 
 
 @app.get("/")
@@ -112,5 +157,6 @@ if workspace_path.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8005, reload=True)
+    # Cognitive Mesh Security: Bind to loopback only by default
+    uvicorn.run(app, host="127.0.0.1", port=8005, reload=True)
 

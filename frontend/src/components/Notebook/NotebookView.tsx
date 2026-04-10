@@ -3,10 +3,11 @@ import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { NotebookChat } from './NotebookChat';
 import { AnalysisView } from './AnalysisView';
 import { ArtifactLibrary } from './ArtifactLibrary';
-import { MessageSquare, BarChart2, Library } from 'lucide-react';
+import WorkspaceActivityLog from './WorkspaceActivityLog';
+import { MessageSquare, BarChart2, Library, Activity } from 'lucide-react';
 
 export const NotebookView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'analysis' | 'library'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'analysis' | 'library' | 'activity'>('chat');
   const { synthesisResults } = useWorkspaceStore();
 
   return (
@@ -88,6 +89,29 @@ export const NotebookView: React.FC = () => {
           <Library size={16} />
           Library
         </button>
+        <button 
+          onClick={() => setActiveTab('activity')}
+          className={`tab-btn-pill ${activeTab === 'activity' ? 'active' : ''}`}
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            padding: '10px',
+            borderRadius: 'var(--radius-pill)',
+            border: 'none',
+            background: activeTab === 'activity' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'activity' ? 'white' : 'var(--text-secondary)',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          <Activity size={16} />
+          Activity
+        </button>
       </div>
 
       {/* Main Column Content */}
@@ -95,6 +119,7 @@ export const NotebookView: React.FC = () => {
         {activeTab === 'chat' && <NotebookChat />}
         {activeTab === 'analysis' && <AnalysisView results={synthesisResults} />}
         {activeTab === 'library' && <ArtifactLibrary />}
+        {activeTab === 'activity' && <WorkspaceActivityLog />}
       </div>
     </div>
   );

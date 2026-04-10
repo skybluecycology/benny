@@ -3,7 +3,7 @@ import { X, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useLLMStatus } from '../../hooks/useLLMStatus';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface Skill {
   id: string;
@@ -35,7 +35,9 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
       if (node && node.type === 'llm') {
         const fetchSkills = async () => {
           try {
-            const res = await fetch(`${API_BASE_URL}/api/skills?workspace=${currentWorkspace || 'default'}`);
+            const res = await fetch(`${API_BASE_URL}/api/skills?workspace=${currentWorkspace || 'default'}`, {
+              headers: { ...GOVERNANCE_HEADERS }
+            });
             if (res.ok) {
               const data = await res.json();
               setAvailableSkills(data.skills || []);

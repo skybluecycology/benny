@@ -14,16 +14,19 @@ import SwarmStatePanel from './components/Studio/SwarmStatePanel';
 import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
 import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
 import SynthesisPanel from './components/Notebook/SynthesisPanel';
+import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { useWorkspaceStore } from './hooks/useWorkspaceStore';
-import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight } from 'lucide-react';
+import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
 
-type View = 'studio' | 'notebook' | 'llm';
+type View = 'studio' | 'notebook' | 'llm' | 'admin';
 
 import WorkspaceSelector from './components/Shared/WorkspaceSelector';
+import SidebarTabs from './components/Studio/SidebarTabs';
 
 function App() {
   const [view, setView] = useState<View>('studio');
+  const [sidebarTab, setSidebarTab] = useState<'flows' | 'agents' | 'nodes' | 'sources'>('flows');
   const [showResults, setShowResults] = useState(false);
   const swarmExecutionId = useWorkflowStore((state) => state.swarmExecutionId);
   const [swarmConfig, setSwarmConfig] = useState({
@@ -118,13 +121,21 @@ function App() {
           >
             <BookOpen size={20} />
           </button>
-          
+
           <button 
             className={`nav-rail-item ${view === 'llm' ? 'active' : ''}`}
             onClick={() => setView('llm')}
-            title="LLM Config"
+            title="LLM Manager"
           >
             <Cpu size={20} />
+          </button>
+          
+          <button 
+            className={`nav-rail-item ${view === 'admin' ? 'active' : ''}`}
+            onClick={() => setView('admin')}
+            title="Mesh Governance"
+          >
+            <Shield size={20} />
           </button>
 
           <div style={{ flex: 1 }} />
@@ -139,20 +150,32 @@ function App() {
         </div>
 
         {/* 2. Left Contextual Sidebar */}
-        <div className={`context-sidebar ${!isLeftPaneOpen ? 'collapsed' : ''}`}>
-          {/* Studio Sidebar - Workflows + Node Palette + Swarm */}
+        <div className={`context-sidebar ${!isLeftPaneOpen ? 'collapsed' : ''}`} style={{ width: `${leftPanelWidth}px` }}>
+          {/* Studio Sidebar - Tabbed view */}
           {view === 'studio' && (
-            <div className="studio-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="studio-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
               <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
                   <WorkspaceSelector />
               </div>
-              <WorkflowList />
-              <SwarmConfigPanel 
-                config={swarmConfig}
-                onChange={setSwarmConfig}
-              />
-              <SwarmStatePanel executionId={swarmExecutionId} />
-              <NodePalette />
+              
+              <SidebarTabs activeTab={sidebarTab} onTabChange={setSidebarTab} />
+              
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {sidebarTab === 'flows' && <WorkflowList mode="flows" />}
+                {sidebarTab === 'agents' && <WorkflowList mode="agents" />}
+                {sidebarTab === 'nodes' && <NodePalette />}
+                {sidebarTab === 'sources' && <SourcePanel />}
+              </div>
+
+              {(sidebarTab === 'flows' || sidebarTab === 'agents') && (
+                <div style={{ borderTop: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.1)' }}>
+                  <SwarmConfigPanel 
+                    config={swarmConfig}
+                    onChange={setSwarmConfig}
+                  />
+                  <SwarmStatePanel executionId={swarmExecutionId} />
+                </div>
+              )}
             </div>
           )}
 
@@ -218,6 +241,7 @@ function App() {
           )}
           
           {view === 'llm' && <LLMManager />}
+          {view === 'admin' && <GlobalAdminDashboard />}
 
           {(view === 'studio' || view === 'notebook') && (
             <button 

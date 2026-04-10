@@ -21,7 +21,10 @@ services:
     volumes:
       - marquez-db-data:/var/lib/postgresql/data
     networks:
-      - benny-network
+      benny-network:
+        aliases:
+          - marquez-db
+          - benny-marquez-db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U marquez"]
       interval: 10s
@@ -38,7 +41,7 @@ services:
       - "5001:5001" # Admin endpoint
     environment:
       - MARQUEZ_CONFIG=/etc/marquez/marquez.yml
-      - POSTGRES_HOST=marquez-db
+      - POSTGRES_HOST=benny-marquez-db
       - POSTGRES_PORT=5432
       - POSTGRES_DB=marquez
       - POSTGRES_USER=marquez
@@ -49,7 +52,10 @@ services:
       marquez-db:
         condition: service_healthy
     networks:
-      - benny-network
+      benny-network:
+        aliases:
+          - marquez-api
+          - benny-marquez-api
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/namespaces"]
       interval: 30s
@@ -64,12 +70,15 @@ services:
     ports:
       - "3010:3000" # UI (shifted to avoid frontend conflict)
     environment:
-      - MARQUEZ_HOST=marquez-api
+      - MARQUEZ_HOST=benny-marquez-api
       - MARQUEZ_PORT=5000
     depends_on:
       - marquez-api
     networks:
-      - benny-network
+      benny-network:
+        aliases:
+          - marquez-web
+          - benny-marquez-web
     restart: unless-stopped
 
   # ============================================

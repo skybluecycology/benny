@@ -18,6 +18,7 @@ WORKSPACE_ROOT = Path("workspace")
 def get_workspace_path(workspace_id: str = "default", subdir: str = "") -> Path:
     """
     Get workspace-scoped path for multi-tenant isolation.
+    Strictly validates that the path is within WORKSPACE_ROOT to prevent traversal.
     
     Args:
         workspace_id: Workspace identifier
@@ -26,8 +27,25 @@ def get_workspace_path(workspace_id: str = "default", subdir: str = "") -> Path:
     Returns:
         Absolute path to the workspace directory or subdirectory
     """
-    base = WORKSPACE_ROOT / workspace_id
-    return base / subdir if subdir else base
+    # 1. Resolve potential traversal before joining
+    # We use .absolute() to ensure we aren't tricked by relative paths
+    root_abs = WORKSPACE_ROOT.absolute()
+    
+    # Construct the target path
+    target = root_abs / workspace_id
+    if subdir:
+        target = target / subdir
+        
+    target_abs = target.absolute()
+    
+    # 2. Strict validation: Target must be a child of root_abs
+    try:
+        if os.path.commonpath([str(root_abs), str(target_abs)]) != str(root_abs):
+            raise PermissionError(f"Path traversal attempt detected: {workspace_id}/{subdir}")
+    except ValueError:
+        raise PermissionError(f"Invalid workspace path: {workspace_id}/{subdir}")
+        
+    return target_abs
 
 
 def ensure_workspace_structure(workspace_id: str = "default") -> dict:

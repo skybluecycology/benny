@@ -12,8 +12,13 @@ from ..core.workspace import get_workspace_path
 from ..core.extraction import extract_structured_text
 from ..tools.knowledge import get_chromadb_client
 from ..core.models import LOCAL_PROVIDERS
+from ..core.task_manager import task_manager
+from ..governance.lineage import track_workflow_start, track_workflow_complete, track_aer
+import uuid
+import json
+import logging
 
-import httpx
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -35,12 +40,26 @@ class QueryRequest(BaseModel):
     model: Optional[str] = None
 
 @router.post("/rag/ingest")
-def ingest_files(request: IngestRequest):
+async def ingest_files(request: IngestRequest):
     """Ingest files from data_in into ChromaDB using structured extraction (Docling)."""
+    run_id = str(uuid.uuid4())
+    task = task_manager.create_task(request.workspace, "rag_ingest", task_id=run_id)
+    
+    try:
+        track_workflow_start(run_id, "rag_ingest", request.workspace, inputs=request.files or [])
+        task_manager.add_aer_entry(
+            run_id, 
+            intent=f"Ingesting {len(request.files) if request.files else 'all'} files from data_in",
+            observation="Initialization complete",
+            plan=f"1. Extract text via Docling 2. Chunk 3. Batch upsert to ChromaDB ({collection_name if 'collection_name' in locals() else 'knowledge'})"
+        )
+    except Exception as e:
+        logger.warning("Lineage tracking failed (init): %s", e)
+
     try:
         data_in_path = get_workspace_path(request.workspace, "data_in")
-        
         if not data_in_path.exists():
+            task_manager.update_task(run_id, status="failed", message="No files found in data_in")
             raise HTTPException(404, "No files found in data_in")
         
         # Get files to ingest
@@ -54,106 +73,100 @@ def ingest_files(request: IngestRequest):
         file_paths = [f for f in file_paths if f.suffix.lower() in supported]
         
         if not file_paths:
+            task_manager.update_task(run_id, status="failed", message="No supported files found")
             raise HTTPException(404, "No supported files found")
         
         # Get ChromaDB client
         client = get_chromadb_client(request.workspace)
-        
-        # Use notebook-scoped collection if notebook_id provided
-        if request.notebook_id:
-            collection_name = f"notebook_{request.notebook_id}"
-        else:
-            collection_name = "knowledge"
-        
+        collection_name = f"notebook_{request.notebook_id}" if request.notebook_id else "knowledge"
         collection = client.get_or_create_collection(collection_name)
 
+        # Update task total steps
+        task_manager.update_task(run_id, total_steps=len(file_paths), progress=10)
         
-        # Ingest files
         ingested = []
-        log_file = get_workspace_path(request.workspace) / "ingest.log"
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write("Starting structured ingestion process with Docling...\n")
-        
-        def write_log(msg: str):
-            print(msg)
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-                
-        for file_path in file_paths:
+        for idx, file_path in enumerate(file_paths):
             try:
-                write_log(f"Processing {file_path.name} with structured extraction...")
-                text = extract_structured_text(file_path, log_fn=write_log)
+                msg = f"Processing {file_path.name} ({idx+1}/{len(file_paths)})..."
+                task_manager.update_task(run_id, message=msg, current_step=idx+1)
+                
+                # Emit AER for extraction
+                try:
+                    track_aer(run_id, "rag_ingest", f"Extracting {file_path.name}", "Docling engine started")
+                except Exception:
+                    pass
+                text = extract_structured_text(file_path)
                 
                 # Simple chunking (split by paragraphs)
                 chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
                 
-                # Batch Add to ChromaDB with Cleanup
-                write_log(f"Adding {len(chunks)} chunks to ChromaDB database (Batch Mode, Size: {request.batch_size})...")
                 if chunks:
                     # 1. DELETE old entries for this source to prevent duplicates
-                    try:
-                        collection.delete(where={"source": file_path.name})
-                    except Exception as e:
-                        write_log(f"Warning: Cleanup failed for {file_path.name}: {str(e)}")
+                    collection.delete(where={"source": file_path.name})
 
                     # 2. UPLOAD in batches
                     batch_size = request.batch_size or 500
                     for i in range(0, len(chunks), batch_size):
                         batch_chunks = chunks[i:i + batch_size]
                         batch_ids = [f"{file_path.stem}_{j}" for j in range(i, i + len(batch_chunks))]
-                        batch_metadatas = [{
-                            "source": file_path.name,
-                            "chunk_index": j
-                        } for j in range(i, i + len(batch_chunks))]
+                        batch_metadatas = [{"source": file_path.name, "chunk_index": j} for j in range(i, i + len(batch_chunks))]
                         
-                        collection.add(
-                            documents=batch_chunks,
-                            metadatas=batch_metadatas,
-                            ids=batch_ids
-                        )
-                        write_log(f"  - Committed batch {i // batch_size + 1} ({len(batch_chunks)} chunks)")
-
+                        collection.add(documents=batch_chunks, metadatas=batch_metadatas, ids=batch_ids)
+                        
+                        # Emit AER for commit
+                        perc = (i + len(batch_chunks)) / len(chunks) * 100
+                        try:
+                            track_aer(run_id, "rag_ingest", f"Committing chunks for {file_path.name}", f"Committed {i+len(batch_chunks)}/{len(chunks)} chunks ({perc:.0f}%)")
+                        except Exception:
+                            pass
                 
-                ingested.append({
-                    "file": file_path.name,
-                    "chunks": len(chunks)
-                })
-                write_log(f"Finished {file_path.name} successfully.")
+                ingested.append({"file": file_path.name, "chunks": len(chunks)})
+                task_manager.update_task(run_id, progress=10 + int(90 * (idx+1) / len(file_paths)))
+                
             except Exception as e:
-                write_log(f"Error processing {file_path.name}: {str(e)}")
-                ingested.append({
-                    "file": file_path.name,
-                    "error": str(e)
-                })
+                task_manager.add_aer_entry(run_id, "Error", f"Failed {file_path.name}: {str(e)}")
+                ingested.append({"file": file_path.name, "error": str(e)})
+        
+        task_manager.update_task(run_id, status="completed", progress=100, message="Ingestion finished successfully")
+        try:
+            track_workflow_complete(run_id, "rag_ingest", ["extraction", "chunking", "upsert"], 0, outputs=[f"chromadb:{collection_name}"]) # time tracking not vital here yet
+        except Exception:
+            pass
         
         return {
             "status": "completed",
+            "run_id": run_id,
             "workspace": request.workspace,
             "ingested": ingested,
             "total_documents": collection.count()
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
+        task_manager.update_task(run_id, status="failed", message=str(e))
         raise HTTPException(500, f"Ingestion failed: {str(e)}")
 
 
 @router.get("/rag/logs")
 async def get_rag_logs(workspace: str = "default"):
-    """Get the latest ingestion logs"""
+    """Get the latest ingestion logs from TaskManager."""
     try:
-        log_file = get_workspace_path(workspace) / "ingest.log"
-        if not log_file.exists():
-            return {"logs": ["No ingestion logs found for this workspace."]}
+        tasks = task_manager.list_tasks(workspace)
+        rag_tasks = [t for t in tasks if t.type == "rag_ingest"]
+        if not rag_tasks:
+            return {"logs": ["No ingestion tasks found."]}
+        
+        # Sort by updated_at descending
+        rag_tasks.sort(key=lambda x: x.updated_at, reverse=True)
+        latest = rag_tasks[0]
+        
+        # Translate task state/AER into log format for legacy UI compatibility
+        logs = [f"Task: {latest.task_id} - status: {latest.status}", latest.message]
+        for entry in latest.aer_log[-10:]: # last 10 steps
+            logs.append(f"[{entry['timestamp']}] {entry['intent']}: {entry['observation']}")
             
-        with open(log_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            
-        # Return last 50 lines to prevent huge payload
-        return {"logs": [line.strip() for line in lines[-50:]]}
+        return {"logs": logs}
     except Exception as e:
-        return {"logs": [f"Error reading logs: {str(e)}"]}
+        return {"logs": [f"Error reading task logs: {str(e)}"]}
 
 
 @router.get("/rag/status")

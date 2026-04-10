@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search, Download, ChevronRight, Layers, Eye } from 'lucide-react';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface GraphNode {
   id: string;
@@ -123,8 +123,12 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       }
 
       const [graphRes, statsRes] = await Promise.all([
-        fetch(graphUrl),
-        fetch(`${API_BASE_URL}/api/graph/stats?workspace=${workspace}&t=${timestamp}`)
+        fetch(graphUrl, {
+          headers: { ...GOVERNANCE_HEADERS }
+        }),
+        fetch(`${API_BASE_URL}/api/graph/stats?workspace=${workspace}&t=${timestamp}`, {
+          headers: { ...GOVERNANCE_HEADERS }
+        })
       ]);
 
       if (graphRes.ok) {
@@ -373,7 +377,10 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/cross-domain`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({ concept, target_domain: domain, workspace })
       });
       if (res.ok) {

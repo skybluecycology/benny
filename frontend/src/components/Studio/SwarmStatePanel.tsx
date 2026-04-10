@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy } from 'lucide-react';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface TaskItem {
   task_id: string;
@@ -42,7 +42,9 @@ export default function SwarmStatePanel({ executionId }: SwarmStatePanelProps) {
     
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/workflow/${executionId}/status`);
+      const response = await fetch(`${API_BASE}/workflow/${executionId}/status`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (response.ok) {
         const data = await response.json();
         setState(data);

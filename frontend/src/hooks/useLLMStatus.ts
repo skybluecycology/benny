@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { API_BASE_URL } from '../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../constants';
 
 interface ProviderStatus {
   name: string;
@@ -18,7 +18,9 @@ export function useLLMStatus(pollInterval: number = 10000) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/llm/status`);
+      const resp = await fetch(`${API_BASE_URL}/api/llm/status`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (!resp.ok) throw new Error('Failed to fetch status');
       const data = await resp.json();
       setProviders(data);
@@ -38,7 +40,10 @@ export function useLLMStatus(pollInterval: number = 10000) {
 
   const startProvider = async (provider: string) => {
     try {
-      await fetch(`${API_BASE_URL}/api/llm/${provider}/start`, { method: 'POST' });
+      await fetch(`${API_BASE_URL}/api/llm/${provider}/start`, { 
+        method: 'POST',
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       setTimeout(fetchStatus, 2000);
     } catch (e) {
       console.error('Failed to start provider:', e);
@@ -47,7 +52,10 @@ export function useLLMStatus(pollInterval: number = 10000) {
 
   const stopProvider = async (provider: string) => {
     try {
-      await fetch(`${API_BASE_URL}/api/llm/${provider}/stop`, { method: 'POST' });
+      await fetch(`${API_BASE_URL}/api/llm/${provider}/stop`, { 
+        method: 'POST',
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       setTimeout(fetchStatus, 1000);
     } catch (e) {
       console.error('Failed to stop provider:', e);

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Brain, Upload, Zap, Loader, ChevronDown, ChevronUp, Book, Trash2, Database, AlertTriangle, CheckCircle, XCircle, Eye, BarChart3, Clock } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { useLLMStatus } from '../../hooks/useLLMStatus';
-import { API_BASE_URL } from '../../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface SynthesisPanelProps {
   onGraphUpdated?: () => void;
@@ -80,8 +80,12 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     try {
       const timestamp = Date.now();
       const [statusRes, mappedRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`),
-        fetch(`${API_BASE_URL}/api/graph/sources?workspace=${currentWorkspace}&t=${timestamp}`)
+        fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`, {
+          headers: { ...GOVERNANCE_HEADERS }
+        }),
+        fetch(`${API_BASE_URL}/api/graph/sources?workspace=${currentWorkspace}&t=${timestamp}`, {
+          headers: { ...GOVERNANCE_HEADERS }
+        })
       ]);
       
       if (statusRes.ok) {
@@ -198,6 +202,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/sources/${encodeURIComponent(doc)}?workspace=${currentWorkspace}`, {
         method: 'DELETE',
+        headers: { ...GOVERNANCE_HEADERS }
       });
       if (res.ok) {
         if (onGraphUpdated) onGraphUpdated();
@@ -222,7 +227,10 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/ingest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({
           text: ingestText,
           source_name: sourceName || 'manual',
@@ -275,7 +283,10 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/ingest-files`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({
           files: selectedDocuments,
           workspace: currentWorkspace,
@@ -315,7 +326,10 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/synthesize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS
+        },
         body: JSON.stringify({
           workspace: currentWorkspace,
           provider: activeLLMProvider,

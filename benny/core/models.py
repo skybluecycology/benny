@@ -6,6 +6,7 @@ import os
 from typing import Optional, Dict, Any, List
 from litellm import completion
 from .litert_engine import LiteRTEngine
+from ..governance.lineage import track_llm_call
 
 
 # =============================================================================
@@ -200,7 +201,13 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
             provider = parts[0]
             model = parts[1]
         else:
-            provider = "openai"
+            # Heuristic: If it looks like a local model (GGUF, FLM, -it), 
+            # and no provider is specified, default to lemonade.
+            local_hints = ["gguf", "flm", "it-", "llama3", "phi-3"]
+            if any(hint in model_id.lower() for hint in local_hints):
+                provider = "lemonade"
+            else:
+                provider = "openai"
             model = model_id
     
     config = {
@@ -213,6 +220,12 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         local_config = LOCAL_PROVIDERS[provider]
         config["base_url"] = local_config["base_url"]
         config["api_key"] = local_config["api_key"]
+    # Fallback: if we defaulted to openai but have lemonade running, it might be that.
+    elif provider == "openai" and any(hint in model_id.lower() for hint in ["gguf", "flm"]):
+         config["provider"] = "lemonade"
+         local_config = LOCAL_PROVIDERS["lemonade"]
+         config["base_url"] = local_config["base_url"]
+         config["api_key"] = local_config["api_key"]
     
     return config
 
@@ -223,7 +236,8 @@ async def call_model(
     temperature: float = 0.7,
     max_tokens: int = 1000,
     fallbacks: Optional[List[str]] = None,
-    timeout: Optional[float] = None
+    timeout: Optional[float] = None,
+    run_id: Optional[str] = None
 ) -> str:
     """
     Call LLM with fallback support.
@@ -269,6 +283,15 @@ async def call_model(
                     api_key=lemonade_config["api_key"],
                     temperature=temperature
                 )
+                
+                # Track fallback call
+                if run_id:
+                    track_llm_call(
+                        parent_run_id=run_id,
+                        model=target_model,
+                        provider="lemonade",
+                        usage=response.get("usage")
+                    )
                 return response.choices[0].message.content
 
             return await LiteRTEngine.generate(prompt=messages[-1]["content"], model_path=model_path)
@@ -277,18 +300,27 @@ async def call_model(
                 raise e
             print(f"LiteRT inference failed, trying fallbacks: {e}")
 
+    print(f"DEBUG: call_model(model='{model}', ...)")
     try:
         config = get_model_config(model)
+        print(f"DEBUG: get_model_config result: {config}")
         
-        provider = config.get("provider", "openai")
+        provider = config.get("provider", "openai").lower()
         litellm_model = config["model"]
         
-        # LiteLLM needs generic local providers to be prefixed with openai/
-        # so it uses the OpenAI spec client to hit the custom base_url.
-        if provider in ["lemonade", "fastflowlm", "lmstudio"]:
+        # Aggressive prefixing for known local providers
+        local_mapping = ["lemonade", "fastflowlm", "lmstudio", "ollama"]
+        if provider in local_mapping or "base_url" in config:
             if not litellm_model.startswith("openai/"):
-                litellm_model = f"openai/{litellm_model}"
-                
+                # Always force openai/ prefix for local servers with custom base_url
+                # LiteLLM needs this to trigger the OpenAI client
+                if "/" in litellm_model:
+                    # if it was 'lemonade/gemma', change to 'openai/gemma'
+                    litellm_model = f"openai/{litellm_model.split('/')[-1]}"
+                else:
+                    litellm_model = f"openai/{litellm_model}"
+                print(f"DEBUG: Transform to litellm_model='{litellm_model}'")
+        
         kwargs = {
             "model": litellm_model,
             "messages": messages,
@@ -301,21 +333,42 @@ async def call_model(
             kwargs["api_base"] = config["base_url"]
         if "api_key" in config and config["api_key"]:
             kwargs["api_key"] = config["api_key"]
+        
+        if timeout:
+            kwargs["timeout"] = timeout
             
         from litellm import completion
+        print(f"DEBUG: FINAL LiteLLM call: completion(model='{litellm_model}', api_base='{kwargs.get('api_base')}')")
         response = completion(**kwargs)
+        
+        # Unified Audit Tracking
+        if run_id:
+            try:
+                track_llm_call(
+                    parent_run_id=run_id,
+                    model=litellm_model,
+                    provider=provider,
+                    usage=response.get("usage")
+                )
+            except Exception as audit_err:
+                print(f"DEBUG: Audit tracking failed: {audit_err}")
+
         return response.choices[0].message.content
     except Exception as e:
-        if fallbacks:
+        print(f"DEBUG: call_model failed: {e}")
+        if fallbacks and len(fallbacks) > 0:
+            print(f"DEBUG: Primary model failed, trying fallbacks: {fallbacks}")
             for fallback in fallbacks:
                 try:
-                    response = completion(
+                    # Recursive call to call_model for fallback to ensure it gets same routing logic
+                    return await call_model(
                         model=fallback,
                         messages=messages,
                         temperature=temperature,
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        run_id=run_id
                     )
-                    return response.choices[0].message.content
                 except:
                     continue
         raise e

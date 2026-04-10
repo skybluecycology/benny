@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { API_BASE_URL } from '../constants';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../constants';
 
 interface WorkspaceState {
   currentWorkspace: string;
@@ -28,7 +28,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   fetchWorkspaces: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/workspaces`);
+      const response = await fetch(`${API_BASE_URL}/api/workspaces`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (response.ok) {
         const data = await response.json();
         const rawList = Array.isArray(data) ? data : (data.workspaces || []);
@@ -51,7 +53,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   createWorkspace: async (name: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/workspaces/${name}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { ...GOVERNANCE_HEADERS }
       });
       
       if (response.ok) {
@@ -113,7 +116,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   fetchSynthesisHistory: async () => {
     const { currentWorkspace } = get();
     try {
-      const response = await fetch(`${API_BASE_URL}/api/graph/history?workspace=${currentWorkspace}`);
+      const response = await fetch(`${API_BASE_URL}/api/graph/history?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
       if (response.ok) {
         const data = await response.json();
         set({ synthesisHistory: data.history || [] });
@@ -127,7 +132,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { currentWorkspace } = get();
     try {
       const response = await fetch(`${API_BASE_URL}/api/graph/runs/${runId}?workspace=${currentWorkspace}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { ...GOVERNANCE_HEADERS }
       });
       if (response.ok) {
         await get().fetchSynthesisHistory();

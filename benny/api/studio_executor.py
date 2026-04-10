@@ -10,9 +10,10 @@ from pathlib import Path
 from datetime import datetime
 import httpx
 
-from ..core.workspace import get_workspace_path
-from ..tools.knowledge import get_chromadb_client
-from ..core.models import LOCAL_PROVIDERS
+from ..core.models import LOCAL_PROVIDERS, call_model
+from ..governance.lineage import track_workflow_start, track_workflow_complete, track_llm_call, track_tool_execution
+from ..core.task_manager import task_manager
+import uuid
 
 
 router = APIRouter()
@@ -168,7 +169,7 @@ async def execute_data_node(node: StudioNode, context: Dict, workspace: str) -> 
     return {"error": f"Unknown data operation: {operation}"}
 
 
-async def execute_llm_node(node: StudioNode, context: Dict, workspace: str) -> Dict:
+async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_id: Optional[str] = None) -> Dict:
     """
     Execute an LLM Agent node with tool-calling capabilities.
     The agent receives attached skills and autonomously decides to call them.
@@ -252,7 +253,18 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str) -> D
 
             data = response.json()
             message = data["choices"][0]["message"]
-            total_tokens += data.get("usage", {}).get("total_tokens", 0)
+            usage = data.get("usage", {})
+            total_tokens += usage.get("total_tokens", 0)
+
+            # Record LLM call to Governance Log
+            if run_id:
+                track_llm_call(
+                    parent_run_id=run_id,
+                    model=model_name,
+                    provider="lemonade", 
+                    usage=usage,
+                    parent_job_name="studio_workflow"
+                )
 
             # Record assistant message
             messages.append(message)
@@ -273,6 +285,16 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str) -> D
                     # Run the skill via registry
                     result_str = registry.execute_skill(func_name, workspace, **args)
                     executed_tools.append({"name": func_name, "args": args})
+
+                    # Track tool execution in audit log
+                    if run_id:
+                        track_tool_execution(
+                            parent_run_id=run_id,
+                            tool_name=func_name,
+                            tool_args=args, # Refactored to tool_args
+                            success=True,
+                            parent_job_name="studio_workflow"
+                        )
 
                     # Add tool response to messages
                     messages.append({
@@ -311,6 +333,16 @@ async def execute_studio_workflow(request: StudioExecuteRequest):
     # Sort nodes in execution order
     sorted_nodes = topological_sort(request.nodes, request.edges)
 
+    run_id = f"studio_{str(uuid.uuid4())[:12]}"
+    task_manager.create_task(request.workspace, "studio_workflow", task_id=run_id)
+    track_workflow_start(
+        run_id, 
+        "studio_workflow", 
+        request.workspace,
+        inputs=[f"node_{n.id}" for n in request.nodes],
+        outputs=[f"studio_run_{run_id}"]
+    )
+
     # Execution context — accumulates outputs between nodes
     context: Dict[str, Any] = {
         "message": request.message or "",
@@ -337,7 +369,7 @@ async def execute_studio_workflow(request: StudioExecuteRequest):
                     artifact_path = output.get("path")
 
             elif node.type == "llm":
-                output = await execute_llm_node(node, context, request.workspace)
+                output = await execute_llm_node(node, context, request.workspace, run_id=run_id)
                 # Propagate LLM output forward for downstream nodes
                 if output.get("response"):
                     context["llm_output"] = output["response"]
@@ -369,7 +401,11 @@ async def execute_studio_workflow(request: StudioExecuteRequest):
                 error=str(e)
             ))
 
-    overall_status = "completed" if all(r.status == "success" for r in node_results) else "partial"
+    overall_status = "completed" if all(r.status == "success" for r in node_results) else "failed"
+
+    # Finalize Audit
+    task_manager.update_task(run_id, status=overall_status, progress=100)
+    track_workflow_complete(run_id, "studio_workflow", [r.node_type for r in node_results], 0)
 
     return StudioExecuteResponse(
         status=overall_status,
