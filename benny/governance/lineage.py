@@ -12,7 +12,7 @@ import json
 import httpx
 
 from openlineage.client import OpenLineageClient
-from openlineage.client.run import Run, RunEvent, RunState, Job
+from openlineage.client.run import Run, RunEvent, RunState, Job, InputDataset, OutputDataset
 from openlineage.client.facet import (
     BaseFacet,
     SqlJobFacet,
@@ -278,6 +278,45 @@ class BennyLineageClient:
         self.client.emit(event)
         return run.runId
 
+    # -------------------------------------------------------------------------
+    # Dataset Transformation Events
+    # -------------------------------------------------------------------------
+    
+    def emit_file_conversion(
+        self,
+        input_path: str,
+        output_path: str,
+        workspace: str,
+        job_name: str = "pdf_to_markdown"
+    ) -> str:
+        """Emit event for a file format transformation / ETL step"""
+        run = self._create_run()
+        
+        job = self._create_job(job_name=f"etl.{job_name}_{workspace}")
+        
+        # Define the input and output datasets
+        input_dataset = InputDataset(
+            namespace=self.namespace,
+            name=input_path
+        )
+        
+        output_dataset = OutputDataset(
+            namespace=self.namespace,
+            name=output_path
+        )
+        
+        event = RunEvent(
+            eventType=RunState.COMPLETE,
+            eventTime=datetime.now(timezone.utc).isoformat(),
+            run=run,
+            job=job,
+            inputs=[input_dataset],
+            outputs=[output_dataset]
+        )
+        
+        self.client.emit(event)
+        return run.runId
+
 
 # =============================================================================
 # GLOBAL CLIENT INSTANCE
@@ -337,4 +376,16 @@ def track_tool_execution(
     """Track tool execution - convenience function"""
     return get_lineage_client().emit_tool_execution(
         parent_run_id, tool_name, tool_args, success, error_message
+    )
+
+
+def track_file_conversion(
+    input_path: str,
+    output_path: str,
+    workspace: str,
+    job_name: str = "pdf_to_markdown"
+) -> str:
+    """Track a file format transformation - convenience function"""
+    return get_lineage_client().emit_file_conversion(
+        input_path, output_path, workspace, job_name
     )

@@ -10,7 +10,7 @@
 | -------------- | ------------------------------- | ----------------------------------- |
 | **Ollama**     | General use, wide model support | `docker-compose up -d ollama`       |
 | **LM Studio**   | Easy GUI, great for testing     | Start via Desktop app (port 1234)   |
-| **Lemonade**   | AMD NPU acceleration            | `lemonade-server serve --port 8080` |
+| **Lemonade**   | AMD NPU acceleration            | `LemonadeServer.exe serve --port 13305` |
 | **FastFlowLM** | Intel NPU acceleration          | Manual start on port 52625          |
 
 
@@ -68,18 +68,18 @@ For AMD Ryzen AI processors with NPU acceleration.
 ### Start Server
 
 ```bash
-lemonade-server serve --port 8080
+LemonadeServer.exe serve --port 13305
 ```
 
 ### API Endpoint
 
-- **URL**: http://localhost:8080/api/v1
+- **URL**: http://localhost:13305/api/v1
 - **API Key**: `not-needed`
 
 ### Test Connection
 
 ```bash
-curl http://localhost:8080/api/v1/models
+curl http://localhost:13305/api/v1/models
 ```
 
 ### Recommended Models
@@ -169,7 +169,7 @@ curl http://localhost:1234/v1/models
 from benny.config import configure_local_provider
 
 # Option 1: Lemonade (default)
-configure_local_provider("lemonade", port=8080)
+configure_local_provider("lemonade", port=13305)
 
 # Option 2: Ollama
 configure_local_provider("ollama", port=11434)
@@ -190,7 +190,7 @@ export OPENAI_API_BASE=http://localhost:11434/v1
 export OPENAI_API_KEY=ollama
 
 # For Lemonade
-export OPENAI_API_BASE=http://localhost:8080/api/v1
+export OPENAI_API_BASE=http://localhost:13305/api/v1
 export OPENAI_API_KEY=not-needed
 
 # For FastFlowLM
@@ -239,11 +239,11 @@ docker-compose restart ollama
 
 ```bash
 # Check if port is in use
-netstat -ano | findstr 8080
+netstat -ano | findstr 13305
 
 # Kill existing process and restart
 taskkill /F /PID <pid>
-lemonade-server serve --port 8080
+LemonadeServer.exe serve --port 13305
 ```
 
 ### Model Not Found

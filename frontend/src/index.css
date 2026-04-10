@@ -6,58 +6,56 @@
    CSS Variables - Color Palette & Tokens
    ----------------------------------------------------------------------------- */
 :root {
-  /* Background colors */
-  --bg-canvas: #0f0f1a;
-  --bg-panel: #1a1a2e;
-  --bg-card: #16213e;
-  --bg-hover: #1f2a4a;
-  --bg-input: #0e1628;
+  /* Background colors (InfraNodus High Contrast) */
+  --bg-canvas: #0a0a0f;
+  --bg-panel: #12121e;
+  --bg-card: #18182b;
+  --bg-hover: #21213d;
+  --bg-input: #080812;
 
   /* Text colors */
-  --text-primary: #f4f4f8;
-  --text-secondary: #a0a0b0;
-  --text-muted: #606070;
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0c0;
+  --text-muted: #6e6e80;
 
-  /* Accent colors (by node type) */
-  --accent-trigger: #4ade80;
-  --accent-llm: #a78bfa;
-  --accent-tool: #60a5fa;
-  --accent-logic: #fb923c;
-  --accent-data: #2dd4bf;
-  --accent-error: #f87171;
-  --accent-success: #22c55e;
+  /* MindNode Branch Palette */
+  --branch-teal: #4dbbff;
+  --branch-purple: #a56eff;
+  --branch-orange: #ff9f0a;
+  --branch-blue: #007aff;
+  --branch-pink: #ff3b30;
+  --branch-green: #34c759;
+  
+  /* Continent Backgrounds (Transparent) */
+  --continent-teal: rgba(77, 187, 255, 0.08);
+  --continent-purple: rgba(165, 110, 255, 0.08);
+  --continent-orange: rgba(255, 159, 10, 0.08);
+  --continent-green: rgba(52, 199, 89, 0.08);
 
-  /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  --gradient-success: linear-gradient(135deg, #22c55e, #4ade80);
-  --gradient-llm: linear-gradient(135deg, #8b5cf6, #d946ef);
+  /* Logic & Intelligence */
+  --accent-bridge: #ffcc00; /* InfraNodus Gap/Bridge */
+  --accent-llm: var(--branch-purple);
+  --accent-error: #ff453a;
+  --accent-success: #32d74b;
 
   /* Borders & Effects */
   --border-color: rgba(255, 255, 255, 0.08);
-  --border-active: rgba(139, 92, 250, 0.5);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(139, 92, 250, 0.3);
+  --border-active: var(--branch-purple);
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 15px rgba(165, 110, 255, 0.3);
 
-  /* Glass effect */
-  --glass-bg: rgba(26, 26, 46, 0.85);
-  --glass-blur: blur(20px);
-
-  /* Sizing */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  /* Sizing (MindNode Pill Design) */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+  --radius-pill: 99px;
   --radius-full: 9999px;
 
   /* Animation */
-  --transition-fast: 0.15s ease-out;
-  --transition-normal: 0.25s ease-out;
-  --transition-slow: 0.4s ease-out;
-
-  /* Node dimensions */
-  --node-width: 200px;
-  --node-min-height: 80px;
+  --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ----------------------------------------------------------------------------- 
@@ -224,14 +222,15 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 18px;
+  padding: 10px 22px;
   font-size: 14px;
-  font-weight: 500;
-  border-radius: var(--radius-md);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
   border: none;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-normal);
   white-space: nowrap;
+  letter-spacing: 0.2px;
 }
 
 .btn:disabled {
@@ -792,7 +791,8 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--gradient-primary);
+  background: var(--branch-purple);
+  border-radius: var(--radius-full);
 }
 
 .config-content {
@@ -2311,3 +2311,104 @@ body {
   color: #10b981;
   border-color: rgba(16, 185, 129, 0.3);
 }
+/* ----------------------------------------------------------------------------- 
+   Dynamic Synthesis Animations (Miro / InfraNodus)
+   ----------------------------------------------------------------------------- */
+@keyframes ai-sparkle {
+  0% { filter: brightness(1) drop-shadow(0 0 0px var(--branch-purple)); }
+  50% { filter: brightness(1.5) drop-shadow(0 0 10px var(--branch-purple)); }
+  100% { filter: brightness(1) drop-shadow(0 0 0px var(--branch-purple)); }
+}
+
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 0px 0px rgba(165, 110, 255, 0.4); }
+  70% { box-shadow: 0 0 0px 15px rgba(165, 110, 255, 0); }
+  100% { box-shadow: 0 0 0px 0px rgba(165, 110, 255, 0); }
+}
+
+@keyframes fly-to-canvas {
+  from { transform: scale(0.1) translate(-100px, 0); opacity: 0; }
+  to { transform: scale(1) translate(0, 0); opacity: 1; }
+}
+
+.sparkle-edge {
+  animation: ai-sparkle 2s ease-in-out infinite;
+}
+
+.pulsate-node {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ----------------------------------------------------------------------------- 
+   Continent Visualization (Atlas Style)
+   ----------------------------------------------------------------------------- */
+.continent-blob {
+  filter: blur(40px);
+  opacity: 0.15;
+  transition: all var(--transition-normal);
+}
+
+.continent-label {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text-muted);
+  opacity: 0.3;
+  pointer-events: none;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+}
+
+/* ----------------------------------------------------------------------------- 
+   Status Tags & Badges
+   ----------------------------------------------------------------------------- */
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.status-tag.indexed {
+  background: rgba(52, 199, 89, 0.1);
+  color: var(--branch-green);
+  border-color: rgba(52, 199, 89, 0.2);
+}
+
+.status-tag.meta {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+}
+
+.status-tag.size {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  font-weight: 500;
+}
+
+.tag-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* Enhancing Source Cards with Tag support */
+.source-card .status-tag {
+  transition: all var(--transition-fast);
+}
+
+.source-card:hover .status-tag.meta {
+  background: rgba(139, 92, 250, 0.1);
+  color: var(--branch-purple);
+  border-color: rgba(139, 92, 250, 0.2);
+}
+

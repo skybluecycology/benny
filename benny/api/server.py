@@ -2,6 +2,20 @@
 Benny API Server - FastAPI application with CORS and routers
 """
 
+import builtins
+
+# Monkey-patch print to prevent UnicodeEncodeError on Windows CP1252 consoles
+_original_print = builtins.print
+
+def _safe_print(*args, **kwargs):
+    try:
+        _original_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        safe_args = [str(a).encode('ascii', 'replace').decode('ascii') for a in args]
+        _original_print(*safe_args, **kwargs)
+
+builtins.print = _safe_print
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,12 +25,14 @@ from contextlib import asynccontextmanager
 from .llm_routes import router as llm_router
 from .workflow_routes import router as workflow_router
 from .file_routes import router as file_router
+from .etl_routes import router as etl_router
 from .rag_routes import router as rag_router
 from .notebook_routes import router as notebook_router
 from .chat_routes import router as chat_router
 from .studio_executor import router as studio_router
 from .skill_routes import router as skill_router
 from .graph_routes import router as graph_router
+from .workspace_routes import router as workspace_router
 
 
 @asynccontextmanager
@@ -26,15 +42,15 @@ async def lifespan(app):
     try:
         from benny.core.graph_db import init_schema
         init_schema()
-        print("✅ Neo4j schema initialized")
+        print("Neo4j schema initialized")
     except Exception as e:
-        print(f"⚠️ Neo4j not available: {e}")
+        print(f"Neo4j not available: {e}")
     yield
     # Shutdown
     try:
         from benny.core.graph_db import close_driver
         close_driver()
-        print("🔌 Neo4j driver closed")
+        print("Neo4j driver closed")
     except Exception:
         pass
 
@@ -59,14 +75,16 @@ app.add_middleware(
 
 # Include routers
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM Management"])
-app.include_router(workflow_router, prefix="/api", tags=["Workflows"])
 app.include_router(file_router, prefix="/api", tags=["File Management"])
+app.include_router(etl_router, prefix="/api/etl", tags=["ETL Pipeline"])
+app.include_router(workflow_router, prefix="/api", tags=["Workflows"])
 app.include_router(rag_router, prefix="/api", tags=["RAG"])
 app.include_router(notebook_router, prefix="/api", tags=["Notebooks"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(studio_router, prefix="/api", tags=["Studio"])
 app.include_router(skill_router, prefix="/api", tags=["Skills"])
 app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
+app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace Settings"])
 
 
 @app.get("/")

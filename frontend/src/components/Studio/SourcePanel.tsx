@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Upload, File, FileText, Trash2, Loader, Download, Terminal, Link, Book } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { API_BASE_URL } from '../../constants';
 
 interface SourceFile {
   name: string;
@@ -13,6 +14,7 @@ export default function DataManagementPanel() {
   const { currentWorkspace, setActiveDocument, selectedDocuments, toggleSelectedDocument } = useWorkspaceStore();
   const [inFiles, setInFiles] = useState<SourceFile[]>([]);
   const [outFiles, setOutFiles] = useState<SourceFile[]>([]);
+  const [stagedFiles, setStagedFiles] = useState<SourceFile[]>([]);
   const [indexedFiles, setIndexedFiles] = useState<string[]>([]);
   const [activeSources, setActiveSources] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
@@ -20,7 +22,9 @@ export default function DataManagementPanel() {
   const [showLogs, setShowLogs] = useState(false);
   const [ingestLogs, setIngestLogs] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [batchSize, setBatchSize] = useState(500);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Poll for logs when ingesting or when showLogs is true
@@ -29,7 +33,7 @@ export default function DataManagementPanel() {
     if (ingesting || showLogs) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:8005/api/rag/logs?workspace=${currentWorkspace}`);
+          const res = await fetch(`${API_BASE_URL}/api/rag/logs?workspace=${currentWorkspace}`);
           const data = await res.json();
           setIngestLogs(data.logs || []);
           logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,10 +56,11 @@ export default function DataManagementPanel() {
 
   const fetchIndexedStatus = async () => {
     try {
-      const response = await fetch(`http://localhost:8005/api/rag/status?workspace=${currentWorkspace}`);
+      const response = await fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`);
       if (!response.ok) return;
       const data = await response.json();
-      setIndexedFiles(data.sources || []);
+      setIndexedFiles(data.sources || data.documents || []);
+
     } catch (error) {
        console.error('Failed to fetch indexed status:', error);
     }
@@ -63,10 +68,11 @@ export default function DataManagementPanel() {
 
   const fetchFiles = async () => {
     try {
-      const response = await fetch(`http://localhost:8005/api/files?workspace=${currentWorkspace}`);
+      const response = await fetch(`${API_BASE_URL}/api/files?workspace=${currentWorkspace}`);
       const data = await response.json();
       setInFiles(data.data_in || []);
       setOutFiles(data.data_out || []);
+      setStagedFiles(data.staging || []);
     } catch (error) {
       console.error('Failed to fetch files:', error);
     }
@@ -98,11 +104,20 @@ export default function DataManagementPanel() {
       const formData = new FormData();
       formData.append('file', file);
       try {
-        await fetch(`http://localhost:8005/api/files/upload?workspace=${currentWorkspace}`, {
-          method: 'POST',
-          body: formData
-        });
-        uploadedCurrent.push(file.name);
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+          const res = await fetch(`${API_BASE_URL}/api/etl/stage-and-convert?workspace=${currentWorkspace}`, {
+            method: 'POST',
+            body: formData
+          });
+          const data = await res.json();
+          uploadedCurrent.push(data.markdown_filename);
+        } else {
+          await fetch(`${API_BASE_URL}/api/files/upload?workspace=${currentWorkspace}`, {
+            method: 'POST',
+            body: formData
+          });
+          uploadedCurrent.push(file.name);
+        }
       } catch (error) {
         console.error('Upload failed:', error);
       }
@@ -114,13 +129,15 @@ export default function DataManagementPanel() {
     if (shouldIndex && uploadedCurrent.length > 0) {
       setIngesting(true);
       try {
-        await fetch('http://localhost:8005/api/rag/ingest', {
+        await fetch(`${API_BASE_URL}/api/rag/ingest`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             workspace: currentWorkspace,
-            files: uploadedCurrent
+            files: uploadedCurrent,
+            batch_size: batchSize
           })
+
         });
         alert('Files uploaded and indexed successfully!');
       } catch (error) {
@@ -134,7 +151,7 @@ export default function DataManagementPanel() {
 
   const deleteFile = async (filename: string, subdir: string) => {
     try {
-      await fetch(`http://localhost:8005/api/files/${filename}?workspace=${currentWorkspace}&subdir=${subdir}`, {
+      await fetch(`${API_BASE_URL}/api/files/${filename}?workspace=${currentWorkspace}&subdir=${subdir}`, {
         method: 'DELETE'
       });
       fetchFiles();
@@ -153,7 +170,7 @@ export default function DataManagementPanel() {
     setUploading(true);
     let uploadedFile = null;
     try {
-      const res = await fetch(`http://localhost:8005/api/files/download-url`, {
+      const res = await fetch(`${API_BASE_URL}/api/files/download-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, workspace: currentWorkspace })
@@ -173,13 +190,15 @@ export default function DataManagementPanel() {
       if (shouldIndex) {
         setIngesting(true);
         try {
-          await fetch('http://localhost:8005/api/rag/ingest', {
+          await fetch(`${API_BASE_URL}/api/rag/ingest`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               workspace: currentWorkspace,
-              files: [uploadedFile]
+              files: [uploadedFile],
+              batch_size: batchSize
             })
+
           });
           alert('File imported and indexed successfully!');
         } catch (error) {
@@ -199,7 +218,7 @@ export default function DataManagementPanel() {
     setUploading(true);
     let uploadedFile = null;
     try {
-      const res = await fetch(`http://localhost:8005/api/files/download-gutenberg`, {
+      const res = await fetch(`${API_BASE_URL}/api/files/download-gutenberg`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, workspace: currentWorkspace })
@@ -219,13 +238,15 @@ export default function DataManagementPanel() {
       if (shouldIndex) {
         setIngesting(true);
         try {
-          await fetch('http://localhost:8005/api/rag/ingest', {
+          await fetch(`${API_BASE_URL}/api/rag/ingest`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               workspace: currentWorkspace,
-              files: [uploadedFile]
+              files: [uploadedFile],
+              batch_size: batchSize
             })
+
           });
           alert('Gutenberg Book imported and indexed successfully!');
         } catch (error) {
@@ -240,7 +261,7 @@ export default function DataManagementPanel() {
   
   const downloadFile = async (filename: string, subdir: string) => {
     try {
-      const response = await fetch(`http://localhost:8005/api/files/${currentWorkspace}/${subdir}/${filename}`);
+      const response = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${subdir}/${filename}`);
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
@@ -269,15 +290,21 @@ export default function DataManagementPanel() {
   };
 
   const ingestFiles = async () => {
+    if (activeSources.size === 0) return;
     setIngesting(true);
     try {
-      await fetch('http://localhost:8005/api/rag/ingest', {
+      await fetch(`${API_BASE_URL}/api/rag/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace: currentWorkspace })
+        body: JSON.stringify({ 
+          workspace: currentWorkspace,
+          files: Array.from(activeSources),
+          batch_size: batchSize
+        })
       });
-      alert('Files indexed successfully!');
+      alert(`Successfully indexed ${activeSources.size} file(s)!`);
       fetchIndexedStatus();
+      setActiveSources(new Set());
     } catch (error) {
       console.error('Ingestion failed:', error);
       alert('Ingestion failed');
@@ -353,6 +380,71 @@ export default function DataManagementPanel() {
       {/* Source Cards - Split View */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         
+        {/* Staged Files (staging) */}
+        {stagedFiles.length > 0 && (
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', paddingLeft: '4px' }}>
+              Raw Media (Staging)
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {stagedFiles.map((file: SourceFile) => (
+                <div
+                  key={`staged-${file.name}`}
+                  className="glass-card source-card"
+                  style={{
+                    padding: '12px',
+                    background: 'var(--surface-elevated)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <File size={20} style={{ color: '#ef4444' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {file.name}
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div className="status-tag meta">STAGED</div>
+                      <div className="status-tag size">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFile(file.name, "staging");
+                      }}
+                      style={{ padding: '6px' }}
+                      title="Download"
+                    >
+                      <Download size={14} />
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteFile(file.name, "staging");
+                      }}
+                      style={{ padding: '6px' }}
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Workspace Files (data_in) */}
         <div>
           <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', paddingLeft: '4px' }}>
@@ -411,15 +503,22 @@ export default function DataManagementPanel() {
                         {file.name}
                       </div>
                       {isIndexed && (
-                        <div style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
-                          ✓ Indexed
+                        <div className="status-tag indexed">
+                          <div className="tag-dot" />
+                          INDEXED
                         </div>
                       )}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      {(file.size / 1024).toFixed(1)} KB
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div className="status-tag meta">
+                        {file.name.split('.').pop()?.toUpperCase()}
+                      </div>
+                      <div className="status-tag size">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </div>
                     </div>
                   </div>
+
                   
                   <div style={{ display: 'flex', gap: '4px' }}>
                     <button
@@ -538,12 +637,40 @@ export default function DataManagementPanel() {
           <button
             className="btn btn-outline"
             onClick={() => setShowLogs(!showLogs)}
-            style={{ padding: '8px', background: showLogs ? 'var(--surface-elevated)' : 'transparent' }}
+            style={{ padding: '8px', background: showLogs ? 'var(--surface-elevated)' : 'transparent', flexShrink: 0 }}
             title="Toggle Ingestion Logs"
           >
             <Terminal size={20} />
           </button>
         </div>
+
+        {/* Batch Size Control */}
+        <div style={{ 
+          background: 'rgba(255,255,255,0.03)', 
+          padding: '10px 14px', 
+          borderRadius: '8px', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '12px',
+          border: '1px solid var(--border-color)'
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+               <label style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'bold', textTransform: 'uppercase' }}>Ingestion Batch Size</label>
+               <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 'bold' }}>{batchSize} chunks</span>
+            </div>
+            <input 
+              type="range" 
+              min="100" 
+              max="2000" 
+              step="100" 
+              value={batchSize} 
+              onChange={(e) => setBatchSize(parseInt(e.target.value))}
+              style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', cursor: 'pointer' }}
+            />
+          </div>
+        </div>
+
 
         {(ingesting || showLogs) && (
           <div style={{

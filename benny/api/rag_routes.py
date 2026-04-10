@@ -22,6 +22,8 @@ class IngestRequest(BaseModel):
     workspace: str = "default"
     files: Optional[List[str]] = None
     notebook_id: Optional[str] = None
+    batch_size: Optional[int] = 500
+
 
 
 class QueryRequest(BaseModel):
@@ -32,6 +34,7 @@ class QueryRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
 
+@router.post("/rag/ingest")
 def ingest_files(request: IngestRequest):
     """Ingest files from data_in into ChromaDB using structured extraction (Docling)."""
     try:
@@ -68,12 +71,12 @@ def ingest_files(request: IngestRequest):
         # Ingest files
         ingested = []
         log_file = get_workspace_path(request.workspace) / "ingest.log"
-        with open(log_file, "w") as f:
+        with open(log_file, "w", encoding="utf-8") as f:
             f.write("Starting structured ingestion process with Docling...\n")
         
         def write_log(msg: str):
             print(msg)
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(msg + "\n")
                 
         for file_path in file_paths:
@@ -84,18 +87,32 @@ def ingest_files(request: IngestRequest):
                 # Simple chunking (split by paragraphs)
                 chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
                 
-                # Add to ChromaDB
-                write_log(f"Adding {len(chunks)} chunks to ChromaDB database...")
+                # Batch Add to ChromaDB with Cleanup
+                write_log(f"Adding {len(chunks)} chunks to ChromaDB database (Batch Mode, Size: {request.batch_size})...")
                 if chunks:
-                    for i, chunk in enumerate(chunks):
+                    # 1. DELETE old entries for this source to prevent duplicates
+                    try:
+                        collection.delete(where={"source": file_path.name})
+                    except Exception as e:
+                        write_log(f"Warning: Cleanup failed for {file_path.name}: {str(e)}")
+
+                    # 2. UPLOAD in batches
+                    batch_size = request.batch_size or 500
+                    for i in range(0, len(chunks), batch_size):
+                        batch_chunks = chunks[i:i + batch_size]
+                        batch_ids = [f"{file_path.stem}_{j}" for j in range(i, i + len(batch_chunks))]
+                        batch_metadatas = [{
+                            "source": file_path.name,
+                            "chunk_index": j
+                        } for j in range(i, i + len(batch_chunks))]
+                        
                         collection.add(
-                            documents=[chunk],
-                            metadatas=[{
-                                "source": file_path.name,
-                                "chunk_index": i
-                            }],
-                            ids=[f"{file_path.stem}_{i}"]
+                            documents=batch_chunks,
+                            metadatas=batch_metadatas,
+                            ids=batch_ids
                         )
+                        write_log(f"  - Committed batch {i // batch_size + 1} ({len(batch_chunks)} chunks)")
+
                 
                 ingested.append({
                     "file": file_path.name,
@@ -130,7 +147,7 @@ async def get_rag_logs(workspace: str = "default"):
         if not log_file.exists():
             return {"logs": ["No ingestion logs found for this workspace."]}
             
-        with open(log_file, "r") as f:
+        with open(log_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
             
         # Return last 50 lines to prevent huge payload
@@ -146,7 +163,7 @@ async def get_rag_status(workspace: str = "default"):
         client = get_chromadb_client(workspace)
         collection = client.get_or_create_collection("knowledge")
         
-        # Get unique sources
+        # Get unique sources - optimized by only fetching metadatas
         all_data = collection.get(include=['metadatas'])
         sources = set()
         for meta in all_data['metadatas']:
@@ -156,8 +173,10 @@ async def get_rag_status(workspace: str = "default"):
             "workspace": workspace,
             "total_chunks": collection.count(),
             "unique_documents": len(sources),
-            "documents": list(sources)
+            "documents": list(sources),
+            "sources": list(sources) # Alias for consistency with graph API
         }
+
     except Exception as e:
         raise HTTPException(500, f"Status check failed: {str(e)}")
 

@@ -10,6 +10,8 @@ import shutil
 import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
+from ..governance.lineage import track_file_conversion
+from ..core.extraction import extract_structured_text
 
 from ..core.workspace import get_workspace_path, get_workspace_files
 
@@ -152,18 +154,21 @@ async def upload_file(
         raise HTTPException(500, f"Upload failed: {str(e)}")
 
 
+
 @router.get("/files")
 async def list_files(workspace: str = "default"):
-    """List all files in workspace data_in and data_out"""
+    """List all files in workspace data_in, data_out, and staging"""
     try:
+        staging_files = get_workspace_files(workspace, "staging")
         data_in_files = get_workspace_files(workspace, "data_in")
         data_out_files = get_workspace_files(workspace, "data_out")
         
         return {
             "workspace": workspace,
+            "staging": staging_files,
             "data_in": data_in_files,
             "data_out": data_out_files,
-            "total": len(data_in_files) + len(data_out_files)
+            "total": len(data_in_files) + len(data_out_files) + len(staging_files)
         }
     except Exception as e:
         raise HTTPException(500, f"Failed to list files: {str(e)}")

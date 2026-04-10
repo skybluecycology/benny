@@ -24,11 +24,17 @@ docker-compose up -d neo4j marquez-db marquez-api marquez-web
 
 REM 2. Start LLM Provider
 echo [2/4] Starting LLM Service (%LLM_PROVIDER%)...
-call manage_llm.bat start-%LLM_PROVIDER%
+if "%LLM_PROVIDER%"=="litert" (
+    echo Note: LiteRT uses local library but falls back to Lemonade NPU for Windows support.
+    call manage_llm.bat start-lemonade
+) else (
+    call manage_llm.bat start-%LLM_PROVIDER%
+)
 
 REM 3. Start Backend
-echo [3/4] Starting Backend Server...
-start "Benny Backend" cmd /k "uvicorn benny.api.server:app --reload --port 8005"
+echo [3/4] Starting Backend Server (using Python 3.12)...
+set PYTHONUTF8=1
+start "Benny Backend" cmd /k "C:\Users\nsdha\miniforge3\python.exe -m uvicorn benny.api.server:app --reload --host 0.0.0.0 --port 8005"
 
 REM 4. Start Frontend
 echo [4/4] Starting Frontend...
@@ -37,10 +43,10 @@ start "Benny Frontend" cmd /k "npm run dev"
 cd ..
 
 echo.
-echo ✅ All services shutdown logic initialized.
-echo    - Marquez:  http://localhost:3010
-echo    - Backend:  http://localhost:8005/docs
-echo    - Frontend: http://localhost:5173 (usually)
+echo ✅ Distributed Stack Initialized.
+echo    - Ryzen Server IP: 192.168.68.134
+echo    - Backend Docs:  http://192.168.68.134:8005/docs
+echo    - Frontend: http://localhost:5173 (on Thinkpad)
 echo.
 goto :eof
 

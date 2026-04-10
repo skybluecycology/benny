@@ -12,7 +12,7 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
 
-from ..core.models import LOCAL_PROVIDERS
+from ..core.models import LOCAL_PROVIDERS, call_model
 
 
 # =============================================================================
@@ -49,12 +49,12 @@ JSON TRIPLES:"""
 
 
 DIRECTED_EXTRACTION_PROMPT = """You are an L2 expert reading a specific section of a document.
-Your goal is to extract the core points, arguments, or mechanisms made in this section.
+Your goal is to extract ALL core points, arguments, or mechanisms made in this section.
 
 {direction_prompt}
 
 Rules for Extraction:
-1. Extract the points strictly as Knowledge Graph relations map.
+1. Extract as many meaningful triples as you can find. Be thorough.
 2. Filter out any noise; only extract points structurally relevant to the direction (if provided).
 3. "subject_type" and "object_type" should categorize the entity (e.g., Person, Theory, Technology, Organization, Location, Event, Concept).
 4. "citation" must be the exact short sentence/excerpt from the text that justifies the claim.
@@ -73,6 +73,15 @@ Output ONLY a JSON array of objects. Example format:
     "object_type": "Concept",
     "citation": "Dopamine is responsible for the reward-seeking loop in mammalian brains.",
     "confidence": 0.9
+  }},
+  {{
+    "subject": "Prefrontal Cortex",
+    "subject_type": "Biology",
+    "predicate": "modulates",
+    "object": "impulse control",
+    "object_type": "Process",
+    "citation": "The prefrontal cortex acts as a top-down modulator for impulsive actions.",
+    "confidence": 0.85
   }}
 ]
 
@@ -148,55 +157,40 @@ Be specific and insightful. Format as JSON:
 JSON:"""
 
 
-async def call_llm(prompt: str, provider: str = "lemonade", model: str = None) -> str:
-    """Call a local or cloud LLM with a prompt and return the raw text response."""
-    provider_config = LOCAL_PROVIDERS.get(provider, LOCAL_PROVIDERS.get("lemonade"))
-    if not provider_config:
-        raise ValueError(f"Unknown LLM provider: {provider}")
-
-    api_base = provider_config["base_url"]
-    chat_url = f"{api_base}/chat/completions"
-    
-    # Model name resolution aligned with frontend expectations
-    if model and model != "default":
-        model_name = model.split("/")[-1]
+async def call_llm(prompt: str, provider: str = "lemonade", model: str = None, timeout: Optional[float] = None) -> str:
+    """Consolidated LLM call utilizing the core dispatcher for OpenAI, LiteLLM, and LiteRT."""
+    # Resolve model string (e.g., "ollama/llama3")
+    if model and "/" in model:
+        full_model = model
     else:
-        if provider == "ollama":
-            model_name = "llama3"
-        elif provider == "lemonade":
-            model_name = "DeepSeek-R1-Distill-Llama-8B-FLM"
-        elif provider == "fastflowlm":
-            model_name = "gemma3:4b"
-        elif provider == "lmstudio":
-            # If no model provided, we'll try to use the first one from status later 
-            # Or use a generic fallback. For LM Studio, it's safer to use the selected one.
-            model_name = model or "default"
+        # Fallback to default model names for known providers
+        default_models = {
+            "ollama": "ollama/llama3",
+            "lemonade": "lemonade/deepseek-r1-8b-FLM",
+            "fastflowlm": "fastflowlm/gemma3:4b",
+            "litert": "litert/gemma-4-E4B-it.litertlm"
+        }
+        if model:
+            full_model = f"{provider}/{model}"
         else:
-            model_name = "default"
+            full_model = default_models.get(provider, "lemonade/default")
 
-
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3  # Low temp for structured extraction
-    }
-
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        response = await client.post(
-            chat_url,
-            json=payload,
-            headers={"Content-Type": "application/json"}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        else:
-            raise Exception(f"LLM call failed ({response.status_code}): {response.text}")
+    return await call_model(
+        model=full_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        timeout=timeout
+    )
 
 
 def _parse_json_from_llm(text: str) -> Any:
-    """Robustly extract JSON from LLM output that may contain markdown fences."""
+    """Robustly extract JSON from LLM output that may contain markdown fences or <think> reasoning blocks."""
     text = text.strip()
+    
+    # Strip <think> blocks common in reasoning models like DeepSeek-R1
+    import re
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    
     # Strip markdown code fences
     if text.startswith("```"):
         lines = text.split("\n")
@@ -226,7 +220,8 @@ async def extract_triples(
     text: str,
     source_name: str = "",
     provider: str = "lemonade",
-    model: str = None
+    model: str = None,
+    timeout: Optional[float] = None
 ) -> List[List[str]]:
     """
     Extract knowledge triples from text using the configured LLM.
@@ -237,7 +232,7 @@ async def extract_triples(
     safe_text = text[:6000]
     prompt = TRIPLE_EXTRACTION_PROMPT.format(text=safe_text)
     
-    raw = await call_llm(prompt, provider=provider, model=model)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout)
     triples = _parse_json_from_llm(raw)
     
     if not isinstance(triples, list):
@@ -258,7 +253,8 @@ async def extract_directed_triples_from_section(
     direction: str = "",
     provider: str = "lemonade",
     model: str = None,
-    inference_delay: float = 2.0
+    inference_delay: float = 0.5,  # Reduced default for performance
+    timeout: Optional[float] = None
 ) -> List[List[str]]:
     """
     Extract L2 points from a document section, optionally influenced by user direction.
@@ -281,7 +277,7 @@ async def extract_directed_triples_from_section(
         text=safe_text
     )
     
-    raw = await call_llm(prompt, provider=provider, model=model)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout)
     triples = _parse_json_from_llm(raw)
     
     if not isinstance(triples, list):
@@ -290,16 +286,59 @@ async def extract_directed_triples_from_section(
     valid = []
     for t in triples:
         if isinstance(t, dict) and "subject" in t and "predicate" in t and "object" in t:
+            # Inject section data for batch storage consistency
+            t["section_title"] = section_title
             valid.append(t)
     
     return valid
+
+
+async def parallel_extract_triples(
+    sections: List[Dict[str, str]],
+    direction: str = "",
+    provider: str = "lemonade",
+    model: str = None,
+    parallel_limit: int = 4,
+    inference_delay: float = 0.5,
+    timeout: Optional[float] = None
+) -> List[Dict[str, Any]]:
+    """
+    Process multiple document sections in parallel for high-performance ingestion.
+    Uses an asyncio.Semaphore to prevent overloading the LLM provider.
+    """
+    import asyncio
+    semaphore = asyncio.Semaphore(parallel_limit)
+    
+    async def wrapped_extract(section):
+        async with semaphore:
+            return await extract_directed_triples_from_section(
+                text=section["text"],
+                section_title=section["title"],
+                direction=direction,
+                provider=provider,
+                model=model,
+                inference_delay=inference_delay,
+                timeout=timeout
+            )
+            
+    # Launch parallel tasks
+    tasks = [wrapped_extract(section) for section in sections]
+    results = await asyncio.gather(*tasks)
+    
+    # Flatten results
+    flat_triples = []
+    for section_triples in results:
+        flat_triples.extend(section_triples)
+        
+    return flat_triples
 
 
 async def detect_conflicts(
     existing_triples: List[List[str]],
     new_triples: List[List[str]],
     provider: str = "lemonade",
-    model: str = None
+    model: str = None,
+    timeout: Optional[float] = None
 ) -> List[Dict[str, str]]:
     """Detect logical conflicts between existing and new triples."""
     if not existing_triples or not new_triples:
@@ -312,7 +351,7 @@ async def detect_conflicts(
     )
     
     try:
-        raw = await call_llm(prompt, provider=provider, model=model)
+        raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout)
         conflicts = _parse_json_from_llm(raw)
         
         if not isinstance(conflicts, list):
@@ -320,19 +359,20 @@ async def detect_conflicts(
         
         return [c for c in conflicts if isinstance(c, dict) and "concept_a" in c]
     except Exception as e:
-        print(f"⚠️ Conflict detection bypassed: LLM call failed ({e})")
+        print(f"[WARNING] Conflict detection bypassed: LLM call failed ({e})")
         return []
 
 
 async def find_synthesis(
     graph_summary: str,
     provider: str = "lemonade",
-    model: str = None
+    model: str = None,
+    timeout: Optional[float] = None
 ) -> List[Dict[str, str]]:
     """Find structural isomorphisms in the knowledge graph."""
     prompt = SYNTHESIS_PROMPT.format(graph_summary=graph_summary)
     
-    raw = await call_llm(prompt, provider=provider, model=model)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout)
     analogies = _parse_json_from_llm(raw)
     
     if not isinstance(analogies, list):
@@ -346,7 +386,8 @@ async def cross_domain_analogy(
     relationships: str,
     target_domain: str,
     provider: str = "lemonade",
-    model: str = None
+    model: str = None,
+    timeout: Optional[float] = None
 ) -> Dict[str, Any]:
     """Map a concept into a different domain."""
     prompt = CROSS_DOMAIN_PROMPT.format(
@@ -355,7 +396,7 @@ async def cross_domain_analogy(
         target_domain=target_domain
     )
     
-    raw = await call_llm(prompt, provider=provider, model=model)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout)
     result = _parse_json_from_llm(raw)
     
     if isinstance(result, dict):

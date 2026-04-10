@@ -10,6 +10,7 @@ import httpx
 import asyncio
 
 from ..core.models import LOCAL_PROVIDERS
+from ..core.litert_engine import LiteRTEngine
 
 
 router = APIRouter()
@@ -26,9 +27,9 @@ SERVICE_COMMANDS = {
         "check": "http://localhost:11434/v1/models"
     },
     "lemonade": {
-        "start": "lemonade-server serve --port 8000",
+        "start": "LemonadeServer.exe serve --port 13305",
         "stop": 'taskkill /FI "WINDOWTITLE eq lemonade*" /F',
-        "check": "http://localhost:8000/api/v1/models"
+        "check": "http://localhost:13305/api/v1/models"
     },
     "fastflowlm": {
         "start": None,  # Manual start required
@@ -39,6 +40,11 @@ SERVICE_COMMANDS = {
         "start": None,  # Usually started manually by user
         "stop": None,
         "check": "http://127.0.0.1:1234/v1/models"
+    },
+    "litert": {
+        "start": "Internal",
+        "stop": "Internal",
+        "check": "internal://litert"
     }
 }
 
@@ -82,15 +88,45 @@ async def get_all_status():
     results = {}
     
     for provider, config in SERVICE_COMMANDS.items():
-        status = await check_provider_status(config["check"])
+        if config["check"] == "internal://litert":
+            # Special case for internal library
+            available = LiteRTEngine.is_available()
+            
+            # If internal LiteRT is missing, we report models that we can redirect to NPU
+            models = [
+                {
+                    "id": "litert/gemma-4-E4B-it.litertlm",
+                    "object": "model",
+                    "owned_by": "litert-community",
+                    "status": "ready" if available else "fallback"
+                }
+            ]
+            
+            if not available:
+                # Add virtual NPU-optimized models that we can handle via redirection
+                models.extend([
+                    {"id": "litert/deepseek-r1-8b-FLM", "object": "model", "owned_by": "fallback-npu"},
+                    {"id": "litert/llama3.2-1b-FLM", "object": "model", "owned_by": "fallback-npu"}
+                ])
+
+            status = {
+                "running": True, # The provider is 'running' because we have a shim/fallback
+                "error": None if available else "Platform Restricted (Using NPU Fallback Mode)",
+                "models": {
+                    "data": models
+                }
+            }
+        else:
+            status = await check_provider_status(config["check"])
+            
         provider_info = LOCAL_PROVIDERS.get(provider, {})
         results[provider] = {
             **status,
             "name": provider_info.get("name", provider),
             "port": provider_info.get("port"),
             "description": provider_info.get("description", ""),
-            "can_start": config["start"] is not None,
-            "can_stop": config["stop"] is not None
+            "can_start": config["start"] is not None and config["start"] != "Internal",
+            "can_stop": config["stop"] is not None and config["stop"] != "Internal"
         }
     
     return results

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, Plus, Trash2, Loader } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
+import { API_BASE_URL } from '../../constants';
 
 interface Workflow {
   id: string;
@@ -25,7 +26,7 @@ export default function WorkflowList() {
 
   const fetchWorkflows = async () => {
     try {
-      const response = await fetch('http://localhost:8005/api/workflows');
+      const response = await fetch(`${API_BASE_URL}/api/workflows`);
       const data = await response.json();
       // Handle format where workflows are inside a "value" array
       const workflowList = Array.isArray(data) ? data : (data.value || []);

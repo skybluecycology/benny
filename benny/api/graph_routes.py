@@ -13,13 +13,16 @@ from ..core.graph_db import (
     verify_connectivity, init_schema, get_full_graph, get_neighbors,
     get_graph_stats, add_triple, add_source_link, add_conflict,
     add_analogy, set_concept_embedding, vector_search,
-    get_mapped_sources, delete_source_from_graph
+    get_mapped_sources, delete_source_from_graph,
+    create_synthesis_run, get_synthesis_history, delete_synthesis_run,
+    update_graph_centrality, batch_add_triples
 )
 from ..synthesis.engine import (
     extract_triples, detect_conflicts, find_synthesis,
-    cross_domain_analogy, get_embedding, compute_cluster_similarities
+    cross_domain_analogy, get_embedding, compute_cluster_similarities,
+    parallel_extract_triples
 )
-from ..core.workspace import get_workspace_path
+from ..core.workspace import get_workspace_path, load_manifest
 from ..core.extraction import extract_structured_text
 
 
@@ -99,6 +102,11 @@ class ClusterRequest(BaseModel):
     threshold: float = 0.75
 
 
+class RunIDRequest(BaseModel):
+    run_id: str
+    workspace: str = "default"
+
+
 # =============================================================================
 # STATUS & SCHEMA
 # =============================================================================
@@ -130,6 +138,9 @@ async def initialize_graph():
 @router.get("/graph/full")
 async def full_graph(workspace: str = "default"):
     """Get the complete knowledge graph for visualization (nodes + edges)."""
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(status_code=503, detail=f"Neo4j not available: {conn.get('error')}")
     try:
         return get_full_graph(workspace)
     except Exception as e:
@@ -139,6 +150,9 @@ async def full_graph(workspace: str = "default"):
 @router.get("/graph/stats")
 async def graph_statistics(workspace: str = "default"):
     """Get graph statistics (node / edge counts)."""
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(status_code=503, detail=f"Neo4j not available: {conn.get('error')}")
     try:
         return get_graph_stats(workspace)
     except Exception as e:
@@ -148,6 +162,9 @@ async def graph_statistics(workspace: str = "default"):
 @router.get("/graph/sources")
 async def graph_sources(workspace: str = "default"):
     """Get list of source documents mapped in the graph."""
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(status_code=503, detail=f"Neo4j not available: {conn.get('error')}")
     try:
         return {"sources": get_mapped_sources(workspace)}
     except Exception as e:
@@ -170,6 +187,49 @@ async def concept_neighbors(concept: str, workspace: str = "default", depth: int
         return get_neighbors(concept, workspace, depth)
     except Exception as e:
         raise HTTPException(500, f"Neighbor query failed: {str(e)}")
+
+
+@router.get("/graph/history")
+async def graph_history(workspace: str = "default"):
+    """Get historical synthesis runs for a workspace."""
+    try:
+        return {"history": get_synthesis_history(workspace)}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch history: {str(e)}")
+
+
+@router.delete("/graph/runs/{run_id}")
+async def delete_run(run_id: str, workspace: str = "default"):
+    """Delete a specific synthesis run and its associated graph data."""
+    try:
+        # 1. Delete from graph
+        graph_result = delete_synthesis_run(run_id, workspace)
+        
+        # 2. Delete file artifacts if they exist
+        data_path = get_workspace_path(workspace, f"runs/{run_id}")
+        if data_path.exists():
+            import shutil
+            shutil.rmtree(data_path)
+            
+        return {**graph_result, "files_deleted": True}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to delete run: {str(e)}")
+
+
+@router.get("/graph/recent")
+async def get_recent_updates(workspace: str = "default", seconds: int = 10):
+    """
+    Get graph updates from the last N seconds. 
+    Used for real-time 'fly-to-continent' visualization during ingestion.
+    """
+    try:
+        graph = get_full_graph(workspace)
+        # Filter for very recent ones (simplified for now: just return last 50 edges)
+        # Real implementation would use timestamp property comparison in Cypher
+        recent_edges = graph["edges"][-50:] if graph["edges"] else []
+        return {"edges": recent_edges}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch recent updates: {str(e)}")
 
 
 @router.post("/graph/triple")
@@ -288,18 +348,18 @@ def _split_markdown_into_segments(text: str) -> List[Dict[str, str]]:
         if header_match:
             # Save the previous chunk
             if ''.join(current_content).strip():
-                segments.append({"title": current_title, "content": '\n'.join(current_content)})
+                segments.append({"title": current_title, "text": '\n'.join(current_content)})
             current_title = header_match.group(2).strip()
             current_content = [line]
         else:
             current_content.append(line)
             
     if ''.join(current_content).strip():
-        segments.append({"title": current_title, "content": '\n'.join(current_content)})
+        segments.append({"title": current_title, "text": '\n'.join(current_content)})
         
     # If no headers found at all, just return one big segment
     if not segments:
-        return [{"title": "Main Content", "content": text}]
+        return [{"title": "Main Content", "text": text}]
         
     return segments
 
@@ -313,36 +373,59 @@ async def _process_content_to_graph(
     embedding_provider: str,
     embedding_model: Optional[str] = None,
     direction: str = "",
-    inference_delay: float = 2.0
+    inference_delay: float = 2.0,
+    run_id: Optional[str] = None
 ):
-    """Internal helper to run the triple extraction -> storage pipeline."""
-    # Step 1: Chunk the text by markdown headers
-    sections = _split_markdown_into_segments(text)
+    import uuid
+    import hashlib
+    import json
     
-    triples = []
-    print(f"Hierarchical parsing initiated for {source_name}: {len(sections)} sections found.")
+    # Step 0: Ensure Run ID and Partition Key
+    if not run_id:
+        run_id = str(uuid.uuid4())
     
-    # Process each section independently (L2 agent extraction)
-    for index, sec in enumerate(sections):
-        title = sec['title']
-        content = sec['content']
-        # Skip microscopic/empty sections
-        if len(content.strip()) < 50:
-            continue
-            
-        print(f"  -> Extracting points from section {index+1}/{len(sections)}: '{title}'")
-        sec_triples = await extract_directed_triples_from_section(
-            text=content,
-            section_title=f"{source_name} - {title}",
-            direction=direction,
-            provider=provider,
-            model=model,
-            inference_delay=inference_delay
+    pk_source = f"{model or 'default'}-{source_name}"
+    partition_key = hashlib.sha256(pk_source.encode()).hexdigest()
+    
+    # Step 0a: Check Neo4j connectivity
+    from ..core.graph_db import verify_connectivity
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(
+            status_code=503,
+            detail=f"Knowledge Graph database not available: {conn.get('error', 'Unknown connection error')}"
         )
-        if sec_triples:
-            for t in sec_triples:
-                t["section_title"] = title
-            triples.extend(sec_triples)
+    
+    manifest = load_manifest(workspace)
+    llm_timeout = manifest.llm_timeout
+    
+    # Create SynthesisRun record
+    create_synthesis_run(
+        run_id=run_id,
+        partition_key=partition_key,
+        model=model or "default",
+        workspace=workspace,
+        files=[source_name],
+        version="1.0.0",
+        artifact_path=str(get_workspace_path(workspace, f"runs/{run_id}"))
+    )
+    
+    # Step 1: Parallel Extraction of Triples
+    sections = _split_markdown_into_segments(text)
+    print(f"Hierarchical parallel parsing initiated for {source_name}: {len(sections)} sections found.")
+    
+    # Filter microscopic sections early
+    active_sections = [s for s in sections if len(s['text'].strip()) >= 50]
+    
+    triples = await parallel_extract_triples(
+        sections=active_sections,
+        direction=direction,
+        provider=provider,
+        model=model,
+        parallel_limit=4, # Hardcoded limit for stability
+        inference_delay=inference_delay,
+        timeout=llm_timeout
+    )
             
     if not triples:
         return {"status": "no_triples_found", "triples_extracted": 0}
@@ -366,48 +449,53 @@ async def _process_content_to_graph(
             existing_triples=existing,
             new_triples=triples,
             provider=provider,
-            model=model
+            model=model,
+            timeout=llm_timeout
         )
     
-    # Step 3: Store triples in Neo4j
-    stored = []
-    all_concepts = set()
-    for t in triples:
-        if not isinstance(t, dict):
-            continue
+    # Step 3: Store triples in Neo4j (Batch Mode)
+    stored_result = batch_add_triples(
+        triples=triples,
+        workspace=workspace,
+        source_name=source_name,
+        run_id=run_id
+    )
+    print(f"[SUCCESS] Batched {stored_result['count']} triples into Neo4j successfully.")
             
-        subj = t.get("subject", "")
-        pred = t.get("predicate", "")
-        obj = t.get("object", "")
-        subj_type = t.get("subject_type", "Concept")
-        obj_type = t.get("object_type", "Concept")
-        citation = t.get("citation", "")
-        confidence = float(t.get("confidence", 1.0))
-        sec_title = t.get("section_title", source_name)
+    # Step 3b: Save Artifacts to Workspace Disk
+    try:
+        run_dir = get_workspace_path(workspace, f"runs/{run_id}")
+        run_dir.mkdir(parents=True, exist_ok=True)
         
-        if not subj or not pred or not obj:
-            continue
-        
-        try:
-            result = add_triple(
-                subject=subj, predicate=pred, obj=obj,
-                workspace=workspace,
-                source_name=source_name,
-                section=f"{source_name} - {sec_title}",
-                subject_type=subj_type,
-                object_type=obj_type,
-                citation=citation,
-                confidence=confidence
-            )
-            stored.append(result)
-            all_concepts.add(subj)
-            all_concepts.add(obj)
+        # 1. Triples JSON
+        with open(run_dir / "extraction.json", "w", encoding="utf-8") as f:
+            json.dump(triples, f, indent=2)
             
-            # Link to source mapping
-            add_source_link(subj, source_name, workspace)
-            add_source_link(obj, source_name, workspace)
-        except Exception as e:
-            print(f"Error storing triple {t}: {e}")
+        # 2. Metadata JSON
+        meta = {
+            "run_id": run_id,
+            "partition_key": partition_key,
+            "model": model,
+            "source": source_name,
+            "timestamp": str(manifest.llm_timeout), # placeholder
+            "triples_count": len(triples)
+        }
+        with open(run_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+            
+        # 3. Simple Summary Markdown
+        summary = f"# Synthesis Report: {source_name}\n\n"
+        summary += f"- **Model**: {model or 'default'}\n"
+        summary += f"- **Triples Extracted**: {len(triples)}\n\n"
+        summary += "## Core Points\n"
+        for t in triples[:10]: # Top 10 for summary
+            summary += f"- {t.get('subject')} {t.get('predicate')} {t.get('object')} (Confidence: {t.get('confidence')})\n"
+        
+        with open(run_dir / "summary.md", "w", encoding="utf-8") as f:
+            f.write(summary)
+            
+    except Exception as e:
+        print(f"Failed to save artifacts: {e}")
     
     # Step 4: Store conflicts
     for conflict in conflicts:
@@ -424,41 +512,55 @@ async def _process_content_to_graph(
     # Step 5: Embed concepts (if requested)
     embedded_count = 0
     if embed:
+        all_concepts = set()
+        for t in triples:
+            if t.get("subject"):
+                all_concepts.add(t.get("subject"))
+            if t.get("object"):
+                all_concepts.add(t.get("object"))
+        
         printed_conn_error = False
         for concept_name in all_concepts:
-                # Use active provider for local embeddings instead of assuming Ollama
-                actual_emb_provider = provider if embedding_provider == "local" else embedding_provider
-                
-                try:
-                    emb = await get_embedding(
-                        concept_name,
-                        provider=actual_emb_provider,
-                        model=embedding_model
-                    )
-                    if emb:
-                        set_concept_embedding(concept_name, emb, workspace)
-                        embedded_count += 1
-                except Exception as e:
-                    err_str = str(e)
-                    if "connection" in err_str.lower() or "connecterror" in err_str.lower():
-                        if not printed_conn_error:
-                            print(f"⚠️ Vector Embedding bypassed: Could not connect to {actual_emb_provider} API.")
-                            printed_conn_error = True
-                    else:
-                        if not printed_conn_error:
-                            print(f"⚠️ Embedding failed for '{concept_name}': {e}")
-                            printed_conn_error = True
+            # Use active provider for local embeddings instead of assuming Ollama
+            actual_emb_provider = provider if embedding_provider == "local" else embedding_provider
+            
+            try:
+                emb = await get_embedding(
+                    concept_name,
+                    provider=actual_emb_provider,
+                    model=embedding_model
+                )
+                if emb:
+                    set_concept_embedding(concept_name, emb, workspace)
+                    embedded_count += 1
+            except Exception as e:
+                err_str = str(e)
+                if "connection" in err_str.lower() or "connecterror" in err_str.lower():
+                    if not printed_conn_error:
+                        print(f"[WARNING] Vector Embedding bypassed: Could not connect to {actual_emb_provider} API.")
+                        printed_conn_error = True
+                else:
+                    if not printed_conn_error:
+                        print(f"[WARNING] Embedding failed for '{concept_name}': {e}")
+                        printed_conn_error = True
+    
+    # Step 6: Update Graph Centrality for visual sizing
+    try:
+        update_graph_centrality(workspace)
+    except Exception:
+        pass
     
     return {
         "status": "ingested",
+        "run_id": run_id,
+        "partition_key": partition_key,
         "triples_extracted": len(triples),
-        "triples_stored": len(stored),
+        "triples_stored": stored_result.get("count", 0) if "stored_result" in locals() else 0,
         "conflicts_detected": len(conflicts),
         "concepts_embedded": embedded_count,
         "triples": triples,
         "conflicts": conflicts
     }
-
 
 @router.post("/graph/synthesize")
 async def synthesize(request: SynthesizeRequest):
@@ -485,12 +587,15 @@ async def synthesize(request: SynthesizeRequest):
             label = pred if pred else rel_type
             lines.append(f"  {src} --[{label}]--> {tgt}")
         
-        graph_summary = "\n".join(lines[:50])  # Cap to avoid huge prompts
+        # Load manifest for timeout
+        manifest = load_manifest(request.workspace)
+        llm_timeout = manifest.llm_timeout
         
         analogies = await find_synthesis(
             graph_summary=graph_summary,
             provider=request.provider,
-            model=request.model
+            model=request.model,
+            timeout=llm_timeout
         )
         
         # Store discovered analogies in the graph
@@ -532,12 +637,17 @@ async def cross_domain(request: CrossDomainRequest):
         
         relationships = "\n".join(rel_lines) if rel_lines else "No relationships found."
         
+        # Load manifest for timeout
+        manifest = load_manifest(request.workspace)
+        llm_timeout = manifest.llm_timeout
+        
         result = await cross_domain_analogy(
             concept=request.concept,
             relationships=relationships,
             target_domain=request.target_domain,
             provider=request.provider,
-            model=request.model
+            model=request.model,
+            timeout=llm_timeout
         )
         
         return {

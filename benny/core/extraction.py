@@ -44,7 +44,7 @@ def extract_structured_text(file_path: Path, log_fn: Callable = print) -> str:
             log_fn(f"Warning: Failed to read {file_path.name} as UTF-8: {e}")
     
     try:
-        log_fn(f"🚀 Using Docling (PyPdfium Backend) to extract structured content from {file_path.name}...")
+        log_fn(f"[INFO] Using Docling (PyPdfium Backend) to extract structured content from {file_path.name}...")
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -70,19 +70,19 @@ def extract_structured_text(file_path: Path, log_fn: Callable = print) -> str:
         markdown_content = result.document.export_to_markdown()
         
         if not markdown_content.strip():
-            log_fn(f"⚠️ Docling returned empty content for {file_path.name}. Falling back...")
+            log_fn(f"[WARNING] Docling returned empty content for {file_path.name}. Falling back...")
             return _basic_extract(file_path)
             
-        log_fn(f"✅ Extracted {len(markdown_content)} characters of structured Markdown.")
+        log_fn(f"[SUCCESS] Extracted {len(markdown_content)} characters of structured Markdown.")
         return markdown_content
         
     except ImportError as e:
-        log_fn(f"⚠️ Docling or backend not found ({e}). Using basic extraction fallback.")
+        log_fn(f"[WARNING] Docling or backend not found ({e}). Using basic extraction fallback.")
         return _basic_extract(file_path)
     except Exception as e:
-        log_fn(f"⚠️ Docling extraction failed for {file_path.name}: {e}. Using fallback.")
+        log_fn(f"[WARNING] Docling extraction failed for {file_path.name}: {e}. Using fallback.")
         try:
             return _basic_extract(file_path)
         except Exception as fallback_err:
-            log_fn(f"❌ Fallback extraction also failed: {fallback_err}")
+            log_fn(f"[ERROR] Fallback extraction also failed: {fallback_err}")
             raise

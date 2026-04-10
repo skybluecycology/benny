@@ -1,17 +1,29 @@
 import { useState, useEffect } from 'react';
 import { Brain, Upload, Zap, Loader, ChevronDown, ChevronUp, Book, Trash2, Database } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { useLLMStatus } from '../../hooks/useLLMStatus';
+import { API_BASE_URL } from '../../constants';
 
 interface SynthesisPanelProps {
   onGraphUpdated?: () => void;
 }
 
-export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) {
-  const { currentWorkspace, activeLLMProvider, activeLLMModels, selectedDocuments, toggleSelectedDocument } = useWorkspaceStore();
+export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }) => {
+  const { 
+    currentWorkspace, 
+    activeLLMProvider, 
+    setActiveLLMProvider, 
+    activeLLMModels, 
+    setActiveLLMModel,
+    selectedDocuments, 
+    toggleSelectedDocument, 
+    setSynthesisResults 
+  } = useWorkspaceStore();
+  const { providers } = useLLMStatus(30000);
   const [ingestText, setIngestText] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<any>(null);
+  const [localResults, setLocalResults] = useState<any>(null);
   const [isExpanded, setIsExpanded] = useState(true);
   const [embeddingProvider, setEmbeddingProvider] = useState('local');
   const [indexedDocs, setIndexedDocs] = useState<string[]>([]);
@@ -24,8 +36,8 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
     try {
       const timestamp = Date.now();
       const [statusRes, mappedRes] = await Promise.all([
-        fetch(`http://localhost:8005/api/rag/status?workspace=${currentWorkspace}`),
-        fetch(`http://localhost:8005/api/graph/sources?workspace=${currentWorkspace}&t=${timestamp}`)
+        fetch(`${API_BASE_URL}/api/rag/status?workspace=${currentWorkspace}`),
+        fetch(`${API_BASE_URL}/api/graph/sources?workspace=${currentWorkspace}&t=${timestamp}`)
       ]);
       
       if (statusRes.ok) {
@@ -50,18 +62,18 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
     if (!window.confirm(`Remove ${doc} from the Knowledge Graph? This deletes all its extracted triples.`)) return;
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8005/api/graph/sources/${encodeURIComponent(doc)}?workspace=${currentWorkspace}`, {
+      const res = await fetch(`${API_BASE_URL}/api/graph/sources/${encodeURIComponent(doc)}?workspace=${currentWorkspace}`, {
         method: 'DELETE',
       });
       if (res.ok) {
         if (onGraphUpdated) onGraphUpdated();
         await fetchStatusAndMapped();
-        setResults({ error: null, success_msg: `Removed ${doc} from graph.` });
+        setLocalResults({ error: null, success_msg: `Removed ${doc} from graph.` });
       } else {
-        setResults({ error: "Failed to remove doc." });
+        setLocalResults({ error: "Failed to remove doc." });
       }
     } catch (err) {
-      setResults({ error: String(err) });
+      setLocalResults({ error: String(err) });
     } finally {
       setLoading(false);
     }
@@ -71,10 +83,11 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
   const handleIngest = async () => {
     if (!ingestText.trim()) return;
     setLoading(true);
-    setResults(null);
+    setLocalResults(null);
+    setSynthesisResults(null);
 
     try {
-      const res = await fetch('http://localhost:8005/api/graph/ingest', {
+      const res = await fetch(`${API_BASE_URL}/api/graph/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,17 +104,18 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
 
       if (res.ok) {
         const data = await res.json();
-        setResults(data);
+        setLocalResults(data);
+        setSynthesisResults(data);
         setIngestText('');
         setSourceName('');
         await fetchStatusAndMapped();
         if (onGraphUpdated) onGraphUpdated();
       } else {
         const err = await res.text();
-        setResults({ error: err });
+        setLocalResults({ error: err });
       }
     } catch (err) {
-      setResults({ error: String(err) });
+      setLocalResults({ error: String(err) });
     } finally {
       setLoading(false);
     }
@@ -110,10 +124,11 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
   const handleIngestFiles = async () => {
     if (selectedDocuments.length === 0) return;
     setLoading(true);
-    setResults(null);
+    setLocalResults(null);
+    setSynthesisResults(null);
 
     try {
-      const res = await fetch('http://localhost:8005/api/graph/ingest-files', {
+      const res = await fetch(`${API_BASE_URL}/api/graph/ingest-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -131,15 +146,16 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
 
       if (res.ok) {
         const data = await res.json();
-        setResults(data);
+        setLocalResults(data);
+        setSynthesisResults(data);
         await fetchStatusAndMapped();
         if (onGraphUpdated) onGraphUpdated();
       } else {
         const err = await res.text();
-        setResults({ error: err });
+        setLocalResults({ error: err });
       }
     } catch (err) {
-      setResults({ error: String(err) });
+      setLocalResults({ error: String(err) });
     } finally {
       setLoading(false);
     }
@@ -147,10 +163,11 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
 
   const handleSynthesize = async () => {
     setLoading(true);
-    setResults(null);
+    setLocalResults(null);
+    setSynthesisResults(null);
 
     try {
-      const res = await fetch('http://localhost:8005/api/graph/synthesize', {
+      const res = await fetch(`${API_BASE_URL}/api/graph/synthesize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -162,14 +179,15 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
 
       if (res.ok) {
         const data = await res.json();
-        setResults(data);
+        setLocalResults(data);
+        setSynthesisResults(data);
         if (onGraphUpdated) onGraphUpdated();
       } else {
         const err = await res.text();
-        setResults({ error: err });
+        setLocalResults({ error: err });
       }
     } catch (err) {
-      setResults({ error: String(err) });
+      setLocalResults({ error: String(err) });
     } finally {
       setLoading(false);
     }
@@ -293,6 +311,54 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
               </p>
               
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>LLM Provider</label>
+                  <select
+                    value={activeLLMProvider}
+                    onChange={(e) => setActiveLLMProvider(e.target.value)}
+                    className="synthesis-select"
+                    style={{ width: '100%' }}
+                    title="Select LLM Provider"
+                    aria-label="Select LLM Provider"
+                  >
+                    {Object.entries(providers).map(([id, p]) => (
+                      <option key={id} value={id}>{p.name} {p.running ? '●' : '○'}</option>
+                    ))}
+                    <optgroup label="Cloud">
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Model</label>
+                  <select
+                    value={activeLLMModels[activeLLMProvider] || ''}
+                    onChange={(e) => setActiveLLMModel(activeLLMProvider, e.target.value)}
+                    className="synthesis-select"
+                    style={{ width: '100%' }}
+                    title="Select Model"
+                    aria-label="Select Model"
+                  >
+                    {!providers[activeLLMProvider] ? (
+                       <option value="">Loading models...</option>
+                    ) : providers[activeLLMProvider]?.models?.data?.length > 0 ? (
+                      providers[activeLLMProvider].models.data.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.id} {m.status === 'fallback' ? '(NPU Fallback)' : ''}
+                        </option>
+                      ))
+                    ) : (
+                      <optgroup label="Default Fallbacks">
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                 <div style={{ flex: '0 0 100px' }}>
                   <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Delay (s)</label>
                   <input 
@@ -367,40 +433,40 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
           )}
 
           {/* Results */}
-          {results && (
+          {localResults && (
             <div className="synthesis-results">
-              {results.error ? (
-                <div className="synthesis-error">❌ {results.error}</div>
+              {localResults.error ? (
+                <div className="synthesis-error">❌ {localResults.error}</div>
               ) : (
                 <>
-                  {results.success_msg && (
+                  {localResults.success_msg && (
                     <div className="synthesis-stat success">
-                      ✅ {results.success_msg}
+                      ✅ {localResults.success_msg}
                     </div>
                   )}
-                  {results.triples_extracted !== undefined && (
+                  {localResults.triples_extracted !== undefined && (
                     <div className="synthesis-stat">
-                      ✅ {results.triples_extracted} triples extracted, {results.triples_stored} stored
+                      ✅ {localResults.triples_extracted} triples extracted, {localResults.triples_stored} stored
                     </div>
                   )}
-                  {results.conflicts_detected > 0 && (
+                  {localResults.conflicts_detected > 0 && (
                     <div className="synthesis-stat conflict">
-                      ⚠️ {results.conflicts_detected} conflicts detected
+                      ⚠️ {localResults.conflicts_detected} conflicts detected
                     </div>
                   )}
-                  {results.concepts_embedded > 0 && (
+                  {localResults.concepts_embedded > 0 && (
                     <div className="synthesis-stat">
-                      🧮 {results.concepts_embedded} concepts embedded
+                      🧮 {localResults.concepts_embedded} concepts embedded
                     </div>
                   )}
-                  {results.analogies_found !== undefined && (
+                  {localResults.analogies_found !== undefined && (
                     <div className="synthesis-stat">
-                      🔗 {results.analogies_found} analogies discovered
+                      🔗 {localResults.analogies_found} analogies discovered
                     </div>
                   )}
-                  {results.triples && results.triples.length > 0 && (
+                  {localResults.triples && localResults.triples.length > 0 && (
                     <div className="synthesis-triples">
-                      {results.triples.map((t: string[], i: number) => (
+                      {localResults.triples.map((t: string[], i: number) => (
                         <div key={i} className="triple-item">
                           <span className="triple-subject">{t[0]}</span>
                           <span className="triple-predicate">{t[1]}</span>
@@ -409,9 +475,9 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
                       ))}
                     </div>
                   )}
-                  {results.analogies && results.analogies.length > 0 && (
+                  {localResults.analogies && localResults.analogies.length > 0 && (
                     <div className="synthesis-analogies">
-                      {results.analogies.map((a: any, i: number) => (
+                      {localResults.analogies.map((a: any, i: number) => (
                         <div key={i} className="analogy-item">
                           <strong>{a.concept_a} ↔ {a.concept_b}</strong>
                           <p>{a.description}</p>
@@ -428,4 +494,6 @@ export default function SynthesisPanel({ onGraphUpdated }: SynthesisPanelProps) 
       )}
     </div>
   );
-}
+};
+
+export default SynthesisPanel;

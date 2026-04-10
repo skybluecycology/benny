@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { API_BASE_URL } from '../constants';
 
 interface WorkspaceState {
   currentWorkspace: string;
@@ -14,6 +15,11 @@ interface WorkspaceState {
   setActiveDocument: (doc: { name: string, subdir: 'data_in' | 'data_out' | 'rag_status' } | null) => void;
   selectedDocuments: string[];
   toggleSelectedDocument: (name: string) => void;
+  synthesisResults: any;
+  setSynthesisResults: (results: any) => void;
+  synthesisHistory: any[];
+  fetchSynthesisHistory: () => Promise<void>;
+  deleteRun: (runId: string) => Promise<boolean>;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -22,12 +28,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   fetchWorkspaces: async () => {
     try {
-      const response = await fetch('http://localhost:8005/api/workspaces');
+      const response = await fetch(`${API_BASE_URL}/api/workspaces`);
       if (response.ok) {
         const data = await response.json();
-        // Assuming data is { workspaces: string[] } or just string[]
-        // API returns list_workspaces() which is usually string[]
-        const workspaceList = Array.isArray(data) ? data : (data.workspaces || []);
+        const rawList = Array.isArray(data) ? data : (data.workspaces || []);
+        
+        // Robustness: ensure we only have strings (IDs)
+        const workspaceList = rawList.map((ws: any) => typeof ws === 'object' ? ws.id : ws).filter(Boolean);
         
         // Ensure default is always there
         if (!workspaceList.includes('default')) {
@@ -43,7 +50,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   createWorkspace: async (name: string) => {
     try {
-      const response = await fetch(`http://localhost:8005/api/workspaces/${name}`, {
+      const response = await fetch(`${API_BASE_URL}/api/workspaces/${name}`, {
         method: 'POST'
       });
       
@@ -69,8 +76,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   activeLLMModels: { 
-    lemonade: 'DeepSeek-R1-Distill-Llama-8B-FLM',
-    lmstudio: 'Gemma 4'
+    lemonade: 'deepseek-r1-8b-FLM',
+    lmstudio: 'openai/Gemma-4-E4B-it-GGUF',
+    litert: 'litert/gemma-4-E4B-it.litertlm'
   },
 
   setActiveLLMModel: (provider: string, model: string) => {
@@ -94,5 +102,41 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ? state.selectedDocuments.filter((doc) => doc !== name)
         : [...state.selectedDocuments, name]
     }));
+  },
+
+  synthesisResults: null,
+  setSynthesisResults: (results: any) => {
+    set({ synthesisResults: results });
+  },
+
+  synthesisHistory: [],
+  fetchSynthesisHistory: async () => {
+    const { currentWorkspace } = get();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/graph/history?workspace=${currentWorkspace}`);
+      if (response.ok) {
+        const data = await response.json();
+        set({ synthesisHistory: data.history || [] });
+      }
+    } catch (error) {
+      console.error('Failed to fetch synthesis history:', error);
+    }
+  },
+
+  deleteRun: async (runId: string) => {
+    const { currentWorkspace } = get();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/graph/runs/${runId}?workspace=${currentWorkspace}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        await get().fetchSynthesisHistory();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to delete run:', error);
+      return false;
+    }
   }
 }));

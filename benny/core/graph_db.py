@@ -39,6 +39,7 @@ def close_driver():
 
 def verify_connectivity() -> dict:
     """Verify Neo4j is reachable and return server info."""
+    from neo4j.exceptions import ServiceUnavailable, AuthError
     try:
         driver = get_driver()
         driver.verify_connectivity()
@@ -50,6 +51,18 @@ def verify_connectivity() -> dict:
                 "ping": record["ping"],
                 "uri": NEO4J_URI
             }
+    except ServiceUnavailable:
+        return {
+            "status": "unavailable",
+            "error": "Could not connect to Neo4j. Is the server running on " + NEO4J_URI + "?",
+            "uri": NEO4J_URI
+        }
+    except AuthError:
+        return {
+            "status": "auth_error",
+            "error": "Neo4j authentication failed. Check your username and password.",
+            "uri": NEO4J_URI
+        }
     except Exception as e:
         return {
             "status": "error",
@@ -88,6 +101,11 @@ def init_schema():
             CREATE CONSTRAINT source_unique IF NOT EXISTS
             FOR (s:Source) REQUIRE (s.name, s.workspace) IS UNIQUE
         """)
+        # Unique constraint on SynthesisRun id
+        session.run("""
+            CREATE CONSTRAINT run_unique IF NOT EXISTS
+            FOR (r:SynthesisRun) REQUIRE (r.run_id) IS UNIQUE
+        """)
         # Vector index for concept embeddings (Neo4j 5 native vector)
         try:
             session.run("""
@@ -123,7 +141,8 @@ def add_triple(
     subject_type: str = "Concept",
     object_type: str = "Concept",
     citation: str = "",
-    confidence: float = 1.0
+    confidence: float = 1.0,
+    run_id: Optional[str] = None
 ) -> dict:
     """
     Add a knowledge triple to the graph.
@@ -151,7 +170,8 @@ def add_triple(
                 citation: $citation,
                 confidence: $confidence,
                 created_at: datetime(),
-                timestamp: $timestamp
+                timestamp: $timestamp,
+                run_id: $run_id
             }]->(o)
             
             RETURN elementId(s) AS sid, elementId(o) AS oid, elementId(r) AS rid
@@ -159,7 +179,7 @@ def add_triple(
              workspace=workspace, source_name=source_name or "",
              metadata=meta_json, timestamp=timestamp or "",
              section=section or "", citation=citation, confidence=confidence,
-             subject_type=subject_type, object_type=object_type)
+             subject_type=subject_type, object_type=object_type, run_id=run_id or "")
         
         record = result.single()
         return {
@@ -168,6 +188,70 @@ def add_triple(
             "relation_id": record["rid"],
             "triple": [subject, predicate, obj]
         }
+
+
+def batch_add_triples(
+    triples: List[Dict[str, Any]],
+    workspace: str = "default",
+    source_name: Optional[str] = None,
+    run_id: Optional[str] = None
+) -> dict:
+    """
+    Add multiple knowledge triples in a single broad transaction.
+    Uses Cypher UNWIND for maximum performance.
+    """
+    driver = get_driver()
+    processed_triples = []
+    for t in triples:
+        processed_triples.append({
+            "subject": t.get("subject", ""),
+            "predicate": t.get("predicate", ""),
+            "obj": t.get("object", ""),
+            "subject_type": t.get("subject_type", "Concept"),
+            "object_type": t.get("object_type", "Concept"),
+            "citation": t.get("citation", ""),
+            "confidence": float(t.get("confidence", 1.0)),
+            "section": t.get("section_title", source_name or ""),
+            "timestamp": t.get("timestamp", ""),
+            "metadata": json.dumps(t.get("metadata", {}))
+        })
+
+    with driver.session() as session:
+        session.run("""
+            UNWIND $triples AS t
+            
+            MERGE (s:Concept {name: t.subject, workspace: $workspace})
+            ON CREATE SET s.created_at = datetime(), s.node_type = t.subject_type
+            ON MATCH SET s.node_type = t.subject_type
+            
+            MERGE (o:Concept {name: t.obj, workspace: $workspace})
+            ON CREATE SET o.created_at = datetime(), o.node_type = t.object_type
+            ON MATCH SET o.node_type = t.object_type
+            
+            CREATE (s)-[r:RELATES_TO {
+                predicate: t.predicate,
+                source: $source_name,
+                metadata: t.metadata,
+                section: t.section,
+                citation: t.citation,
+                confidence: t.confidence,
+                created_at: datetime(),
+                timestamp: t.timestamp,
+                run_id: $run_id
+            }]->(o)
+            
+            // Batch Source Linkage
+            WITH s, o, r, $run_id AS run_id, $source_name AS source_name, $workspace AS workspace
+            MERGE (src_node:Source {name: source_name, workspace: workspace})
+            ON CREATE SET src_node.created_at = datetime()
+            MERGE (s)-[:SOURCED_FROM]->(src_node)
+            MERGE (o)-[:SOURCED_FROM]->(src_node)
+            
+            RETURN count(r) AS count
+        """, triples=processed_triples, workspace=workspace, 
+             source_name=source_name or "", run_id=run_id or "")
+             
+    return {"status": "batch_completed", "count": len(processed_triples)}
 
 
 def add_source_link(concept_name: str, source_name: str, workspace: str = "default") -> dict:
@@ -451,3 +535,89 @@ def delete_source_from_graph(source_name: str, workspace: str = "default") -> di
         """, workspace=workspace)
         
     return {"status": "deleted", "source": source_name, "workspace": workspace}
+
+
+def create_synthesis_run(
+    run_id: str,
+    partition_key: str,
+    model: str,
+    workspace: str,
+    files: List[str],
+    version: str = "1.0.0",
+    artifact_path: str = ""
+) -> dict:
+    """Create a new SynthesisRun node with metadata."""
+    driver = get_driver()
+    with driver.session() as session:
+        session.run("""
+            MERGE (r:SynthesisRun {run_id: $run_id})
+            ON CREATE SET 
+                r.partition_key = $pk,
+                r.model = $model,
+                r.workspace = $workspace,
+                r.files = $files,
+                r.version = $version,
+                r.artifact_path = $artifact_path,
+                r.created_at = datetime()
+        """, run_id=run_id, pk=partition_key, model=model,
+             workspace=workspace, files=files, version=version,
+             artifact_path=artifact_path)
+    return {"status": "run_created", "run_id": run_id}
+
+
+def get_synthesis_history(workspace: str = "default") -> List[dict]:
+    """List all synthesis runs in a workspace."""
+    driver = get_driver()
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (r:SynthesisRun {workspace: $workspace})
+            RETURN r.run_id AS run_id, r.model AS model, r.timestamp AS timestamp, 
+                   r.files AS files, r.version AS version, r.created_at AS created_at,
+                   r.partition_key AS partition_key
+            ORDER BY r.created_at DESC
+        """, workspace=workspace)
+        return [dict(rec) for rec in result]
+
+
+def delete_synthesis_run(run_id: str, workspace: str = "default") -> dict:
+    """Delete a specific run and all its associated triples."""
+    driver = get_driver()
+    with driver.session() as session:
+        # 1. Delete all edges tagged with this run_id
+        session.run("""
+            MATCH ()-[r:RELATES_TO {run_id: $run_id}]->()
+            DELETE r
+        """, run_id=run_id)
+        
+        # 2. Delete the SynthesisRun node
+        session.run("""
+            MATCH (r:SynthesisRun {run_id: $run_id, workspace: $workspace})
+            DELETE r
+        """, run_id=run_id, workspace=workspace)
+        
+        # 3. Cleanup orphaned concepts
+        session.run("""
+            MATCH (c:Concept {workspace: $workspace})
+            WHERE NOT (c)--()
+            DELETE c
+        """, workspace=workspace)
+        
+    return {"status": "run_deleted", "run_id": run_id}
+
+
+def update_graph_centrality(workspace: str = "default") -> dict:
+    """
+    Calculate betweenness centrality for all nodes in the workspace
+    and store it as a 'centrality' property.
+    This uses a simplified calculation or Neo4j GDS if available.
+    """
+    # For now, we'll use a simple degree-based importance proxy 
+    # as a placeholder for full betweenness centrality.
+    driver = get_driver()
+    with driver.session() as session:
+        session.run("""
+            MATCH (c:Concept {workspace: $workspace})
+            WITH c, count{(c)--()} AS importance
+            SET c.centrality = importance
+        """, workspace=workspace)
+    return {"status": "centrality_updated"}

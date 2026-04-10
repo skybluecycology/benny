@@ -26,10 +26,14 @@ MANIFEST
 venv/
 env/
 ENV/
-.env
+.env*
 
 # VS Code
 .vscode/
+
+# Models
+benny/models/
+serve/
 
 # Application Data
 workspace/

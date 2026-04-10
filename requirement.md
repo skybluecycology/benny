@@ -83,7 +83,7 @@ Benny supports three local LLM providers out of the box for easy testing and pri
 
 | Provider       | Port  | API Style         | Use Case                                   |
 | -------------- | ----- | ----------------- | ------------------------------------------ |
-| **Lemonade**   | 8080  | OpenAI-compatible | AMD NPU acceleration, fastest local option |
+| **Lemonade**   | 13305  | OpenAI-compatible | AMD NPU acceleration, fastest local option |
 | **Ollama**     | 11434 | OpenAI-compatible | Popular, wide model support                |
 | **FastFlowLM** | 52625 | OpenAI-compatible | Intel NPU acceleration                     |
 
@@ -98,11 +98,11 @@ import os
 LOCAL_PROVIDERS = {
     "lemonade": {
         "name": "Lemonade",
-        "port": 8080,
-        "base_url": "http://localhost:8080/api/v1",
+        "port": 13305,
+        "base_url": "http://localhost:13305/api/v1",
         "api_key": "not-needed",  # Local server, no key required
         "description": "AMD NPU accelerated inference",
-        "startup_cmd": "lemonade-server serve --port 8080"
+        "startup_cmd": "LemonadeServer.exe serve --port 13305"
     },
     "ollama": {
         "name": "Ollama",
@@ -245,9 +245,9 @@ SERVICE_COMMANDS = {
         "check": "http://localhost:11434/v1/models"
     },
     "lemonade": {
-        "start": "lemonade-server serve --port 8080",
+        "start": "LemonadeServer.exe serve --port 13305",
         "stop": "taskkill /FI \"WINDOWTITLE eq lemonade*\" /F",
-        "check": "http://localhost:8080/api/v1/models"
+        "check": "http://localhost:13305/api/v1/models"
     },
     "fastflowlm": {
         "start": None,  # Manual start required
@@ -408,8 +408,8 @@ const LLMManager: React.FC = () => {
 REM manage_llm.bat - LLM service management
 
 if "%1"=="start-lemonade" (
-    start "lemonade" cmd /k "lemonade-server serve --port 8080"
-    echo Started Lemonade on port 8080
+    start "lemonade" cmd /k "LemonadeServer.exe serve --port 13305"
+    echo Started Lemonade on port 13305
 )
 
 if "%1"=="start-ollama" (
@@ -425,7 +425,7 @@ if "%1"=="stop-all" (
 
 if "%1"=="status" (
     echo Checking LLM services...
-    curl -s http://localhost:8080/api/v1/models >nul 2>&1 && echo Lemonade: RUNNING || echo Lemonade: STOPPED
+    curl -s http://localhost:13305/api/v1/models >nul 2>&1 && echo Lemonade: RUNNING || echo Lemonade: STOPPED
     curl -s http://localhost:11434/v1/models >nul 2>&1 && echo Ollama: RUNNING || echo Ollama: STOPPED
     curl -s http://localhost:52625/v1/models >nul 2>&1 && echo FastFlowLM: RUNNING || echo FastFlowLM: STOPPED
 )

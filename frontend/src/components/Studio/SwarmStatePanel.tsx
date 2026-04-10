@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy } from 'lucide-react';
+import { API_BASE_URL } from '../../constants';
 
 interface TaskItem {
   task_id: string;
@@ -29,7 +30,7 @@ interface SwarmStatePanelProps {
   executionId: string | null;
 }
 
-const API_BASE = 'http://localhost:8005';
+const API_BASE = API_BASE_URL;
 
 export default function SwarmStatePanel({ executionId }: SwarmStatePanelProps) {
   const [state, setState] = useState<SwarmExecutionState | null>(null);

@@ -4,6 +4,7 @@ import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import WorkflowExportImport from './WorkflowExportImport';
 import ActiveLLMBadge from './ActiveLLMBadge';
+import { API_BASE_URL } from '../../constants';
 
 interface ExecutionBarProps {
   onNavigateToLLM?: () => void;
@@ -57,7 +58,7 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     setNodes(updatedNodes);
 
     try {
-      const response = await fetch('http://localhost:8005/api/workflows/execute', {
+      const response = await fetch(`${API_BASE_URL}/api/workflows/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -122,7 +123,7 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     
     setExecuting(true);
     try {
-      const response = await fetch('http://localhost:8005/api/workflow/execute', {
+      const response = await fetch(`${API_BASE_URL}/api/workflow/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -184,7 +185,7 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:8005/api/workflows', {
+      const response = await fetch(`${API_BASE_URL}/api/workflows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -41,7 +41,7 @@ export default function WorkspaceSelector() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Folder size={14} className="text-secondary" />
             <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {currentWorkspace}
+              {typeof currentWorkspace === 'string' ? currentWorkspace : (currentWorkspace as any)?.id || 'Select...'}
             </span>
           </div>
           <ChevronDown size={14} />
@@ -61,7 +61,7 @@ export default function WorkspaceSelector() {
                   }}
                 >
                   <Folder size={14} />
-                  <span style={{ flex: 1 }}>{ws}</span>
+                  <span style={{ flex: 1 }}>{typeof ws === 'string' ? ws : (ws as any)?.id || 'Unnamed'}</span>
                   {ws === currentWorkspace && <Check size={12} />}
                 </button>
               ))}

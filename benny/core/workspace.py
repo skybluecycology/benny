@@ -3,8 +3,12 @@ Workspace Isolation - Multi-tenant workspace management
 """
 
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import os
+import yaml
+import json
+
+from .schema import WorkspaceManifest
 
 
 # Base workspace directory
@@ -28,19 +32,10 @@ def get_workspace_path(workspace_id: str = "default", subdir: str = "") -> Path:
 
 def ensure_workspace_structure(workspace_id: str = "default") -> dict:
     """
-    Create workspace directory structure if it doesn't exist.
-    
-    Structure:
-        workspace/{id}/
-        ├── agents/        # Saved agent configurations
-        ├── chromadb/      # Vector store
-        ├── data_in/       # Input files
-        ├── data_out/      # Generated artifacts
-        ├── reports/       # Final outputs
-        └── skills/        # Custom skill definitions
+    Create workspace directory structure and initial manifest if it doesn't exist.
     """
     base = get_workspace_path(workspace_id)
-    subdirs = ["agents", "chromadb", "data_in", "data_out", "reports", "skills"]
+    subdirs = ["agents", "chromadb", "data_in", "data_out", "reports", "skills", "runs", "staging"]
     
     created = []
     for subdir in subdirs:
@@ -49,15 +44,53 @@ def ensure_workspace_structure(workspace_id: str = "default") -> dict:
             path.mkdir(parents=True, exist_ok=True)
             created.append(subdir)
     
+    # Initialize manifest if missing
+    manifest_path = base / "manifest.yaml"
+    if not manifest_path.exists():
+        manifest = WorkspaceManifest(version="1.0.0")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            yaml.dump(manifest.dict(), f, sort_keys=False)
+        created.append("manifest.yaml")
+    
     return {
+        "status": "ready",
         "workspace_id": workspace_id,
         "path": str(base.absolute()),
-        "created_dirs": created
+        "created_dirs": [d for d in created if d != "manifest.yaml"],
+        "manifest_created": "manifest.yaml" in created,
+        "isolation": "scoped_directory_structure"
     }
 
 
+def load_manifest(workspace_id: str) -> WorkspaceManifest:
+    """Load and validate the workspace manifest (YAML)."""
+    path = get_workspace_path(workspace_id) / "manifest.yaml"
+    if not path.exists():
+        return WorkspaceManifest(version="1.0.0")
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if not data:
+            return WorkspaceManifest(version="1.0.0")
+        return WorkspaceManifest(**data)
+    except Exception as e:
+        print(f"[WARNING] Error loading manifest for {workspace_id}: {e}")
+        return WorkspaceManifest(version="1.0.0")
+
+
+def save_manifest(workspace_id: str, manifest: WorkspaceManifest) -> None:
+    """Save the workspace manifest to YAML."""
+    path = get_workspace_path(workspace_id) / "manifest.yaml"
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(manifest.dict(), f, sort_keys=False)
+
+
 def list_workspaces() -> List[dict]:
-    """List all available workspaces"""
+    """
+    List all workspaces and act as a Discovery Catalog crawler.
+    Enriches the results with manifest metadata for centralized observability.
+    """
     if not WORKSPACE_ROOT.exists():
         WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
         return []
@@ -65,11 +98,13 @@ def list_workspaces() -> List[dict]:
     workspaces = []
     for item in WORKSPACE_ROOT.iterdir():
         if item.is_dir():
+            manifest = load_manifest(item.name)
             workspaces.append({
                 "id": item.name,
                 "path": str(item.absolute()),
                 "has_chromadb": (item / "chromadb").exists(),
-                "has_data": (item / "data_in").exists() and any((item / "data_in").iterdir()) if (item / "data_in").exists() else False
+                "has_data": (item / "data_in").exists() and any((item / "data_in").iterdir()) if (item / "data_in").exists() else False,
+                "manifest": manifest.dict()  # Enriched discovery metadata
             })
     
     return workspaces
