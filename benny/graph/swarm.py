@@ -11,6 +11,8 @@ Architecture:
 
 from __future__ import annotations
 
+import logging
+
 import os
 import json
 import asyncio
@@ -23,7 +25,9 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send, Command
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from litellm import completion
+from litellm import completion, acompletion
+
+logger = logging.getLogger(__name__)
 
 from ..core.state import SwarmState, TaskItem, PartialResult, create_swarm_state
 from ..core.workspace import get_workspace_path
@@ -52,10 +56,11 @@ def get_governance_url(execution_id: str, workflow_name: str = "swarm") -> str:
 # SKILL DISCOVERY (Bricolage Pattern)
 # =============================================================================
 
-def discover_skills() -> Dict[str, str]:
+def discover_skills() -> Dict[str, Dict[str, Any]]:
     """
     Discover available skills from benny/skills/ directory.
-    Returns dict of skill_name -> skill_description
+    Returns dict of skill_name -> {description, priority}.
+    Skills with 'priority: high' in front-matter are ranked first.
     """
     skills = {}
     if SKILLS_DIR.exists():
@@ -66,9 +71,22 @@ def discover_skills() -> Dict[str, str]:
                 content = skill_file.read_text(encoding="utf-8")
                 # Extract first line as description
                 first_line = content.split("\n")[0].strip("# ")
-                skills[skill_file.stem] = first_line
+                # Extract priority from front-matter if present
+                priority = "normal"
+                if content.startswith("---"):
+                    fm_end = content.find("---", 3)
+                    if fm_end != -1:
+                        fm = content[3:fm_end]
+                        if "priority: high" in fm:
+                            priority = "high"
+                        elif "priority: low" in fm:
+                            priority = "low"
+                skills[skill_file.stem] = {
+                    "description": first_line,
+                    "priority": priority 
+                }
             except Exception:
-                skills[skill_file.stem] = "Skill available"
+                skills[skill_file.stem] = {"description": "Skill available", "priority": "normal"}
     return skills
 
 
@@ -90,7 +108,10 @@ def planner_node(state: SwarmState) -> Dict[str, Any]:
     Acts as a "bricoleur" by looking for existing skills first.
     """
     available_skills = discover_skills()
-    skills_list = "\n".join([f"- {name}: {desc}" for name, desc in available_skills.items()])
+    # Sort by priority (high first)
+    priority_order = {"high": 0, "normal": 1, "low": 2}
+    sorted_skills = sorted(available_skills.items(), key=lambda x: priority_order.get(x[1].get("priority", "normal"), 1))
+    skills_list = "\n".join([f"- {name}: {info['description']} [priority: {info['priority']}]" for name, info in sorted_skills])
     
     system_prompt = f"""You are a task decomposition expert. Break down the user's request into 3-7 discrete, executable tasks.
 
@@ -113,7 +134,7 @@ Rules:
     user_prompt = f"Decompose this request into tasks:\n\n{state['original_request']}"
     
     try:
-        response = completion(
+        response = await acompletion(
             model=state.get("model", "ollama/llama3.2"),
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -155,6 +176,7 @@ Rules:
             }
             
     except Exception as e:
+        logger.error("Planner LLM error: %s", e)
         return {
             "errors": [f"Planner LLM error: {str(e)}"],
             "status": "failed"
@@ -276,7 +298,7 @@ If the task requires research or data you don't have, clearly state assumptions.
 
         user_prompt = f"Execute this task:\n\n{description}"
         
-        response = completion(
+        response = await acompletion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},

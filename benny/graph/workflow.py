@@ -5,6 +5,7 @@ Deterministic workflow execution with conditional routing and HITL checkpoints
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Literal, TypedDict, Optional, Any
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -12,6 +13,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from litellm import completion
 import json
+
+logger = logging.getLogger(__name__)
 
 from ..core.state import GraphState
 
@@ -175,7 +178,12 @@ def format_output(state: WorkflowState) -> dict:
 # =============================================================================
 
 def should_use_tool(state: WorkflowState) -> Literal["execute_tool", "human_review", "format_output"]:
-    """Determine if tool execution is needed"""
+    """Determine if tool execution is needed. Error-aware: routes to output on failure."""
+    # If there was an error in the LLM call, skip tools and go to output
+    if state.get("error"):
+        logger.warning("Error detected in state, routing to format_output: %s", state["error"])
+        return "format_output"
+
     context = state.get("context", {})
     
     if context.get("pending_tool"):

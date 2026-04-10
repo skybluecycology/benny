@@ -1,11 +1,41 @@
-import { useState, useEffect } from 'react';
-import { Brain, Upload, Zap, Loader, ChevronDown, ChevronUp, Book, Trash2, Database } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Brain, Upload, Zap, Loader, ChevronDown, ChevronUp, Book, Trash2, Database, AlertTriangle, CheckCircle, XCircle, Eye, BarChart3, Clock } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { useLLMStatus } from '../../hooks/useLLMStatus';
 import { API_BASE_URL } from '../../constants';
 
 interface SynthesisPanelProps {
   onGraphUpdated?: () => void;
+}
+
+interface IngestionProgress {
+  run_id: string;
+  status: 'connecting' | 'running' | 'completed' | 'error';
+  message: string;
+  current_section?: number;
+  total_sections?: number;
+  triples_extracted?: number;
+  conflicts_found?: number;
+  concepts_embedded?: number;
+  total_concepts?: number;
+  events: Array<{ event: string; message: string; timestamp: number }>;
+}
+
+interface TripleCard {
+  subject: string;
+  subject_type: string;
+  predicate: string;
+  object: string;
+  object_type: string;
+  citation: string;
+  confidence: number;
+  section_title?: string;
+}
+
+interface ConflictItem {
+  concept_a: string;
+  concept_b: string;
+  description: string;
 }
 
 export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }) => {
@@ -31,6 +61,20 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
   const [synthesisDirection, setSynthesisDirection] = useState('');
   const [embeddingModel, setEmbeddingModel] = useState('nomic-embed-text-v1-GGUF');
   const [inferenceDelay, setInferenceDelay] = useState(2.0);
+
+  // SSE Progress Tracking
+  const [ingestionProgress, setIngestionProgress] = useState<IngestionProgress | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Triple Inspector & Conflict Resolution
+  const [inspectTriples, setInspectTriples] = useState<TripleCard[]>([]);
+  const [activeConflicts, setActiveConflicts] = useState<ConflictItem[]>([]);
+  const [showTripleInspector, setShowTripleInspector] = useState(false);
+  const [showConflictPanel, setShowConflictPanel] = useState(false);
+
+  // Synthesis History
+  const [showHistory, setShowHistory] = useState(false);
+  const { synthesisHistory, fetchSynthesisHistory, deleteRun } = useWorkspaceStore();
 
   const fetchStatusAndMapped = async () => {
     try {
@@ -58,6 +102,96 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     fetchStatusAndMapped();
   }, [currentWorkspace]);
 
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  const connectSSE = (runId: string) => {
+    // Close any existing connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const progress: IngestionProgress = {
+      run_id: runId,
+      status: 'connecting',
+      message: 'Connecting to ingestion stream...',
+      events: []
+    };
+    setIngestionProgress(progress);
+
+    const es = new EventSource(`${API_BASE_URL}/api/graph/ingest/events/${runId}`);
+    eventSourceRef.current = es;
+
+    // Dispatch custom event for KnowledgeGraphCanvas to listen to
+    window.dispatchEvent(new CustomEvent('benny:ingestion-started', { detail: { run_id: runId } }));
+
+    const handleEvent = (eventType: string) => (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        setIngestionProgress(prev => {
+          if (!prev) return null;
+          const updated = { ...prev };
+          updated.status = 'running';
+          updated.message = data.message || eventType;
+          updated.events = [...prev.events, { event: eventType, message: data.message, timestamp: Date.now() }];
+
+          if (data.data) {
+            if (data.data.current !== undefined) updated.current_section = data.data.current;
+            if (data.data.total !== undefined) updated.total_sections = data.data.total;
+            if (data.data.count !== undefined) updated.triples_extracted = data.data.count;
+            if (data.data.conflicts !== undefined) updated.conflicts_found = data.data.conflicts;
+            if (data.data.completed !== undefined) updated.concepts_embedded = data.data.completed;
+            if (data.data.total !== undefined && eventType === 'embedding_progress') updated.total_concepts = data.data.total;
+          }
+
+          if (eventType === 'completed') {
+            updated.status = 'completed';
+          } else if (eventType === 'error') {
+            updated.status = 'error';
+          }
+
+          return updated;
+        });
+      } catch (err) {
+        console.error('SSE parse error:', err);
+      }
+    };
+
+    es.addEventListener('started', handleEvent('started'));
+    es.addEventListener('section_progress', handleEvent('section_progress'));
+    es.addEventListener('triples_extracted', handleEvent('triples_extracted'));
+    es.addEventListener('conflicts_checked', handleEvent('conflicts_checked'));
+    es.addEventListener('stored', handleEvent('stored'));
+    es.addEventListener('embedding_progress', handleEvent('embedding_progress'));
+    es.addEventListener('centrality_updated', handleEvent('centrality_updated'));
+    es.addEventListener('completed', (e: MessageEvent) => {
+      handleEvent('completed')(e);
+      es.close();
+      eventSourceRef.current = null;
+      setLoading(false);
+      fetchStatusAndMapped();
+      if (onGraphUpdated) onGraphUpdated();
+    });
+    es.addEventListener('error', (e: MessageEvent) => {
+      handleEvent('error')(e);
+      es.close();
+      eventSourceRef.current = null;
+      setLoading(false);
+    });
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+      setLoading(false);
+    };
+  };
+
   const handleRemoveFromGraph = async (doc: string) => {
     if (!window.confirm(`Remove ${doc} from the Knowledge Graph? This deletes all its extracted triples.`)) return;
     setLoading(true);
@@ -78,7 +212,6 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
       setLoading(false);
     }
   };
-
 
   const handleIngest = async () => {
     if (!ingestText.trim()) return;
@@ -108,6 +241,17 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
         setSynthesisResults(data);
         setIngestText('');
         setSourceName('');
+        
+        // Populate triple inspector and conflicts
+        if (data.triples) {
+          setInspectTriples(data.triples);
+          setShowTripleInspector(true);
+        }
+        if (data.conflicts && data.conflicts.length > 0) {
+          setActiveConflicts(data.conflicts);
+          setShowConflictPanel(true);
+        }
+        
         await fetchStatusAndMapped();
         if (onGraphUpdated) onGraphUpdated();
       } else {
@@ -126,6 +270,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
     setLoading(true);
     setLocalResults(null);
     setSynthesisResults(null);
+    setIngestionProgress(null);
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/graph/ingest-files`, {
@@ -146,17 +291,18 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
 
       if (res.ok) {
         const data = await res.json();
-        setLocalResults(data);
-        setSynthesisResults(data);
-        await fetchStatusAndMapped();
-        if (onGraphUpdated) onGraphUpdated();
+        // Connect to SSE stream for real-time progress
+        if (data.run_id) {
+          connectSSE(data.run_id);
+        }
+        setLocalResults({ success_msg: `Ingestion started (${selectedDocuments.length} files). Streaming progress...` });
       } else {
         const err = await res.text();
         setLocalResults({ error: err });
+        setLoading(false);
       }
     } catch (err) {
       setLocalResults({ error: String(err) });
-    } finally {
       setLoading(false);
     }
   };
@@ -192,6 +338,11 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
       setLoading(false);
     }
   };
+
+  // Progress bar percentage
+  const progressPct = ingestionProgress?.current_section && ingestionProgress?.total_sections
+    ? Math.round((ingestionProgress.current_section / ingestionProgress.total_sections) * 100)
+    : 0;
 
   return (
     <div className="synthesis-panel">
@@ -322,7 +473,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
                     aria-label="Select LLM Provider"
                   >
                     {Object.entries(providers).map(([id, p]) => (
-                      <option key={id} value={id}>{p.name} {p.running ? '●' : '○'}</option>
+                      <option key={id} value={id}>{p.name} {p.running ? '\u25cf' : '\u25cb'}</option>
                     ))}
                     <optgroup label="Cloud">
                       <option value="openai">OpenAI</option>
@@ -394,6 +545,64 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
             </div>
           )}
 
+          {/* SSE Progress Bar */}
+          {ingestionProgress && (
+            <div className="synthesis-section" style={{
+              background: ingestionProgress.status === 'error' ? 'rgba(239,68,68,0.05)' : 'rgba(139,92,246,0.05)',
+              border: `1px solid ${ingestionProgress.status === 'error' ? 'rgba(239,68,68,0.2)' : 'rgba(139,92,246,0.2)'}`,
+              borderRadius: '8px',
+              padding: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                {ingestionProgress.status === 'running' && <Loader size={14} className="animate-spin" style={{ color: 'var(--primary)' }} />}
+                {ingestionProgress.status === 'completed' && <CheckCircle size={14} style={{ color: '#10b981' }} />}
+                {ingestionProgress.status === 'error' && <XCircle size={14} style={{ color: '#ef4444' }} />}
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {ingestionProgress.status === 'completed' ? 'Ingestion Complete' : 
+                   ingestionProgress.status === 'error' ? 'Ingestion Failed' : 'Ingesting...'}
+                </span>
+              </div>
+
+              {/* Determinate progress bar */}
+              {ingestionProgress.total_sections && ingestionProgress.total_sections > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <div style={{
+                    height: '6px', background: 'rgba(139,92,246,0.15)', borderRadius: '3px',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      height: '100%', width: `${progressPct}%`,
+                      background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+                      borderRadius: '3px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Section {ingestionProgress.current_section}/{ingestionProgress.total_sections}
+                    {ingestionProgress.triples_extracted !== undefined && (
+                      <span> · {ingestionProgress.triples_extracted} triples</span>
+                    )}
+                    {ingestionProgress.conflicts_found !== undefined && ingestionProgress.conflicts_found > 0 && (
+                      <span style={{ color: '#f59e0b' }}> · {ingestionProgress.conflicts_found} conflicts</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Latest event message */}
+              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                {ingestionProgress.message}
+              </div>
+
+              {/* Embedding progress */}
+              {ingestionProgress.concepts_embedded !== undefined && ingestionProgress.total_concepts && (
+                <div style={{ marginTop: '6px', fontSize: '10px', color: '#10b981' }}>
+                  Embedded {ingestionProgress.concepts_embedded}/{ingestionProgress.total_concepts} concepts
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Synthesis Trigger */}
           <div className="synthesis-section">
             <label className="synthesis-label">
@@ -407,6 +616,44 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
               {loading ? <Loader size={14} className="animate-spin" /> : <Zap size={14} />}
               Discover Structural Isomorphisms
             </button>
+          </div>
+
+          {/* Synthesis History Button */}
+          <div className="synthesis-section">
+            <button
+              className="btn btn-ghost synthesis-btn-full"
+              onClick={() => { setShowHistory(!showHistory); if (!showHistory) fetchSynthesisHistory(); }}
+              style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}
+            >
+              <Clock size={12} /> {showHistory ? 'Hide' : 'Show'} Synthesis History
+            </button>
+
+            {showHistory && synthesisHistory.length > 0 && (
+              <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+                {synthesisHistory.map((run: any, idx: number) => (
+                  <div key={run.run_id || idx} style={{
+                    padding: '8px', background: 'rgba(0,0,0,0.1)', borderRadius: '6px',
+                    marginBottom: '4px', fontSize: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                  }}>
+                    <div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                        {run.files?.join(', ') || 'Unknown'}
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                        {run.model || 'default'} · {run.created_at ? new Date(run.created_at).toLocaleDateString() : ''}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-icon btn-ghost danger"
+                      onClick={() => deleteRun(run.run_id)}
+                      title="Delete run"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Manage Mapped Documents */}
@@ -436,45 +683,144 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({ onGraphUpdated }
           {localResults && (
             <div className="synthesis-results">
               {localResults.error ? (
-                <div className="synthesis-error">❌ {localResults.error}</div>
+                <div className="synthesis-error" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <XCircle size={14} /> {localResults.error}
+                </div>
               ) : (
                 <>
                   {localResults.success_msg && (
-                    <div className="synthesis-stat success">
-                      ✅ {localResults.success_msg}
+                    <div className="synthesis-stat success" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle size={12} /> {localResults.success_msg}
                     </div>
                   )}
                   {localResults.triples_extracted !== undefined && (
-                    <div className="synthesis-stat">
-                      ✅ {localResults.triples_extracted} triples extracted, {localResults.triples_stored} stored
+                    <div className="synthesis-stat" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle size={12} /> {localResults.triples_extracted} triples extracted, {localResults.triples_stored} stored
+                      {localResults.triples && localResults.triples.length > 0 && (
+                        <button
+                          className="btn-ghost"
+                          onClick={() => { setInspectTriples(localResults.triples); setShowTripleInspector(!showTripleInspector); }}
+                          style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--primary)' }}
+                        >
+                          <Eye size={10} /> {showTripleInspector ? 'Hide' : 'Inspect'}
+                        </button>
+                      )}
                     </div>
                   )}
                   {localResults.conflicts_detected > 0 && (
-                    <div className="synthesis-stat conflict">
-                      ⚠️ {localResults.conflicts_detected} conflicts detected
+                    <div className="synthesis-stat conflict" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <AlertTriangle size={12} /> {localResults.conflicts_detected} conflicts detected
+                      <button
+                        className="btn-ghost"
+                        onClick={() => { setActiveConflicts(localResults.conflicts || []); setShowConflictPanel(!showConflictPanel); }}
+                        style={{ marginLeft: 'auto', fontSize: '10px', color: '#f59e0b' }}
+                      >
+                        {showConflictPanel ? 'Hide' : 'Resolve'}
+                      </button>
                     </div>
                   )}
                   {localResults.concepts_embedded > 0 && (
-                    <div className="synthesis-stat">
-                      🧮 {localResults.concepts_embedded} concepts embedded
+                    <div className="synthesis-stat" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <BarChart3 size={12} /> {localResults.concepts_embedded} concepts embedded
                     </div>
                   )}
                   {localResults.analogies_found !== undefined && (
-                    <div className="synthesis-stat">
-                      🔗 {localResults.analogies_found} analogies discovered
+                    <div className="synthesis-stat" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Zap size={12} /> {localResults.analogies_found} analogies discovered
                     </div>
                   )}
-                  {localResults.triples && localResults.triples.length > 0 && (
-                    <div className="synthesis-triples">
-                      {localResults.triples.map((t: string[], i: number) => (
-                        <div key={i} className="triple-item">
-                          <span className="triple-subject">{t[0]}</span>
-                          <span className="triple-predicate">{t[1]}</span>
-                          <span className="triple-object">{t[2]}</span>
+
+                  {/* Triple Inspector */}
+                  {showTripleInspector && inspectTriples.length > 0 && (
+                    <div style={{ marginTop: '8px', maxHeight: '300px', overflowY: 'auto' }}>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Triple Inspector ({inspectTriples.length})
+                      </label>
+                      {inspectTriples.map((t: any, i: number) => (
+                        <div key={i} style={{
+                          padding: '8px', background: 'rgba(139,92,246,0.05)', borderRadius: '6px',
+                          border: '1px solid rgba(139,92,246,0.12)', marginTop: '4px', fontSize: '11px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span className="triple-subject" style={{ 
+                              background: 'rgba(165,110,255,0.1)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600
+                            }}>{t.subject}</span>
+                            <span className="triple-predicate" style={{ 
+                              color: '#818cf8', fontStyle: 'italic' 
+                            }}>{t.predicate}</span>
+                            <span className="triple-object" style={{ 
+                              background: 'rgba(77,187,255,0.1)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600
+                            }}>{t.object}</span>
+                          </div>
+                          {t.confidence !== undefined && (
+                            <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{
+                                height: '3px', flex: 1, background: 'rgba(255,255,255,0.1)', borderRadius: '2px',
+                                overflow: 'hidden'
+                              }}>
+                                <div style={{
+                                  height: '100%', width: `${(t.confidence || 0) * 100}%`,
+                                  background: t.confidence > 0.7 ? '#10b981' : t.confidence > 0.4 ? '#f59e0b' : '#ef4444',
+                                  borderRadius: '2px'
+                                }} />
+                              </div>
+                              <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                {Math.round((t.confidence || 0) * 100)}%
+                              </span>
+                            </div>
+                          )}
+                          {t.citation && (
+                            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px', fontStyle: 'italic' }}>
+                              "{t.citation.substring(0, 120)}{t.citation.length > 120 ? '...' : ''}"
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
+
+                  {/* Conflict Resolution Panel */}
+                  {showConflictPanel && activeConflicts.length > 0 && (
+                    <div style={{ marginTop: '8px' }}>
+                      <label style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Conflict Resolution ({activeConflicts.length})
+                      </label>
+                      {activeConflicts.map((c, i) => (
+                        <div key={i} style={{
+                          padding: '8px', background: 'rgba(245,158,11,0.05)', borderRadius: '6px',
+                          border: '1px solid rgba(245,158,11,0.2)', marginTop: '4px', fontSize: '11px'
+                        }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {c.concept_a} ↔ {c.concept_b}
+                          </div>
+                          <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            {c.description}
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                            <button 
+                              className="btn-ghost" 
+                              style={{ fontSize: '9px', color: '#10b981', padding: '2px 8px', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '4px' }}
+                              onClick={() => {
+                                setActiveConflicts(prev => prev.filter((_, idx) => idx !== i));
+                              }}
+                            >
+                              <CheckCircle size={10} /> Accept
+                            </button>
+                            <button 
+                              className="btn-ghost" 
+                              style={{ fontSize: '9px', color: '#ef4444', padding: '2px 8px', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px' }}
+                              onClick={() => {
+                                setActiveConflicts(prev => prev.filter((_, idx) => idx !== i));
+                              }}
+                            >
+                              <XCircle size={10} /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {localResults.analogies && localResults.analogies.length > 0 && (
                     <div className="synthesis-analogies">
                       {localResults.analogies.map((a: any, i: number) => (

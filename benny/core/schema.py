@@ -1,9 +1,105 @@
 """
-Global Schema - Pydantic models for workspace manifests and governance.
+Global Schema - Pydantic models for workspace manifests, governance, and synthesis pipeline types.
 """
 
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Dict, Any, Optional, Literal
+from enum import Enum
+
+
+# =============================================================================
+# KNOWLEDGE TRIPLE - Core data type for the entire synthesis pipeline
+# =============================================================================
+
+class KnowledgeTriple(BaseModel):
+    """
+    A single knowledge triple extracted from text by the synthesis engine.
+    Used throughout the pipeline instead of raw Dict[str, Any].
+    """
+    subject: str
+    subject_type: str = "Concept"
+    predicate: str
+    object: str
+    object_type: str = "Concept"
+    citation: str = ""
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    section_title: str = ""
+
+    @field_validator("subject", "predicate", "object")
+    @classmethod
+    def strip_whitespace(cls, v: str) -> str:
+        return v.strip()
+
+    @property
+    def normalized_key(self) -> str:
+        """Normalized deduplication key (lowercase subject|predicate|object)."""
+        return f"{self.subject.lower()}|{self.predicate.lower()}|{self.object.lower()}"
+
+
+# =============================================================================
+# SYNTHESIS CONFIGURATION - Replaces all hardcoded engine defaults
+# =============================================================================
+
+class SynthesisConfig(BaseModel):
+    """
+    Centralised configuration for the synthesis engine.
+    Can be overridden per-workspace via the manifest.
+    """
+    # Chunking
+    max_context_tokens: int = Field(default=1500, description="Max tokens per LLM context chunk (~4 chars/token)")
+    min_section_chars: int = Field(default=50, description="Minimum chars for a section to be processed")
+
+    # Parallel extraction
+    parallel_limit: int = Field(default=4, description="Max concurrent LLM calls for section extraction")
+    inference_delay: float = Field(default=0.5, description="Delay between calls to prevent thermal throttle")
+
+    # Quality
+    min_confidence: float = Field(default=0.3, description="Discard triples below this confidence")
+    deduplicate: bool = Field(default=True, description="Remove near-duplicate triples")
+    max_conflict_triples: int = Field(default=30, description="Max triples sent to conflict detection")
+
+    # Retry
+    max_retries: int = Field(default=3, description="LLM call retry attempts")
+    retry_base_delay: float = Field(default=1.0, description="Base delay for exponential backoff (seconds)")
+
+    # Embedding
+    embedding_batch_size: int = Field(default=8, description="Concurrent embedding requests")
+
+
+# =============================================================================
+# SSE INGESTION EVENTS - Structured events for real-time progress streaming
+# =============================================================================
+
+class IngestionEventType(str, Enum):
+    STARTED = "started"
+    SECTION_PROGRESS = "section_progress"
+    TRIPLES_EXTRACTED = "triples_extracted"
+    CONFLICTS_CHECKED = "conflicts_checked"
+    STORED = "stored"
+    EMBEDDING_PROGRESS = "embedding_progress"
+    CENTRALITY_UPDATED = "centrality_updated"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class IngestionEvent(BaseModel):
+    """A single SSE event emitted during ingestion."""
+    event: IngestionEventType
+    run_id: str = ""
+    source_name: str = ""
+    data: Dict[str, Any] = Field(default_factory=dict)
+    message: str = ""
+
+    def to_sse(self) -> str:
+        """Format as an SSE wire-format string."""
+        import json
+        payload = self.model_dump()
+        return f"event: {self.event.value}\ndata: {json.dumps(payload)}\n\n"
+
+
+# =============================================================================
+# WORKSPACE MANIFEST
+# =============================================================================
 
 class WorkspaceManifest(BaseModel):
     """
@@ -12,11 +108,14 @@ class WorkspaceManifest(BaseModel):
     This is the "Decentralized Manifest" that teams own in their workspace repo.
     """
     version: str = Field(default="1.0.0", description="Schema version for governance and migrations")
-    llm_timeout: float = Field(default=300.0, description="LLX call timeout in seconds")
+    llm_timeout: float = Field(default=300.0, description="LLM call timeout in seconds")
     default_model: Optional[str] = Field(None, description="Primary model for this workspace")
     embedding_provider: str = Field(default="local", description="Provider for vector embeddings")
     governance_tags: List[str] = Field(default_factory=list, description="Audit and compliance tags")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary extension fields")
+
+    # Synthesis engine overrides
+    synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig, description="Synthesis engine config")
 
     class Config:
         json_schema_extra = {
@@ -25,6 +124,7 @@ class WorkspaceManifest(BaseModel):
                 "llm_timeout": 600.0,
                 "default_model": "gemma-4-26b-a4b",
                 "governance_tags": ["high_compliance", "sensitive_data"],
-                "metadata": {"owner": "AI Platform Team"}
+                "metadata": {"owner": "AI Platform Team"},
+                "synthesis": {"max_context_tokens": 2000, "min_confidence": 0.5}
             }
         }

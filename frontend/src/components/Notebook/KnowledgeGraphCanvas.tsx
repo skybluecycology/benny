@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import ForceGraph3D from '3d-force-graph';
-import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search } from 'lucide-react';
+import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search, Download, ChevronRight, Layers, Eye } from 'lucide-react';
 import { API_BASE_URL } from '../../constants';
 
 interface GraphNode {
@@ -10,6 +10,7 @@ interface GraphNode {
   domain: string;
   node_type?: string;
   created_at: string;
+  centrality?: number;
   x?: number;
   y?: number;
   z?: number;
@@ -28,16 +29,21 @@ interface GraphEdge {
   confidence?: number;
   created_at: string;
   timestamp: string;
+  run_id?: string;
 }
 
 interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  total_nodes?: number;
+  has_more?: boolean;
+  page?: number | null;
 }
 
 interface KnowledgeGraphCanvasProps {
   onConceptClick?: (concept: string) => void;
   workspace?: string;
+  refreshTrigger?: number;
 }
 
 const EDGE_COLORS: Record<string, string> = {
@@ -59,7 +65,10 @@ const NODE_COLORS: Record<string, string> = {
   Location: '#ff375f'
 };
 
-export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'default' }: KnowledgeGraphCanvasProps) {
+// Performance threshold: switch to low-fidelity rendering above this
+const PERFORMANCE_NODE_THRESHOLD = 500;
+
+export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'default', refreshTrigger }: KnowledgeGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] });
@@ -69,9 +78,19 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: any } | null>(null);
   const [viewMode, setViewMode] = useState<'graph' | 'map'>('graph');
+  const [showAll, setShowAll] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = 200;
   
   // Filtering & Isolation States
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimerRef = useRef<any>(null);
+  
+  // Node Detail Sidebar
+  const [detailNode, setDetailNode] = useState<any | null>(null);
+  const [nodeEdges, setNodeEdges] = useState<GraphEdge[]>([]);
+
   const focusRef = useRef({ 
     node: null as GraphNode | null, 
     search: '', 
@@ -79,12 +98,32 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     neighbors: new Set<string>() 
   });
 
-  const fetchGraph = useCallback(async () => {
+  // Debounced search — prevent excessive WebGL repaints  
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [searchQuery]);
+
+  // Performance checks
+  const isLargeGraph = useMemo(() => graphData.nodes.length > PERFORMANCE_NODE_THRESHOLD, [graphData.nodes.length]);
+
+  const fetchGraph = useCallback(async (page?: number, fetchAll?: boolean) => {
     setLoading(true);
     try {
       const timestamp = Date.now();
+      let graphUrl = `${API_BASE_URL}/api/graph/full?workspace=${workspace}&t=${timestamp}`;
+      
+      if (fetchAll) {
+        graphUrl += `&show_all=true`;
+      } else if (page !== undefined) {
+        graphUrl += `&page=${page}&page_size=${PAGE_SIZE}`;
+      }
+
       const [graphRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/graph/full?workspace=${workspace}&t=${timestamp}`),
+        fetch(graphUrl),
         fetch(`${API_BASE_URL}/api/graph/stats?workspace=${workspace}&t=${timestamp}`)
       ]);
 
@@ -103,37 +142,59 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     }
   }, [workspace]);
 
-  // Real-time Poll for incremental updates during ingestion
+  // SSE real-time updates — replaces polling
   useEffect(() => {
-    let interval: any = null;
-    if (loading) {
-       interval = setInterval(async () => {
-         try {
-           const res = await fetch(`${API_BASE_URL}/api/graph/recent?workspace=${workspace}`);
-           if (res.ok) {
-             const data = await res.json();
-             if (data.edges && data.edges.length > 0) {
-                // Incremental refresh logic could go here
-                // For now, we just fetch the full graph to keep it simple but accurate
-                fetchGraph();
-             }
-           }
-         } catch (e) {}
-       }, 5000);
-    }
-    return () => clearInterval(interval);
-  }, [loading, workspace, fetchGraph]);
+    // Listen for custom events from the SynthesisPanel when a new ingestion starts
+    const handleIngestionSSE = (e: CustomEvent) => {
+      const { run_id } = e.detail;
+      if (!run_id) return;
+
+      const eventSource = new EventSource(`${API_BASE_URL}/api/graph/ingest/events/${run_id}`);
+      
+      eventSource.addEventListener('stored', () => {
+        // Refresh graph when new triples are stored
+        fetchGraph(showAll ? undefined : currentPage, showAll);
+      });
+
+      eventSource.addEventListener('centrality_updated', () => {
+        fetchGraph(showAll ? undefined : currentPage, showAll);
+      });
+
+      eventSource.addEventListener('completed', () => {
+        fetchGraph(showAll ? undefined : currentPage, showAll);
+        eventSource.close();
+      });
+
+      eventSource.addEventListener('error', () => {
+        eventSource.close();
+      });
+
+      eventSource.onerror = () => {
+        eventSource.close();
+      };
+    };
+
+    window.addEventListener('benny:ingestion-started' as any, handleIngestionSSE as any);
+    return () => window.removeEventListener('benny:ingestion-started' as any, handleIngestionSSE as any);
+  }, [fetchGraph, showAll, currentPage]);
 
   // Initial load
   useEffect(() => {
     fetchGraph();
   }, [fetchGraph]);
 
+  // Respond to external refresh triggers
+  useEffect(() => {
+    if (refreshTrigger) {
+      fetchGraph(showAll ? undefined : currentPage, showAll);
+    }
+  }, [refreshTrigger]);
+
   // Propagate search & select states into the active ref immediately to restyle WebGL dynamically
   useEffect(() => {
     if (!graphRef.current) return;
     
-    focusRef.current.search = searchQuery.toLowerCase();
+    focusRef.current.search = debouncedSearch.toLowerCase();
     focusRef.current.node = selectedNode;
     focusRef.current.neighbors.clear();
     focusRef.current.links.clear();
@@ -154,7 +215,21 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       .linkColor(graphRef.current.linkColor())
       .nodeOpacity(graphRef.current.nodeOpacity())
       .linkOpacity(graphRef.current.linkOpacity());
-  }, [searchQuery, selectedNode, graphData]);
+  }, [debouncedSearch, selectedNode, graphData]);
+
+  // Node detail sidebar — compute connected edges when a node is selected for detail
+  useEffect(() => {
+    if (!detailNode) {
+      setNodeEdges([]);
+      return;
+    }
+    const connected = graphData.edges.filter((e: any) => {
+      const src = typeof e.source === 'object' ? e.source.id : e.source;
+      const tgt = typeof e.target === 'object' ? e.target.id : e.target;
+      return src === detailNode.id || tgt === detailNode.id;
+    });
+    setNodeEdges(connected);
+  }, [detailNode, graphData.edges]);
 
   // Render 3D force graph
   useEffect(() => {
@@ -165,7 +240,6 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       containerRef.current.innerHTML = '';
     }
 
-    // Dynamic selection of the constructor to handle ESM/CJS compatibility
     const ForceGraph3D_Lib = (ForceGraph3D as any).default || ForceGraph3D;
     const graph = (ForceGraph3D_Lib)()(containerRef.current)
       .backgroundColor('rgba(0,0,0,0)')
@@ -195,7 +269,6 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       })
       .nodeVal((node: any) => {
         const baseSize = (node.labels || [])[0] === 'Source' ? 4 : 6;
-        // Centrality scaling: Nodes with high centrality grow larger
         const centralityBonus = node.centrality ? Math.log10(node.centrality + 1) * 8 : 0;
         return baseSize + centralityBonus;
       })
@@ -217,10 +290,8 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       .linkWidth((link: any) => (focusRef.current.links.has(link) ? 2.5 : 1.2))
       .linkDirectionalArrowLength((link: any) => (focusRef.current.node && !focusRef.current.links.has(link) ? 0 : 4))
       .linkDirectionalArrowRelPos(1)
-      .linkDirectionalParticles((link: any) => (focusRef.current.links.has(link) ? 4 : 0))
-      .linkDirectionalParticleSpeed(0.01)
       
-      // Interactive Citation Hover Details!
+      // Interactive Citation Hover Details
       .linkLabel((link: any) => {
         const citationStr = link.citation ? `<div style="margin-top:4px; font-style:italic; font-size:10px; opacity:0.8; max-width:200px; white-space:normal">"${link.citation}"</div>` : '';
         const sectionStr = link.section ? `<div style="margin-top:2px; font-size:9px; color:#a78bfa">${link.section}</div>` : '';
@@ -236,9 +307,10 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       
       .onNodeClick((node: any) => {
         setSelectedNode(node);
+        setDetailNode(node);
         if (onConceptClick) onConceptClick(node.name);
         
-        // Dynamic camera zoom into the selected target neighbourhood
+        // Dynamic camera zoom
         const distance = 150;
         const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
         graphRef.current.cameraPosition(
@@ -251,14 +323,27 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
         setContextMenu({ x: event.clientX, y: event.clientY, node: node });
       })
       .onBackgroundClick(() => {
-         setSelectedNode(null); // Escape focus isolation clicking the background
+         setSelectedNode(null);
+         setDetailNode(null);
       })
       .width(containerRef.current.clientWidth)
       .height(containerRef.current.clientHeight);
 
-    // Map Mode logic: Flatten Z-axis and add continent backgrounds
+    // Performance guards: disable particles and reduce resolution for large graphs
+    if (isLargeGraph) {
+      graph
+        .linkDirectionalParticles(0)
+        .nodeResolution(6);  // Lower polygon count
+    } else {
+      graph
+        .linkDirectionalParticles((link: any) => (focusRef.current.links.has(link) ? 4 : 0))
+        .linkDirectionalParticleSpeed(0.01)
+        .nodeResolution(12);
+    }
+
+    // Map Mode: Flatten Z-axis for the "Atlas" feel
     if (viewMode === 'map') {
-      graph.numDimensions(2); // Perspective becomes 2D-like for the "Atlas" feel
+      graph.numDimensions(2);
     } else {
       graph.numDimensions(3);
     }
@@ -281,7 +366,7 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     resizeObserver.observe(containerRef.current);
 
     return () => resizeObserver.disconnect();
-  }, [graphData, onConceptClick]);
+  }, [graphData, onConceptClick, viewMode, isLargeGraph]);
 
   const handleCrossDomain = async (concept: string, domain: string) => {
     setContextMenu(null);
@@ -298,6 +383,54 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     } catch (err) {
       console.error('Cross-domain analogy failed:', err);
     }
+  };
+
+  // Export handlers
+  const handleExportJSON = () => {
+    const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `knowledge-graph-${workspace}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPNG = () => {
+    if (!containerRef.current) return;
+    const canvas = containerRef.current.querySelector('canvas');
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `knowledge-graph-${workspace}.png`;
+    a.click();
+  };
+
+  // Pagination handlers
+  const handleNextPage = () => {
+    const nextPage = currentPage + 1;
+    setCurrentPage(nextPage);
+    fetchGraph(nextPage, false);
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 0) {
+      const prevPage = currentPage - 1;
+      setCurrentPage(prevPage);
+      fetchGraph(prevPage, false);
+    }
+  };
+
+  const handleShowAll = () => {
+    setShowAll(true);
+    fetchGraph(undefined, true);
+  };
+
+  const handleShowPaginated = () => {
+    setShowAll(false);
+    setCurrentPage(0);
+    fetchGraph(0, false);
   };
 
   return (
@@ -322,12 +455,17 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
           {stats && (
             <span className="graph-toolbar-stats" style={{ marginLeft: '8px' }}>
               {stats.concepts} concepts · {stats.relationships} relations
+              {graphData.total_nodes && graphData.total_nodes > graphData.nodes.length && !showAll && (
+                <span style={{ color: 'var(--warning)', marginLeft: '4px' }}>
+                  (showing {graphData.nodes.length}/{graphData.total_nodes})
+                </span>
+              )}
             </span>
           )}
         </div>
-        <div className="graph-toolbar-right" style={{ display: 'flex', gap: '8px' }}>
-          {/* View Toggle Pill */}
-          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-pill)', padding: '4px', border: '1px solid var(--border-color)', marginRight: '8px' }}>
+        <div className="graph-toolbar-right" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {/* View mode toggle */}
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-pill)', padding: '4px', border: '1px solid var(--border-color)' }}>
             <button 
               onClick={() => setViewMode('graph')}
               style={{
@@ -360,7 +498,63 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
             </button>
           </div>
 
-          <button className="btn-icon btn-ghost" onClick={fetchGraph} title="Refresh">
+          {/* Pagination / Show All toggle */}
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-pill)', padding: '4px', border: '1px solid var(--border-color)' }}>
+            <button
+              onClick={showAll ? handleShowPaginated : handleShowAll}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-pill)',
+                border: 'none',
+                background: showAll ? 'var(--branch-teal)' : 'transparent',
+                color: showAll ? '#fff' : 'var(--text-muted)',
+                fontSize: '10px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+              title={showAll ? 'Switch to paginated view' : 'Show all nodes'}
+            >
+              {showAll ? <Layers size={10} /> : <Eye size={10} />}
+              {showAll ? 'Paginated' : 'All'}
+            </button>
+          </div>
+
+          {/* Page navigation (only in paginated mode) */}
+          {!showAll && graphData.has_more !== undefined && (
+            <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+              <button 
+                className="btn-icon btn-ghost" 
+                onClick={handlePrevPage} 
+                disabled={currentPage === 0}
+                title="Previous page"
+                style={{ opacity: currentPage === 0 ? 0.3 : 1, transform: 'rotate(180deg)' }}
+              >
+                <ChevronRight size={12} />
+              </button>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', minWidth: '20px', textAlign: 'center' }}>
+                {currentPage + 1}
+              </span>
+              <button 
+                className="btn-icon btn-ghost" 
+                onClick={handleNextPage} 
+                disabled={!graphData.has_more}
+                title="Next page"
+                style={{ opacity: !graphData.has_more ? 0.3 : 1 }}
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          )}
+
+          {/* Export buttons */}
+          <button className="btn-icon btn-ghost" onClick={handleExportPNG} title="Export as PNG">
+            <Download size={14} />
+          </button>
+
+          <button className="btn-icon btn-ghost" onClick={() => fetchGraph(showAll ? undefined : currentPage, showAll)} title="Refresh">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
           <button className="btn-icon btn-ghost" onClick={() => setIsFullscreen(!isFullscreen)} title="Toggle Fullscreen">
@@ -370,6 +564,18 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       </div>
 
       <div ref={containerRef} className="graph-3d-container" onClick={() => setContextMenu(null)} />
+
+      {/* Performance warning */}
+      {isLargeGraph && (
+        <div style={{
+          position: 'absolute', top: '48px', left: '12px',
+          background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)',
+          padding: '4px 10px', borderRadius: '6px', fontSize: '10px', color: '#f59e0b'
+        }}>
+          <AlertTriangle size={10} style={{ marginRight: '4px' }} />
+          Large graph ({graphData.nodes.length} nodes) — particles disabled for performance
+        </div>
+      )}
 
       {graphData.nodes.length === 0 && !loading && (
         <div className="graph-empty-state">
@@ -384,32 +590,133 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
         {Object.entries(NODE_COLORS).map(([type, color]) => (
            <div key={type} className="legend-item" style={{ cursor: 'pointer' }} onClick={() => setSearchQuery(searchQuery === type ? '' : type)}>
              <span className="legend-dot" style={{ background: color }} />
-             <span style={{ opacity: searchQuery && searchQuery !== type.toLowerCase() ? 0.5 : 1 }}>{type}</span>
+             <span style={{ opacity: debouncedSearch && debouncedSearch.toLowerCase() !== type.toLowerCase() ? 0.5 : 1 }}>{type}</span>
            </div>
         ))}
       </div>
 
+      {/* Context Menu */}
       {contextMenu && (
         <div className="graph-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="context-menu-title">{contextMenu.node.name}</div>
           <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Physics')}><Zap size={12} /> Show in Physics</button>
           <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Biology')}><Zap size={12} /> Show in Biology</button>
           <button onClick={() => handleCrossDomain(contextMenu.node.name, 'Economics')}><Zap size={12} /> Show in Economics</button>
+          <button onClick={() => { setContextMenu(null); handleExportJSON(); }}><Download size={12} /> Export Graph JSON</button>
           <button onClick={() => setContextMenu(null)}><AlertTriangle size={12} /> View Conflicts</button>
         </div>
       )}
 
-      {selectedNode && (
-        <div className="graph-node-info" style={{ background: 'rgba(15, 15, 20, 0.95)', border: '1px solid var(--border-color)', backdropFilter: 'blur(8px)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-             <strong style={{ fontSize: '14px', color: 'var(--primary)' }}>{selectedNode.name}</strong>
-             <button className="btn-ghost" onClick={() => setSelectedNode(null)}>×</button>
+      {/* Node Detail Sidebar */}
+      {detailNode && (
+        <div className="graph-node-detail-sidebar" style={{
+          position: 'absolute', right: '12px', top: '48px', bottom: '48px',
+          width: '280px', background: 'rgba(15, 15, 20, 0.97)',
+          border: '1px solid var(--border-color)', borderRadius: '12px',
+          backdropFilter: 'blur(12px)', overflow: 'auto', padding: '16px',
+          display: 'flex', flexDirection: 'column', gap: '12px'
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <strong style={{ fontSize: '15px', color: 'var(--primary)', display: 'block', marginBottom: '4px' }}>
+                {detailNode.name}
+              </strong>
+              <span style={{
+                background: 'rgba(139,92,246,0.1)', padding: '2px 8px', borderRadius: '4px',
+                fontSize: '10px', color: '#a78bfa'
+              }}>
+                {detailNode.node_type || (detailNode.labels || [])[0] || 'Concept'}
+              </span>
+            </div>
+            <button
+              className="btn-ghost"
+              onClick={() => { setDetailNode(null); setSelectedNode(null); }}
+              style={{ padding: '4px', fontSize: '16px', lineHeight: 1 }}
+            >×</button>
           </div>
-          <span style={{ background: 'rgba(139,92,246,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', color: '#a78bfa', display: 'inline-block', marginBottom: '4px' }}>
-             {selectedNode.node_type || (selectedNode.labels || [])[0] || 'Concept'}
-          </span>
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-             <em>Sub-graph isolated. Click background to reset visualization.</em>
+
+          {/* Centrality Score */}
+          {detailNode.centrality !== undefined && detailNode.centrality > 0 && (
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Centrality:</span>{' '}
+              <span style={{ color: '#10b981', fontWeight: 600 }}>{detailNode.centrality.toFixed(2)}</span>
+            </div>
+          )}
+
+          {/* Connected Edges */}
+          <div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Connections ({nodeEdges.length})
+            </div>
+            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {nodeEdges.map((edge, idx) => {
+                const srcName = typeof edge.source === 'object' ? (edge.source as any).name : edge.source;
+                const tgtName = typeof edge.target === 'object' ? (edge.target as any).name : edge.target;
+                const otherName = srcName === detailNode.name ? tgtName : srcName;
+                const direction = srcName === detailNode.name ? '→' : '←';
+
+                return (
+                  <div key={idx} style={{
+                    padding: '6px 8px', background: 'rgba(139,92,246,0.06)',
+                    borderRadius: '6px', border: '1px solid rgba(139,92,246,0.12)',
+                    fontSize: '11px'
+                  }}>
+                    <div style={{ color: 'var(--text-primary)' }}>
+                      {direction} <strong style={{ color: '#a78bfa' }}>{edge.predicate || edge.type}</strong> {otherName}
+                    </div>
+                    {edge.confidence !== undefined && (
+                      <div style={{ fontSize: '9px', color: '#10b981', marginTop: '2px' }}>
+                        Confidence: {Math.round(edge.confidence * 100)}%
+                      </div>
+                    )}
+                    {edge.citation && (
+                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px', fontStyle: 'italic' }}>
+                        "{edge.citation.substring(0, 80)}{edge.citation.length > 80 ? '...' : ''}"
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {nodeEdges.length === 0 && (
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  No connections found
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Source Documents */}
+          {nodeEdges.some(e => e.source_doc) && (
+            <div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Source Documents
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {[...new Set(nodeEdges.map(e => e.source_doc).filter(Boolean))].map(src => (
+                  <span key={src} style={{
+                    padding: '2px 8px', background: 'rgba(99,102,241,0.1)',
+                    borderRadius: '12px', fontSize: '10px', color: '#818cf8'
+                  }}>
+                    {src}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ marginTop: 'auto', display: 'flex', gap: '6px' }}>
+            <button
+              className="btn btn-ghost"
+              style={{ flex: 1, fontSize: '10px', padding: '6px' }}
+              onClick={() => {
+                setSelectedNode(null);
+                setDetailNode(null);
+              }}
+            >
+              Reset View
+            </button>
           </div>
         </div>
       )}
