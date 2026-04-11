@@ -18,7 +18,7 @@ interface ConfigPanelProps {
 }
 
 export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
-  const [activeTab, setActiveTab] = useState<'settings' | 'input' | 'output'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'input' | 'output' | 'compute'>('settings');
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
   const nodes = useWorkflowStore((state) => state.nodes);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
@@ -74,7 +74,7 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
     updateNodeData(node.id, { label: e.target.value });
   };
 
-  const handleConfigChange = (key: string, value: string) => {
+  const handleConfigChange = (key: string, value: any) => {
     updateNodeData(node.id, { 
       config: { 
         ...(node.data.config as object || {}), 
@@ -125,6 +125,12 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
           onClick={() => setActiveTab('output')}
         >
           Output ({connections.outputs.length})
+        </button>
+        <button 
+          className={`config-tab ${activeTab === 'compute' ? 'active' : ''}`}
+          onClick={() => setActiveTab('compute')}
+        >
+          Compute
         </button>
       </div>
 
@@ -294,8 +300,55 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
                     <option value="write">Write File</option>
                     <option value="search">Search Knowledge Base</option>
                     <option value="csv">Query CSV</option>
+                    <option value="adaptive_search">Adaptive RAG Search (AI-Powered)</option>
                   </select>
                 </div>
+                
+                {/* Adaptive RAG Configuration — only shown when operation is adaptive_search */}
+                {(node.data.config as {operation?: string})?.operation === 'adaptive_search' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="rag-max-retries">
+                        Max Retries: <strong>{(node.data.config as any)?.maxRetries || 3}</strong>
+                      </label>
+                      <input
+                        id="rag-max-retries"
+                        type="range"
+                        className="form-range"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={(node.data.config as any)?.maxRetries || 3}
+                        onChange={(e) => handleConfigChange('maxRetries', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="rag-multi-hop-depth">
+                        Multi-Hop Depth: <strong>{(node.data.config as any)?.multiHopDepth || 3}</strong>
+                      </label>
+                      <input
+                        id="rag-multi-hop-depth"
+                        type="range"
+                        className="form-range"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={(node.data.config as any)?.multiHopDepth || 3}
+                        onChange={(e) => handleConfigChange('multiHopDepth', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={(node.data.config as any)?.enableHallucinationCheck !== false}
+                          onChange={(e) => handleConfigChange('enableHallucinationCheck', e.target.checked)}
+                        />
+                        <span className="form-label" style={{ margin: 0 }}>Enable Hallucination Grading</span>
+                      </label>
+                    </div>
+                  </>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="file-path">File Path</label>
                   <input 
@@ -322,7 +375,105 @@ export default function ConfigPanel({ isOpen, nodeId }: ConfigPanelProps) {
                 />
               </div>
             )}
+
+            {node.type === 'a2a' && (
+              <>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="agent-url">Agent URL</label>
+                  <input
+                    id="agent-url"
+                    type="text"
+                    className="form-input"
+                    placeholder="http://remote-agent:8005"
+                    value={(node.data.config as any)?.agentUrl || ''}
+                    onChange={(e) => handleConfigChange('agentUrl', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="agent-timeout">Timeout (seconds)</label>
+                  <input
+                    id="agent-timeout"
+                    type="number"
+                    className="form-input"
+                    min={10}
+                    max={3600}
+                    value={(node.data.config as any)?.timeout || 300}
+                    onChange={(e) => handleConfigChange('timeout', e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn btn-outline"
+                  style={{ width: '100%', marginTop: '8px' }}
+                  onClick={async () => {
+                    const url = (node.data.config as any)?.agentUrl;
+                    if (!url) return alert('Enter an agent URL first');
+                    try {
+                      const res = await fetch(`${url}/.well-known/agent.json`);
+                      if (res.ok) {
+                        const card = await res.json();
+                        handleConfigChange('agentName', card.name);
+                        alert(`Discovered: ${card.name}\nSkills: ${card.skills?.map((s: any) => s.name).join(', ')}`);
+                      } else {
+                        alert('Agent not found at that URL');
+                      }
+                    } catch {
+                      alert('Could not connect to agent');
+                    }
+                  }}
+                >
+                  🔍 Discover Agent
+                </button>
+              </>
+            )}
           </>
+        )}
+
+        {activeTab === 'compute' && (
+          <div className="compute-tab" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
+            <div className="form-group">
+              <label className="form-label">Max Parallel Agents (Concurrency)</label>
+              <input 
+                type="range" 
+                min={1} 
+                max={8} 
+                step={1}
+                className="form-range"
+                value={(node.data.config as any)?.maxConcurrency || 1}
+                onChange={(e) => handleConfigChange('maxConcurrency', parseInt(e.target.value))}
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                Currently: {(node.data.config as any)?.maxConcurrency || 1} parallel calls
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Max Recursion Depth</label>
+              <input 
+                type="number" 
+                min={0} 
+                max={5}
+                className="form-input"
+                value={(node.data.config as any)?.recursionLimit || 2}
+                onChange={(e) => handleConfigChange('recursionLimit', parseInt(e.target.value))}
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                Limit on how many times a task can be sub-divided.
+              </div>
+            </div>
+
+            <div style={{ 
+              padding: '12px', 
+              background: 'rgba(59, 130, 246, 0.1)', 
+              border: '1px solid rgba(59, 130, 246, 0.2)', 
+              borderRadius: '6px',
+              fontSize: '11px',
+              color: '#60a5fa',
+              lineHeight: 1.4
+            }}>
+              <strong>Laptop Safety Info:</strong>
+              <p style={{ margin: '4px 0 0 0' }}>Keep concurrency low (1-2) when running large local models (like Llama-3-70B) to prevent system lag and OOM errors.</p>
+            </div>
+          </div>
         )}
 
         {activeTab === 'input' && (

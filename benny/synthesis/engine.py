@@ -214,6 +214,7 @@ def adaptive_truncate(text: str, max_tokens: int = 1500) -> str:
 async def call_llm(
     prompt: str,
     provider: str = "lemonade",
+    model: Optional[str] = None,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     run_id: Optional[str] = None

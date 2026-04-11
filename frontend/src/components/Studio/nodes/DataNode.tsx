@@ -31,6 +31,7 @@ export default function DataNode({ id, data, selected }: DataNodeProps) {
     write: 'Write File',
     search: 'Search KB',
     csv: 'Query CSV',
+    adaptive_search: '🧠 Adaptive Search',
   };
 
   return (

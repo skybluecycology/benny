@@ -777,3 +777,87 @@ def update_graph_centrality(workspace: str = "default") -> dict:
         """, workspace=workspace)
 
     return {"status": "centrality_updated", "method": "weighted_degree"}
+
+
+def multi_hop_traversal(query: str, workspace: str = "default", depth: int = 3, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Perform multi-hop graph traversal from entities mentioned in the query.
+    
+    Algorithm:
+    1. Extract entity names from the query using simple NLP (word matching against existing nodes)
+    2. For each matched entity, traverse relationships up to `depth` hops
+    3. Collect connected nodes and relationship paths
+    4. Return as list of {content, source, path} dicts
+    
+    Args:
+        query: The search query
+        workspace: Workspace scope
+        depth: Maximum relationship hops (1-5)
+        limit: Maximum results to return
+    
+    Returns:
+        List of documents with relational context
+    """
+    driver = get_driver()
+    if driver is None:
+        return []
+    
+    results = []
+    try:
+        with driver.session() as session:
+            # Step 1: Find entities mentioned in the query
+            # Use a case-insensitive CONTAINS match against node names
+            entity_query = """
+            MATCH (n)
+            WHERE any(word IN $words WHERE toLower(n.name) CONTAINS toLower(word))
+            RETURN n.name AS name, labels(n) AS labels
+            LIMIT 10
+            """
+            words = [w for w in query.split() if len(w) > 3]  # Skip short words
+            if not words:
+                return []
+            
+            entities = session.run(entity_query, words=words)
+            entity_names = [record["name"] for record in entities]
+            
+            if not entity_names:
+                return []
+            
+            # Step 2: Multi-hop traversal from each entity
+            hop_query = f"""
+            MATCH path = (start)-[*1..{min(depth, 5)}]-(connected)
+            WHERE start.name IN $entity_names
+            RETURN start.name AS source_entity,
+                   connected.name AS connected_entity,
+                   [rel IN relationships(path) | type(rel)] AS relationship_types,
+                   length(path) AS hops,
+                   connected.description AS description
+            ORDER BY hops ASC
+            LIMIT $limit
+            """
+            
+            traversal_results = session.run(
+                hop_query, 
+                entity_names=entity_names, 
+                limit=limit
+            )
+            
+            for record in traversal_results:
+                path_str = " → ".join(record["relationship_types"])
+                content = (
+                    f"Entity: {record['connected_entity']}\n"
+                    f"Relationship path from {record['source_entity']}: {path_str}\n"
+                    f"Hops: {record['hops']}\n"
+                )
+                if record.get("description"):
+                    content += f"Description: {record['description']}\n"
+                
+                results.append({
+                    "content": content,
+                    "source": f"neo4j://{record['source_entity']}/{path_str}",
+                    "hops": record["hops"],
+                })
+    except Exception as e:
+        logger.warning("Multi-hop traversal failed: %s", e)
+    
+    return results

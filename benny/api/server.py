@@ -37,6 +37,8 @@ from .skill_routes import router as skill_router
 from .graph_routes import router as graph_router
 from .workspace_routes import router as workspace_router
 from .task_routes import router as task_router
+from .governance_routes import router as governance_router
+from ..a2a.server import router as a2a_router
 
 
 @asynccontextmanager
@@ -71,7 +73,8 @@ GOVERNANCE_WHITELIST = [
     "/docs",
     "/openapi.json",
     "/redoc",
-    "/api/graph/ingest/events"
+    "/api/graph/ingest/events",
+    "/.well-known/agent.json"  # A2A discovery must be public
 ]
 
 class GovHeaderMiddleware(BaseHTTPMiddleware):
@@ -79,6 +82,10 @@ class GovHeaderMiddleware(BaseHTTPMiddleware):
     Cognitive Mesh Governance Middleware - Enforces X-Benny-API-Key requirement.
     """
     async def dispatch(self, request: Request, call_next):
+        # 0. Allow OPTIONS preflights to pass cleanly to CORSMiddleware
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # 1. Configurable Whitelist Check
         path = request.url.path
         if any(path.startswith(w) for w in GOVERNANCE_WHITELIST):
@@ -111,8 +118,8 @@ app.add_middleware(GovHeaderMiddleware)
 # Restricted CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
-    allow_credentials=True,
+    allow_origins=["*"], 
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -121,15 +128,27 @@ app.add_middleware(
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM Management"])
 app.include_router(file_router, prefix="/api", tags=["File Management"])
 app.include_router(etl_router, prefix="/api/etl", tags=["ETL Pipeline"])
+app.include_router(studio_router, prefix="/api", tags=["Studio"])  # Move up to prevent shadowing
+app.include_router(task_router, prefix="/api", tags=["Task Governance"])   # Move up to prevent shadowing
 app.include_router(workflow_router, prefix="/api", tags=["Workflows"])
 app.include_router(rag_router, prefix="/api", tags=["RAG"])
 app.include_router(notebook_router, prefix="/api", tags=["Notebooks"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
-app.include_router(studio_router, prefix="/api", tags=["Studio"])
 app.include_router(skill_router, prefix="/api", tags=["Skills"])
 app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
 app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace Settings"])
-app.include_router(task_router, prefix="/api", tags=["Task Governance"])
+app.include_router(governance_router, prefix="/api/governance", tags=["Security & Compliance"])
+app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
+
+
+@app.get("/api/heartbeat")
+async def heartbeat():
+    return {
+        "status": "alive",
+        "version": "1.0.1-strategic",
+        "cwd": os.getcwd(),
+        "pid": os.getpid()
+    }
 
 
 @app.get("/")
@@ -149,6 +168,13 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/.well-known/agent.json")
+async def well_known_agent_card():
+    """Serve Agent Card at the well-known discovery path."""
+    from benny.a2a.server import _get_agent_card
+    return _get_agent_card().model_dump()
+
+
 # Serve workspace files
 workspace_path = Path("workspace")
 if workspace_path.exists():
@@ -158,5 +184,5 @@ if workspace_path.exists():
 if __name__ == "__main__":
     import uvicorn
     # Cognitive Mesh Security: Bind to loopback only by default
-    uvicorn.run(app, host="127.0.0.1", port=8005, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8005, reload=True)
 

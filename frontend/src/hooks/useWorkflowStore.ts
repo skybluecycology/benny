@@ -2,6 +2,33 @@ import { create } from 'zustand';
 import { addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import type { Node, Edge, Connection, NodeChange, EdgeChange } from '@xyflow/react';
 
+export interface HITLRequest {
+  nodeId: string;
+  nodeName: string;
+  action_description: string;
+  reasoning: string;
+  current_state_summary: string;
+  options: Array<{
+    label: string;
+    value: string;
+    description?: string;
+  }>;
+}
+
+export interface ExecutionEvent {
+  type: 'node_started' | 'node_completed' | 'node_error' | 'hitl_required' | 'workflow_completed' | 'workflow_failed';
+  nodeId?: string;
+  timestamp: number;
+  data?: any;
+}
+
+export interface AERTrace {
+  intent: string;
+  observation: string;
+  inference: string;
+  plan: string;
+}
+
 interface WorkflowState {
   nodes: Node[];
   edges: Edge[];
@@ -11,6 +38,16 @@ interface WorkflowState {
   nodeOutputs: Record<string, any>;
   swarmExecutionId: string | null;
   
+  // === NEW FIELDS ===
+  executionPhase: 'idle' | 'running' | 'paused_hitl' | 'completed' | 'failed';
+  currentExecutingNodeId: string | null;
+  hitlPendingData: HITLRequest | null;
+  executionRunId: string | null;
+  nodeExecutionTimers: Record<string, number>;
+  executionEvents: ExecutionEvent[];
+  reasoningTraces: Record<string, AERTrace>;
+  currentWorkflow: any | null;
+
   // Actions
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
@@ -29,6 +66,18 @@ interface WorkflowState {
   setNodeOutput: (nodeId: string, output: any) => void;
   clearExecution: () => void;
   getConnectedNodes: (nodeId: string) => { inputs: Node[]; outputs: Node[] };
+
+  // === NEW ACTIONS ===
+  setExecutionPhase: (phase: WorkflowState['executionPhase']) => void;
+  setCurrentExecutingNodeId: (nodeId: string | null) => void;
+  setHitlPendingData: (data: HITLRequest | null) => void;
+  setExecutionRunId: (runId: string | null) => void;
+  addExecutionEvent: (event: ExecutionEvent) => void;
+  setReasoningTrace: (nodeId: string, trace: AERTrace) => void;
+  startNodeTimer: (nodeId: string) => void;
+  stopNodeTimer: (nodeId: string) => void;
+  resetExecution: () => void;
+  setCurrentWorkflow: (workflow: any | null) => void;
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
@@ -39,6 +88,16 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   executionStatus: {},
   nodeOutputs: {},
   swarmExecutionId: null,
+
+  // === INITIAL VALUES ===
+  executionPhase: 'idle',
+  currentExecutingNodeId: null,
+  hitlPendingData: null,
+  executionRunId: null,
+  nodeExecutionTimers: {},
+  executionEvents: [],
+  reasoningTraces: {},
+  currentWorkflow: null,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -138,4 +197,48 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       outputs: nodes.filter((n) => outputEdges.some((e) => e.target === n.id)),
     };
   },
+
+  // === NEW ACTION IMPLEMENTATIONS ===
+  setExecutionPhase: (phase) => set({ executionPhase: phase }),
+
+  setCurrentExecutingNodeId: (nodeId) => set({ currentExecutingNodeId: nodeId }),
+
+  setHitlPendingData: (data) => set({ 
+    hitlPendingData: data,
+    executionPhase: data ? 'paused_hitl' : get().executionPhase 
+  }),
+
+  setExecutionRunId: (runId) => set({ executionRunId: runId }),
+
+  addExecutionEvent: (event) => set({ 
+    executionEvents: [...get().executionEvents, event] 
+  }),
+
+  setReasoningTrace: (nodeId, trace) => set({
+    reasoningTraces: { ...get().reasoningTraces, [nodeId]: trace }
+  }),
+
+  startNodeTimer: (nodeId) => set({
+    nodeExecutionTimers: { ...get().nodeExecutionTimers, [nodeId]: Date.now() }
+  }),
+
+  stopNodeTimer: (nodeId) => {
+    const timers = { ...get().nodeExecutionTimers };
+    delete timers[nodeId];
+    set({ nodeExecutionTimers: timers });
+  },
+
+  resetExecution: () => set({
+    executionPhase: 'idle',
+    currentExecutingNodeId: null,
+    hitlPendingData: null,
+    executionRunId: null,
+    nodeExecutionTimers: {},
+    executionEvents: [],
+    reasoningTraces: {},
+    executionStatus: {},
+    nodeOutputs: {},
+  }),
+  setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
 }));
+

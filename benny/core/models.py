@@ -5,8 +5,12 @@ Multi-Model Orchestration - LiteLLM integration with local/cloud providers
 import os
 from typing import Optional, Dict, Any, List
 from litellm import completion
+import logging
 from .litert_engine import LiteRTEngine
 from ..governance.lineage import track_llm_call
+from ..governance.operating_manual import build_system_prompt_augmentation
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -196,14 +200,20 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         model = profile["model"]
     else:
         # Parse LiteLLM model string like "ollama/llama3"
-        if "/" in model_id:
-            parts = model_id.split("/", 1)
-            provider = parts[0]
-            model = parts[1]
+        if "/" in model_id and not model_id.startswith("openai/"):
+            provider = model_id.split("/")[0]
+            model = "/".join(model_id.split("/")[1:])
+            
+            # Map common prefixes to actual providers
+            provider_map = {
+                "amd": "lemonade",
+                "fastflow": "fastflowlm"
+            }
+            provider = provider_map.get(provider.lower(), provider)
         else:
             # Heuristic: If it looks like a local model (GGUF, FLM, -it), 
             # and no provider is specified, default to lemonade.
-            local_hints = ["gguf", "flm", "it-", "llama3", "phi-3"]
+            local_hints = ["gguf", "flm", "it-", "llama3", "phi-3", "qwen"]
             if any(hint in model_id.lower() for hint in local_hints):
                 provider = "lemonade"
             else:
@@ -220,14 +230,108 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         local_config = LOCAL_PROVIDERS[provider]
         config["base_url"] = local_config["base_url"]
         config["api_key"] = local_config["api_key"]
+        
+        # Aggressive prefixing for LiteLLM compatibility
+        # LiteLLM needs 'openai/' to trigger the OpenAI-compatible client for custom base_urls
+        if not config["model"].startswith("openai/") and provider in ["lemonade", "ollama", "fastflowlm", "lmstudio"]:
+            model_core = config["model"]
+            # If the model name contains a specific localized path, extract the base name
+            # common for Lemonade/FastFlowLM model IDs
+            if "/" in model_core:
+                 model_core = model_core.split("/")[-1]
+            config["model"] = f"openai/{model_core}"
+            
     # Fallback: if we defaulted to openai but have lemonade running, it might be that.
     elif provider == "openai" and any(hint in model_id.lower() for hint in ["gguf", "flm"]):
          config["provider"] = "lemonade"
          local_config = LOCAL_PROVIDERS["lemonade"]
          config["base_url"] = local_config["base_url"]
          config["api_key"] = local_config["api_key"]
+         if not config["model"].startswith("openai/"):
+            config["model"] = f"openai/{config['model']}"
     
     return config
+
+
+async def get_active_model(workspace_id: str = "default") -> str:
+    """
+    Get the first available model by checking workspace manifest, then probing providers.
+    
+    Priority:
+    1. Workspace default_model from manifest.yaml
+    2. Auto-detect which provider is actually running by probing check URLs
+    3. Raise error if nothing available
+    
+    Args:
+        workspace_id: Workspace identifier
+        
+    Returns:
+        Model identifier string (e.g., "lmstudio/gemma-2-27b")
+        
+    Raises:
+        Exception if no model available and default_model is null
+    """
+    from .workspace import load_manifest
+    
+    # Priority 1: Load workspace manifest and use default_model if set
+    try:
+        manifest = load_manifest(workspace_id)
+        if manifest.default_model:
+            print(f"✓ Using workspace default_model: {manifest.default_model}")
+            return manifest.default_model
+    except Exception as e:
+        logging.warning(f"Could not load manifest for {workspace_id}: {e}")
+    
+    # Priority 2: Probe each local provider to see which is running
+    print(f"No default_model set for {workspace_id}. Auto-detecting available providers...")
+    probe_order = ["lmstudio", "lemonade", "ollama", "fastflowlm"]
+    
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            for provider_name in probe_order:
+                if provider_name not in LOCAL_PROVIDERS:
+                    continue
+                
+                provider = LOCAL_PROVIDERS[provider_name]
+                check_url = provider.get("check_url")
+                
+                if not check_url:
+                    continue
+                
+                try:
+                    response = await client.get(check_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        models = data.get("data", [])
+                        if models:
+                            # Return first available model with provider prefix
+                            model_id = models[0].get("id", models[0])
+                            result = f"{provider_name}/{model_id}"
+                            print(f"✓ Auto-detected active provider {provider_name}: {result}")
+                            return result
+                except Exception as e:
+                    logging.debug(f"Provider {provider_name} not available: {e}")
+                    continue
+    except Exception as e:
+        logger.error(f"Error probing providers: {e}")
+    
+    # Priority 3: Fallback to the first provider that we might have a preset for
+    # (Optional: we could just return a default like reasoning)
+    
+    # Priority 4: Fallback error
+    error_msg = (
+        f"No active LLM provider found and no default_model set in "
+        f"workspace '{workspace_id}' manifest.yaml. \n"
+        f"Please either:\n"
+        f"  1. Set 'default_model' in {workspace_id}/manifest.yaml, or\n"
+        f"  2. Ensure one of these providers is running: \n"
+        f"     - LM Studio (port 1234)\n"
+        f"     - Lemonade (port 13305)\n"
+        f"     - Ollama (port 11434)\n"
+        f"     - FastFlowLM (port 52625)"
+    )
+    logger.error(f"[LLM_MANAGER] {error_msg}")
+    raise Exception(error_msg)
 
 
 async def call_model(
@@ -252,6 +356,32 @@ async def call_model(
     Returns:
         Generated text response
     """
+    # Operating Manual: Prepend identity and rules to the system prompt
+    # Extract workspace_id from messages if present (assuming meta or context might have it, 
+    # but for now we often pass it in run_id or it's 'default').
+    # For now, we'll try to find 'workspace' in the messages or use 'default'.
+    workspace_id = "default"
+    for msg in messages:
+        if msg.get("role") == "system" and "workspace:" in msg.get("content", ""):
+            import re
+            match = re.search(r"workspace:\s*(\S+)", msg["content"])
+            if match:
+                workspace_id = match.group(1)
+                break
+    
+    augmentation = build_system_prompt_augmentation(workspace_id)
+    if augmentation:
+        # Find the system prompt and prepend to it, or create one if missing
+        system_found = False
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                messages[i]["content"] = augmentation + msg.get("content", "")
+                system_found = True
+                break
+        
+        if not system_found:
+            messages.insert(0, {"role": "system", "content": augmentation})
+
     # Handle internal LiteRT (MediaPipe) inference
     if model.startswith("litert/") or "/litert" in model or (isinstance(model, str) and "litert" in model.lower()):
         # Extract model path if provided, else use default in initialize()
@@ -308,14 +438,12 @@ async def call_model(
         provider = config.get("provider", "openai").lower()
         litellm_model = config["model"]
         
-        # Aggressive prefixing for known local providers
+        # The prefixing logic is now handled in get_model_config for consistency
+        # but we keep this as a safety check for direct model string inputs
         local_mapping = ["lemonade", "fastflowlm", "lmstudio", "ollama"]
         if provider in local_mapping or "base_url" in config:
             if not litellm_model.startswith("openai/"):
-                # Always force openai/ prefix for local servers with custom base_url
-                # LiteLLM needs this to trigger the OpenAI client
                 if "/" in litellm_model:
-                    # if it was 'lemonade/gemma', change to 'openai/gemma'
                     litellm_model = f"openai/{litellm_model.split('/')[-1]}"
                 else:
                     litellm_model = f"openai/{litellm_model}"

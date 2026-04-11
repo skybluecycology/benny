@@ -167,6 +167,7 @@ class Task(BaseModel):
     total_steps: int = 0
     current_step: int = 0
     message: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom task metrics and stage info")
     aer_log: List[Dict[str, Any]] = Field(default_factory=list, description="Agent Execution Record narrative")
     lineage_run_id: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())

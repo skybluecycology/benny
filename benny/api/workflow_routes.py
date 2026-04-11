@@ -3,13 +3,17 @@ Workflow Routes - Execute and manage graph workflows
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, AsyncGenerator
 from pathlib import Path
 import uuid
 import asyncio
+import logging
+import json
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.messages import HumanMessage
 
@@ -36,8 +40,15 @@ init_tracing()
 # Create checkpointer for workflow state persistence
 checkpointer = SQLiteCheckpointer()
 
+# File-based workflow storage
+workflow_storage = WorkflowStorage()
+
 # In-memory execution tracking (use Redis in production)
 executions: Dict[str, Dict] = {}
+
+# SSE event buffers for real-time streaming (execution_id → list of events)
+_swarm_events: Dict[str, list] = {}
+_swarm_event_flags: Dict[str, asyncio.Event] = {}
 
 
 # =============================================================================
@@ -48,7 +59,7 @@ class WorkflowRequest(BaseModel):
     workflow: str
     workspace: str = "default"
     message: Optional[str] = None
-    model: str = "Qwen3-8B-Hybrid"
+    model: Optional[str] = None
     params: Optional[Dict[str, Any]] = None
 
 
@@ -60,6 +71,34 @@ class WorkflowResponse(BaseModel):
     artifact_path: Optional[str] = None
     governance_url: Optional[str] = None
 
+
+# =============================================================================
+# SSE EVENT UTILITIES
+# =============================================================================
+
+def _emit_swarm_event(execution_id: str, event_type: str, data: Dict[str, Any]):
+    """Emit an event for swarm SSE streaming."""
+    if execution_id not in _swarm_events:
+        _swarm_events[execution_id] = []
+    
+    event = {
+        "type": event_type,
+        "timestamp": datetime.now().isoformat(),
+        **data,
+    }
+    _swarm_events[execution_id].append(event)
+    logging.info(f"[AUDIT] Swarm event emitted | execution_id: {execution_id} | type: {event_type} | total events: {len(_swarm_events[execution_id])}")
+    
+    # Signal SSE consumer
+    flag = _swarm_event_flags.get(execution_id)
+    if flag:
+        flag.set()
+        logging.info(f"[AUDIT] Signaled SSE flag for {execution_id}")
+
+
+# =============================================================================
+# WORKFLOW EXECUTION
+# =============================================================================
 
 async def _execute_workflow_async(
     execution_id: str,
@@ -135,36 +174,73 @@ async def _execute_swarm_async(
 ) -> None:
     """Background task to execute swarm workflow"""
     import os
+    logging.info(f"[AUDIT] Swarm background task started | execution_id: {execution_id} | workflow: {request.workflow}")
     try:
         executions[execution_id]["status"] = "running"
         executions[execution_id]["started_at"] = datetime.now().isoformat()
+        logging.info(f"[AUDIT] Marked execution as running: {execution_id}")
         
-        # Get concurrency from env or params
+        # Get configuration from env or params
         max_concurrency = int(os.getenv("SWARM_MAX_CONCURRENCY", "1"))
-        if request.params and "max_concurrency" in request.params:
-            max_concurrency = request.params["max_concurrency"]
+        handover_limit = 500
+        
+        if request.params:
+            if "max_concurrency" in request.params:
+                max_concurrency = request.params["max_concurrency"]
+            if "handover_summary_limit" in request.params:
+                handover_limit = request.params["handover_summary_limit"]
+        
+        # Fetch the strategy YAML to get trigger files and outputs
+        workflow_def = workflow_storage.get_workflow(request.workflow)
+        input_files = []
+        output_files = []
+        strategy_config = {}
+        
+        if workflow_def:
+            # Re-read the raw YAML data if possible (workflow_storage returns visualized dict)
+            # Better: let's assume we can get the raw data from the strategy path
+            import yaml
+            strategy_path = workflow_def.get("file_path")
+            if strategy_path and os.path.exists(strategy_path):
+                with open(strategy_path, 'r', encoding='utf-8') as f:
+                    raw_data = yaml.safe_load(f)
+                    if raw_data:
+                        input_files = raw_data.get("trigger", {}).get("files", [])
+                        strategy_config = raw_data.get("strategy", {})
+                        output_files = strategy_config.get("outputs", [])
         
         # Execute the swarm workflow
+        logging.info(f"[AUDIT] Calling run_swarm_workflow | execution_id: {execution_id} | max_concurrency: {max_concurrency}")
         result = await run_swarm_workflow(
             request=request.message or "",
             workspace=request.workspace,
             model=request.model,
             execution_id=execution_id,
-            max_concurrency=max_concurrency
+            max_concurrency=max_concurrency,
+            input_files=input_files,
+            output_files=output_files,
+            config=strategy_config
         )
+        logging.info(f"[AUDIT] Swarm workflow completed | execution_id: {execution_id} | status: {result.get('status')}")
         
-        # Update execution state
+        # Update execution state with enhanced swarm fields
         executions[execution_id]["status"] = result.get("status", "completed")
         executions[execution_id]["result"] = result.get("final_document")
         executions[execution_id]["artifact_path"] = result.get("artifact_path")
         executions[execution_id]["governance_url"] = result.get("governance_url")
         executions[execution_id]["plan"] = result.get("plan")
+        executions[execution_id]["waves"] = result.get("waves")
+        executions[execution_id]["current_wave"] = result.get("current_wave")
+        executions[execution_id]["ascii_dag"] = result.get("ascii_dag")
+        executions[execution_id]["review_pass_results"] = result.get("review_pass_results")
         executions[execution_id]["completed_at"] = datetime.now().isoformat()
         
         if result.get("errors"):
             executions[execution_id]["errors"] = result["errors"]
         
     except Exception as e:
+        logging.error(f"[AUDIT] Swarm execution background task failed | execution_id: {execution_id} | error: {str(e)}", exc_info=True)
+        logger.error(f"Swarm execution background task failed: {e}")
         executions[execution_id]["status"] = "failed"
         executions[execution_id]["error"] = str(e)
         executions[execution_id]["failed_at"] = datetime.now().isoformat()
@@ -174,6 +250,7 @@ async def _execute_swarm_async(
 async def execute_workflow(request: WorkflowRequest, background_tasks: BackgroundTasks):
     """Execute a workflow"""
     execution_id = str(uuid.uuid4())
+    logging.info(f"[AUDIT] POST /workflow/execute | workflow: {request.workflow} | workspace: {request.workspace} | message: {request.message[:50] if request.message else 'none'}")
     
     # Ensure workspace exists
     ensure_workspace_structure(request.workspace)
@@ -190,21 +267,39 @@ async def execute_workflow(request: WorkflowRequest, background_tasks: Backgroun
         "error": None,
         "created_at": datetime.now().isoformat()
     }
+    logging.info(f"[AUDIT] Created execution_id: {execution_id}")
     
+    # Determine if it's a swarm/strategy workflow
+    is_swarm = request.workflow == "swarm"
+    if not is_swarm:
+        wf_def = workflow_storage.get_workflow(request.workflow)
+        if wf_def and wf_def.get("type") == "strategy":
+            is_swarm = True
+            logging.info(f"[AUDIT] Workflow '{request.workflow}' is strategy type - routing to swarm")
+            # Initialize SSE buffers for swarm
+            _swarm_events[execution_id] = []
+            logging.info(f"[AUDIT] Initialized SSE event buffer for swarm: {execution_id}")
+            
     # Route to appropriate workflow handler
-    if request.workflow == "swarm":
+    if is_swarm:
         background_tasks.add_task(_execute_swarm_async, execution_id, request)
+        logging.info(f"[AUDIT] Started background task for swarm: {execution_id}")
     else:
         background_tasks.add_task(_execute_workflow_async, execution_id, request)
+        logging.info(f"[AUDIT] Started background task for regular workflow: {execution_id}")
     
-    return WorkflowResponse(
+    response = WorkflowResponse(
         execution_id=execution_id,
         status="pending",
         workflow=request.workflow,
         workspace=request.workspace,
         governance_url=get_governance_url(execution_id, request.workflow) if request.workflow == "swarm" else None
     )
+    logging.info(f"[AUDIT] Returning response: execution_id={execution_id}, is_swarm={is_swarm}")
+    return response
 
+
+from ..core.task_manager import task_manager
 
 @router.get("/workflow/{execution_id}/status")
 async def get_workflow_status(execution_id: str):
@@ -212,7 +307,14 @@ async def get_workflow_status(execution_id: str):
     if execution_id not in executions:
         raise HTTPException(404, f"Execution not found: {execution_id}")
     
-    return executions[execution_id]
+    execution = executions[execution_id]
+    
+    # Merge TaskManager AER logs if available
+    task = task_manager.get_task(execution_id)
+    if task:
+        execution["aer_log"] = task.aer_log
+        
+    return execution
 
 
 class InterruptResponse(BaseModel):
@@ -337,8 +439,7 @@ class WorkflowDefinition(BaseModel):
     edges: List[EdgeDefinition]
 
 
-# File-based workflow storage
-workflow_storage = WorkflowStorage()
+# (workflow_storage instance moved to top-level initialization)
 
 
 @router.get("/workflows")

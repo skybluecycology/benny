@@ -89,6 +89,25 @@ class AgentExecutionRecordFacet(BaseFacet):
     _schemaURL: Optional[str] = None
 
 
+@dataclass
+class PolicyBreachFacet(BaseFacet):
+    rule: str
+    description: str
+    content_snippet: str
+    node_id: str
+    _producer: str = PRODUCER
+    _schemaURL: Optional[str] = None
+
+
+@dataclass
+class BennyContextFacet(BaseFacet):
+    """Facet to link OpenLineage runs back to Benny's internal IDs"""
+    benny_run_id: str
+    workspace: str
+    _producer: str = PRODUCER
+    _schemaURL: Optional[str] = None
+
+
 # =============================================================================
 # LINEAGE CLIENT
 # =============================================================================
@@ -104,6 +123,7 @@ class BennyLineageClient:
         self.marquez_url = marquez_url
         self._client: Optional[OpenLineageClient] = None
         self._runs: Dict[str, Run] = {}
+        self._run_id_map: Dict[str, str] = {} # Benny ID -> OpenLineage UUID
     
     @property
     def client(self) -> OpenLineageClient:
@@ -112,9 +132,34 @@ class BennyLineageClient:
             self._client = OpenLineageClient(url=self.marquez_url)
         return self._client
     
-    def _create_run(self, run_id: Optional[str] = None, facets: Optional[Dict[str, BaseFacet]] = None) -> Run:
-        """Create a new run with generated or provided ID and optional facets"""
-        return Run(runId=run_id or str(uuid.uuid4()), facets=facets or {})
+    def _get_or_create_uuid(self, benny_id: Optional[str]) -> str:
+        """Ensure we have a valid UUID for OpenLineage, mapping from Benny ID if needed"""
+        if not benny_id:
+            return str(uuid.uuid4())
+        
+        # Check if already a valid UUID
+        try:
+            uuid.UUID(benny_id)
+            return benny_id
+        except ValueError:
+            # Not a UUID, check map or generate new
+            if benny_id not in self._run_id_map:
+                self._run_id_map[benny_id] = str(uuid.uuid4())
+                logger.info("Mapped Benny ID '%s' to OpenLineage UUID '%s'", benny_id, self._run_id_map[benny_id])
+            return self._run_id_map[benny_id]
+
+    def _create_run(self, benny_id: Optional[str] = None, facets: Optional[Dict[str, BaseFacet]] = None) -> Run:
+        """Create a new run with valid UUID and optional facets"""
+        run_id = self._get_or_create_uuid(benny_id)
+        
+        actual_facets = facets or {}
+        if benny_id and "benny_context" not in actual_facets:
+            actual_facets["benny_context"] = BennyContextFacet(
+                benny_run_id=benny_id,
+                workspace="default" # Ideally passed, but defaulting for now
+            )
+            
+        return Run(runId=run_id, facets=actual_facets)
     
     def _create_job(self, job_name: str, facets: Optional[Dict[str, BaseFacet]] = None) -> Job:
         """Create a job with the given name and facets"""
@@ -138,7 +183,16 @@ class BennyLineageClient:
         metadata: Optional[Dict[str, Any]] = None
     ) -> str:
         """Emit START event for workflow execution"""
-        run = self._create_run(workflow_id)
+        # workflow_id here is Benny's internal execution ID (e.g. run-xxxx)
+        
+        facets = {
+            "benny_context": BennyContextFacet(
+                benny_run_id=workflow_id,
+                workspace=workspace
+            )
+        }
+        
+        run = self._create_run(workflow_id, facets=facets)
         self._runs[workflow_id] = run
         
         job = self._create_job(
@@ -183,21 +237,33 @@ class BennyLineageClient:
         outputs: Optional[List[str]] = None
     ) -> None:
         """Emit COMPLETE event for workflow execution"""
-        run = self._runs.get(workflow_id, self._create_run(workflow_id))
+        # Lookup the Run object (which contains the valid OpenLineage UUID)
+        run = self._runs.get(workflow_id)
+        if not run:
+            # Fallback creation if not tracked (unlikely)
+            run = self._create_run(workflow_id)
         
         job = self._create_job(job_name=f"workflow.{workflow_name}")
         
+        # Merge facets
+        facets = {
+            "workflow_execution": WorkflowExecutionFacet(
+                workflow_id=workflow_id,
+                workspace="default",
+                nodes_executed=nodes_executed,
+                execution_time_ms=execution_time_ms,
+                status="completed"
+            )
+        }
+        if workflow_id in self._run_id_map:
+             facets["benny_context"] = BennyContextFacet(
+                benny_run_id=workflow_id,
+                workspace="default"
+            )
+
         run = Run(
             runId=run.runId,
-            facets={
-                "workflow_execution": WorkflowExecutionFacet(
-                    workflow_id=workflow_id,
-                    workspace="default",
-                    nodes_executed=nodes_executed,
-                    execution_time_ms=execution_time_ms,
-                    status="completed"
-                )
-            }
+            facets=facets
         )
         
         try:
@@ -229,7 +295,9 @@ class BennyLineageClient:
         error_message: str
     ) -> None:
         """Emit FAIL event for workflow execution"""
-        run = self._runs.get(workflow_id, self._create_run(workflow_id))
+        run = self._runs.get(workflow_id)
+        if not run:
+            run = self._create_run(workflow_id)
         
         job = self._create_job(job_name=f"workflow.{workflow_name}")
         
@@ -284,6 +352,9 @@ class BennyLineageClient:
         """Emit event for LLM API call, linked to a parent workflow run."""
         job = self._create_job(job_name=f"llm.{provider}.{model.replace('/', '_')}")
         
+        # Resolve OpenLineage UUID for the parent
+        parent_uuid = self._get_or_create_uuid(parent_run_id)
+
         # Link to parent for nested visualization in Marquez
         facets = {
             "llm_call": LLMCallFacet(
@@ -296,7 +367,7 @@ class BennyLineageClient:
                 total_tokens=usage.get("total_tokens") if usage else None
             ),
             "parent": ParentRunFacet(
-                run={"runId": parent_run_id},
+                run={"runId": parent_uuid},
                 job={"namespace": self.namespace, "name": parent_job_name}
             )
         }
@@ -340,6 +411,8 @@ class BennyLineageClient:
         """Emit event for tool execution, nested within parent run."""
         job = self._create_job(job_name=f"tool.{tool_name}")
         
+        parent_uuid = self._get_or_create_uuid(parent_run_id)
+
         facets = {
             "tool_execution": ToolExecutionFacet(
                 tool_name=tool_name,
@@ -348,7 +421,7 @@ class BennyLineageClient:
                 error_message=error_message
             ),
             "parent": ParentRunFacet(
-                run={"runId": parent_run_id},
+                run={"runId": parent_uuid},
                 job={"namespace": self.namespace, "name": parent_job_name}
             )
         }
@@ -444,11 +517,15 @@ class BennyLineageClient:
         plan: str = ""
     ) -> None:
         """Emit a RUNNING event with the Agent Execution Record facet."""
-        run = self._runs.get(run_id, self._create_run(run_id))
+        run = self._runs.get(run_id)
+        if not run:
+            run = self._create_run(run_id)
+            
+        ol_run_id = run.runId
         job = self._create_job(job_name=job_name)
         
         event_run = Run(
-            runId=run.runId,
+            runId=ol_run_id,
             facets={
                 "agent_execution_record": AgentExecutionRecordFacet(
                     intent=intent,
@@ -458,7 +535,7 @@ class BennyLineageClient:
                     run_id=run_id
                 ),
                 "parent": ParentRunFacet(
-                    run={"runId": run_id}, # Link reasoning back to the main synthesis workflow
+                    run={"runId": ol_run_id}, # Link reasoning back to the main synthesis workflow
                     job={"namespace": self.namespace, "name": job_name}
                 )
             }
@@ -483,6 +560,54 @@ class BennyLineageClient:
             )
         except Exception as e:
             logger.warning("Failed to emit AER lineage event: %s", e)
+
+    def emit_policy_breach(
+        self,
+        run_id: str,
+        node_id: str,
+        rule: str,
+        description: str,
+        content_snippet: str
+    ) -> None:
+        """Emit a RUNNING event with a PolicyBreachFacet to signal HITL intervention."""
+        run = self._runs.get(run_id)
+        if not run:
+            run = self._create_run(run_id)
+            
+        ol_run_id = run.runId
+        job = self._create_job(job_name="studio_workflow_intervention")
+        
+        event_run = Run(
+            runId=ol_run_id,
+            facets={
+                "policy_breach": PolicyBreachFacet(
+                    rule=rule,
+                    description=description,
+                    content_snippet=content_snippet,
+                    node_id=node_id
+                )
+            }
+        )
+        
+        try:
+            event = RunEvent(
+                eventType=RunState.OTHER, # Use OTHER for intervention pauses
+                eventTime=datetime.now(timezone.utc).isoformat(),
+                run=event_run,
+                producer=PRODUCER,
+                job=job,
+                inputs=[],
+                outputs=[]
+            )
+            self.client.emit(event)
+            # Local Audit Log
+            emit_governance_event(
+                event_type="POLICY_BREACH_INTERVENTION",
+                data=attr.asdict(event),
+                workspace_id="default"
+            )
+        except Exception as e:
+            logger.warning("Failed to emit policy breach lineage: %s", e)
 
 
 # =============================================================================
@@ -580,4 +705,17 @@ def track_aer(
     """Track reasoning step - convenience function"""
     get_lineage_client().emit_aer(
         run_id, job_name, intent, observation, inference, plan
+    )
+
+
+def track_policy_breach(
+    run_id: str,
+    node_id: str,
+    rule: str,
+    description: str,
+    content_snippet: str
+) -> None:
+    """Track policy breach and intervention - convenience function"""
+    get_lineage_client().emit_policy_breach(
+        run_id, node_id, rule, description, content_snippet
     )

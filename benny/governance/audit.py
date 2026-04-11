@@ -85,6 +85,11 @@ def _audit_worker():
                 "workspace": workspace_id,
                 "data": processed_payload
             }
+            
+            # Add SHA-256 integrity hash before writing
+            event_json = json.dumps(log_entry, sort_keys=True, cls=BennyAuditEncoder)
+            log_entry["_integrity_hash"] = hashlib.sha256(event_json.encode('utf-8')).hexdigest()
+            
             log_line = json.dumps(log_entry, cls=BennyAuditEncoder) + "\n"
 
             # 3. Write to Global Log
@@ -166,6 +171,110 @@ def emit_governance_event(event_type: str, data: Dict[str, Any], workspace_id: s
         "workspace_id": workspace_id,
         "mirror": mirror
     })
+
+def emit_security_event(
+    event_type: str,
+    agent_id: str,
+    action: str,
+    result: str,
+    details: Dict[str, Any] = None,
+    workspace_id: str = "global"
+):
+    """
+    Emit a security-specific audit event.
+    
+    Event types:
+      - UNAUTHORIZED_ACCESS: Agent tried to access something it shouldn't
+      - PERMISSION_VIOLATION: RBAC check failed
+      - MANIFEST_VIOLATION: Tool exceeded its declared capabilities
+      - CREDENTIAL_ACCESS: Credential was accessed from the vault
+      - RATE_LIMIT_EXCEEDED: Agent exceeded call rate limits
+    """
+    emit_governance_event(
+        event_type=f"SECURITY_{event_type}",
+        data={
+            "agent_id": agent_id,
+            "action": action,
+            "result": result,
+            "details": details or {},
+            "co_authored_by": "ai_agent",  # Explicit AI disclosure per PRD
+        },
+        workspace_id=workspace_id
+    )
+
+def verify_audit_integrity(workspace_id: str = "global") -> Dict[str, Any]:
+    """
+    Verify the integrity of the audit log by checking SHA-256 hashes.
+    
+    Returns:
+        {
+            "total_events": int,
+            "verified": int,
+            "tampered": int,
+            "missing_hash": int,
+            "tampered_events": [...]
+        }
+    """
+    if workspace_id == "global":
+        audit_path = GLOBAL_AUDIT_LOG
+    else:
+        audit_path = _get_workspace_path(workspace_id, "runs/audit.log")
+        
+    if not audit_path.exists():
+        return {"total_events": 0, "verified": 0, "tampered": 0, "missing_hash": 0}
+    
+    total = 0
+    verified = 0
+    tampered = 0
+    missing_hash = 0
+    tampered_events = []
+    
+    try:
+        content = audit_path.read_text(encoding="utf-8")
+        for line_num, line in enumerate(content.splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            
+            total += 1
+            try:
+                event = json.loads(line)
+                stored_hash = event.pop("_integrity_hash", None)
+                
+                if stored_hash is None:
+                    # Note: Legacy events might not have a hash
+                    missing_hash += 1
+                    continue
+                
+                # Recompute hash without the _integrity_hash field
+                # Use sort_keys=True for deterministic serialization
+                recomputed = hashlib.sha256(
+                    json.dumps(event, sort_keys=True, cls=BennyAuditEncoder).encode('utf-8')
+                ).hexdigest()
+                
+                if recomputed == stored_hash:
+                    verified += 1
+                else:
+                    tampered += 1
+                    tampered_events.append({
+                        "line": line_num,
+                        "event_type": event.get("event_type", "UNKNOWN"),
+                        "expected_hash": stored_hash,
+                        "actual_hash": recomputed,
+                    })
+            except (json.JSONDecodeError, KeyError):
+                missing_hash += 1
+    except Exception as e:
+        logger.error(f"Error during audit integrity check: {e}")
+        return {"error": str(e), "total_events": total}
+    
+    return {
+        "total_events": total,
+        "verified": verified,
+        "tampered": tampered,
+        "missing_hash": missing_hash,
+        "tampered_events": tampered_events,
+    }
 
 # Auto-start service on import if main
 if __name__ == "__main__":

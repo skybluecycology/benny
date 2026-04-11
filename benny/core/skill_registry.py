@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 
 from .workspace import get_workspace_path
+from ..governance.permission_manifest import validate_tool_access
 
 
 # =============================================================================
@@ -302,8 +303,32 @@ class SkillRegistry:
         skills = self.get_skills_by_ids(skill_ids, workspace)
         return [s.to_openai_tool_schema() for s in skills]
 
-    def execute_skill(self, skill_id: str, workspace: str, **kwargs) -> str:
-        """Execute a skill by ID with given arguments."""
+    def execute_skill(self, skill_id: str, workspace: str, agent_role: str = "executor", agent_id: str = "default", **kwargs) -> str:
+        """Execute a skill by ID with RBAC enforcement."""
+        from ..gateway.rbac import check_permission, AgentRole, ToolOperation
+        
+        # RBAC check (non-blocking — logs violation but allows if no policy exists)
+        try:
+            role = AgentRole(agent_role)
+            permitted = check_permission(
+                workspace=workspace,
+                agent_role=role,
+                tool_id=skill_id,
+                operation=ToolOperation.EXECUTE,
+                agent_id=agent_id,
+            )
+            if not permitted:
+                return f"❌ Permission denied: role '{agent_role}' cannot execute '{skill_id}'"
+        except Exception as e:
+            # If RBAC system fails, allow execution but log warning
+            import logging
+            logging.getLogger(__name__).warning("RBAC check failed, allowing execution: %s", e)
+        
+        # Least Skills Security Check (Permission Manifest)
+        violation = validate_tool_access(agent_id, skill_id, workspace)
+        if violation:
+            return f"❌ SECURITY_PERMISSION_VIOLATION: {violation.message}"
+        
         handler = SKILL_HANDLERS.get(skill_id)
         if not handler:
             return f"❌ Unknown skill: {skill_id}"

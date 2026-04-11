@@ -15,6 +15,12 @@ import LLMNode from './nodes/LLMNode';
 import ToolNode from './nodes/ToolNode';
 import LogicNode from './nodes/LogicNode';
 import DataNode from './nodes/DataNode';
+import A2ANode from './nodes/A2ANode';
+
+import InterventionNode from './nodes/InterventionNode';
+import LiveExecutionOverlay from './LiveExecutionOverlay';
+import HITLFormPanel from './HITLFormPanel';
+import A2APulse from './A2APulse';
 
 export default function WorkflowCanvas() {
   const { screenToFlowPosition } = useReactFlow();
@@ -36,13 +42,14 @@ export default function WorkflowCanvas() {
     tool: ToolNode,
     logic: LogicNode,
     data: DataNode,
+    a2a: A2ANode,
+    intervention: InterventionNode,
   }), []);
 
   // Keyboard delete handler
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Delete' || event.key === 'Backspace') {
-        // Don't delete if user is typing in an input
         const target = event.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
           return;
@@ -109,48 +116,58 @@ export default function WorkflowCanvas() {
   }, [setSelectedNode, setSelectedEdge]);
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges.map(e => ({
-        ...e,
-        selected: e.id === selectedEdge,
-        style: {
-          ...e.style,
-          stroke: e.id === selectedEdge ? '#ef4444' : 'var(--primary)',
-          strokeWidth: e.id === selectedEdge ? 3 : 2,
-        }
-      }))}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onNodeClick={onNodeClick}
-      onEdgeClick={onEdgeClick}
-      onPaneClick={onPaneClick}
-      nodeTypes={nodeTypes}
-      fitView
-      snapToGrid
-      snapGrid={[20, 20]}
-      deleteKeyCode={null} // We handle delete ourselves
-      selectionOnDrag
-      panOnDrag={[1, 2]} // Pan with middle/right mouse
-    >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.05)" />
-      <Controls />
-      <MiniMap 
-        nodeColor={(node) => {
-          switch (node.type) {
-            case 'trigger': return '#4ade80';
-            case 'llm': return '#a78bfa';
-            case 'tool': return '#60a5fa';
-            case 'logic': return '#fb923c';
-            case 'data': return '#2dd4bf';
-            default: return '#888';
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges.map(e => ({
+          ...e,
+          selected: e.id === selectedEdge,
+          style: {
+            ...e.style,
+            stroke: e.id === selectedEdge ? '#ef4444' : 'var(--primary)',
+            strokeWidth: e.id === selectedEdge ? 3 : 2,
           }
-        }}
-        maskColor="rgba(0,0,0,0.8)"
-      />
-    </ReactFlow>
+        }))}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
+        onPaneClick={onPaneClick}
+        nodeTypes={nodeTypes}
+        fitView
+        snapToGrid
+        snapGrid={[20, 20]}
+        deleteKeyCode={null}
+        selectionOnDrag
+        panOnDrag={[1, 2]}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.05)" />
+        <Controls />
+        <MiniMap 
+          nodeColor={(node) => {
+            switch (node.type) {
+              case 'trigger': return '#4ade80';
+              case 'llm': return '#a78bfa';
+              case 'tool': return '#60a5fa';
+              case 'logic': return '#fb923c';
+              case 'data': return '#2dd4bf';
+              case 'a2a': return '#0ea5e3';
+              case 'intervention': return '#f59e0b';
+              default: return '#888';
+            }
+          }}
+          maskColor="rgba(0,0,0,0.8)"
+        />
+      </ReactFlow>
+      
+      {/* Real-time execution overlays */}
+      <LiveExecutionOverlay />
+      <HITLFormPanel />
+      <A2APulse />
+    </div>
   );
 }
+

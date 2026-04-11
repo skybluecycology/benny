@@ -20,14 +20,14 @@ export default function DataManagementPanel() {
   const [uploading, setUploading] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [ingestLogs, setIngestLogs] = useState<string[]>([]);
+  const [activeTasks, setActiveTasks] = useState<any[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Poll for logs when ingesting or when showLogs is true
+  // Poll for tasks when ingesting or when showLogs is true
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (ingesting || showLogs) {
@@ -37,14 +37,23 @@ export default function DataManagementPanel() {
             headers: { ...GOVERNANCE_HEADERS }
           });
           const data = await res.json();
-          setIngestLogs(data.logs || []);
+          const tasks = data.tasks || [];
+          setActiveTasks(tasks);
+          
+          // If all tasks are completed, eventually stop ingesting state
+          const isAnyRunning = tasks.some((t: any) => t.status === 'running');
+          if (!isAnyRunning && ingesting) {
+            setIngesting(false);
+            fetchIndexedStatus();
+          }
+          
           logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         } catch (e) {
           console.error('Failed to fetch logs', e);
         }
       }, 1000);
     } else {
-      setIngestLogs([]);
+      setActiveTasks([]);
     }
     return () => clearInterval(interval);
   }, [ingesting, showLogs, currentWorkspace]);
@@ -342,6 +351,85 @@ export default function DataManagementPanel() {
     if (ext === 'pdf') return <File size={20} style={{ color: '#ef4444' }} />;
     if (ext === 'md') return <FileText size={20} style={{ color: '#3b82f6' }} />;
     return <FileText size={20} style={{ color: '#10b981' }} />;
+  };
+
+  const IngestionDashboard = ({ task }: { task: any }) => {
+    const stages = ["EXTRACTING", "INDEXING", "GRAPH_MAPPING"];
+    const currentStage = task.metadata?.stage || "EXTRACTING";
+    const currentIndex = stages.indexOf(currentStage);
+
+    return (
+      <div className="ingestion-dashboard glass-card" style={{ padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+             <Loader className="animate-spin" size={16} style={{ color: 'var(--primary)' }} />
+             <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>Cognitive Inquisitor Active</span>
+           </div>
+           <div className={`status-tag ${task.status === 'completed' ? 'indexed' : 'meta'}`} style={{ fontSize: '10px' }}>
+             {task.status.toUpperCase()}
+           </div>
+        </div>
+
+        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          {task.message}
+        </div>
+
+        {/* Multi-Stage Progress Bar */}
+        <div style={{ display: 'flex', gap: '4px', height: '6px', marginBottom: '16px' }}>
+          {stages.map((stage, i) => {
+            const isDone = i < currentIndex;
+            const isCurrent = i === currentIndex;
+            return (
+              <div 
+                key={stage} 
+                className="progress-segment"
+                style={{ 
+                  flex: 1, 
+                  background: isDone ? 'var(--primary)' : isCurrent ? 'rgba(168, 139, 250, 0.3)' : 'rgba(255,255,255,0.05)',
+                  borderRadius: '3px',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}
+              >
+                {isCurrent && (
+                  <div 
+                    className="progress-shimmer" 
+                    style={{ 
+                      position: 'absolute', 
+                      inset: 0, 
+                      width: `${task.progress % 100}%`, 
+                      background: 'var(--primary)',
+                      transition: 'width 0.3s ease'
+                    }} 
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Stage Labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', textAlign: 'center' }}>
+          {stages.map((stage, i) => (
+            <div key={stage} style={{ flex: 1, fontSize: '9px', fontWeight: 'bold', color: i <= currentIndex ? 'var(--text-primary)' : 'var(--text-muted)', textTransform: 'uppercase' }}>
+              {stage.replace('_', ' ')}
+            </div>
+          ))}
+        </div>
+
+        {/* Metrics Grid */}
+        <div style={{ display: 'flex', gap: '12px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+           <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Chunks</div>
+              <div style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--primary)' }}>{task.metadata?.indexed_count || 0}<span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>/{task.metadata?.chunks || '?'}</span></div>
+           </div>
+           <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Triples</div>
+              <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981' }}>{task.metadata?.triples || 0}</div>
+           </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -697,20 +785,25 @@ export default function DataManagementPanel() {
 
 
         {(ingesting || showLogs) && (
-          <div style={{
-            background: '#1e1e1e',
-            color: '#00ff00',
-            fontFamily: 'monospace',
-            fontSize: '11px',
-            padding: '12px',
-            borderRadius: '8px',
-            maxHeight: '150px',
-            overflowY: 'auto',
-            border: '1px solid #333'
-          }}>
-            {ingestLogs.length === 0 ? "Starting..." : ingestLogs.map((log: string, i: number) => (
-              <div key={i}>{log}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {activeTasks.map((task) => (
+               <IngestionDashboard key={task.task_id} task={task} />
             ))}
+            
+            {/* Fallback Legacy Logs if no tasks found */}
+            {activeTasks.length === 0 && (
+              <div style={{
+                background: '#1e1e1e',
+                color: '#8b5cf6',
+                fontFamily: 'monospace',
+                fontSize: '11px',
+                padding: '12px',
+                borderRadius: '8px',
+                textAlign: 'center'
+              }}>
+                Initialising Cognitive Inquisitor...
+              </div>
+            )}
             <div ref={logsEndRef} />
           </div>
         )}

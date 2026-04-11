@@ -70,6 +70,71 @@ def ensure_workspace_structure(workspace_id: str = "default") -> dict:
             yaml.dump(manifest.dict(), f, sort_keys=False)
         created.append("manifest.yaml")
     
+    # Create default Operating Manuals if they don't exist
+    _create_default_manual(base / "SOUL.md", """# Name
+Benny
+
+# Purpose
+Enterprise cognitive mesh orchestration platform for structured knowledge work.
+
+# Communication Style
+Professional, precise, and transparent. Always explain reasoning.
+
+# Core Values
+- Accuracy over speed
+- Transparency in all reasoning
+- Human oversight for critical decisions
+- Data privacy and security
+
+# Boundaries
+- Never modify production data without explicit human approval
+- Always cite sources when providing information
+- Escalate to human reviewers when confidence is below 70%
+- Never expose credentials or sensitive information in outputs
+""")
+
+    _create_default_manual(base / "USER.md", """# Organization
+[Your Organization Name]
+
+# Authorized Personnel
+- [Admin Name] (Admin)
+
+# Domain Context
+[Describe your business domain and subject matter]
+
+# Compliance Requirements
+- All outputs must be auditable via governance logs
+- PII must be handled per applicable regulations
+""")
+
+    _create_default_manual(base / "AGENTS.md", """# Coding Standards
+- Use type hints in all Python functions
+- Follow PEP 8 style guidelines
+- Write docstrings for all public functions
+
+# Tool Usage Policies
+- Always use call_model() for LLM calls, never raw litellm
+- Use the SkillRegistry for tool execution
+- Log all file system operations
+
+# Forbidden Actions
+- Do not delete files outside the workspace directory
+- Do not make external API calls without RBAC authorization
+- Do not bypass governance middleware
+- Do not store credentials in plain text
+
+# Output Formatting
+- Use Markdown for all generated documents
+- Include timestamps and provenance in generated artifacts
+""")
+
+    # Create security subdirectories
+    for sec_dir in ["policies", "agents", "credentials"]:
+        path = base / sec_dir
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            created.append(sec_dir)
+
     return {
         "status": "ready",
         "workspace_id": workspace_id,
@@ -78,6 +143,17 @@ def ensure_workspace_structure(workspace_id: str = "default") -> dict:
         "manifest_created": "manifest.yaml" in created,
         "isolation": "scoped_directory_structure"
     }
+
+
+def _create_default_manual(path: Path, content: str) -> None:
+    """Create a default manual file if it doesn't exist."""
+    if not path.exists():
+        try:
+            path.write_text(content.strip(), encoding="utf-8")
+        except Exception as e:
+            # We don't want task saving to crash the main process
+            import logging
+            logging.error(f"TaskManager persistence failed for {path}: {e}")
 
 
 def load_manifest(workspace_id: str) -> WorkspaceManifest:
@@ -139,21 +215,32 @@ def get_workspace_files(workspace_id: str, subdir: str = "data_out") -> List[dic
     Returns:
         List of file info dicts
     """
-    path = get_workspace_path(workspace_id, subdir)
-    if not path.exists():
+    try:
+        path = get_workspace_path(workspace_id, subdir)
+        if not path.exists():
+            return []
+        
+        files = []
+        try:
+            for item in path.iterdir():
+                if item.is_file():
+                    try:
+                        files.append({
+                            "name": item.name,
+                            "path": str(item.relative_to(WORKSPACE_ROOT.absolute())),
+                            "size": item.stat().st_size,
+                            "modified": item.stat().st_mtime
+                        })
+                    except Exception:
+                        continue # Skip problematic files
+        except Exception:
+            return []
+        
+        return files
+    except Exception as e:
+        import logging
+        logging.error(f"Error listing files for {workspace_id}/{subdir}: {e}")
         return []
-    
-    files = []
-    for item in path.iterdir():
-        if item.is_file():
-            files.append({
-                "name": item.name,
-                "path": str(item.relative_to(WORKSPACE_ROOT)),
-                "size": item.stat().st_size,
-                "modified": item.stat().st_mtime
-            })
-    
-    return files
 
 
 # Pass-by-reference threshold (5KB)

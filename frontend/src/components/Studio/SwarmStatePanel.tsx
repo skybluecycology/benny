@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy, Brain, Target, Search, Lightbulb, ClipboardList } from 'lucide-react';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
+import WaveTimeline from './WaveTimeline';
 
 interface TaskItem {
   task_id: string;
@@ -18,12 +19,18 @@ interface PartialResult {
 
 interface SwarmExecutionState {
   execution_id: string;
-  status: 'pending' | 'planning' | 'executing' | 'aggregating' | 'completed' | 'partial_success' | 'failed';
+  status: 'pending' | 'planning' | 'executing' | 'aggregating' | 'completed' | 'partial_success' | 'failed' | 'scheduled';
   plan?: TaskItem[];
   partial_results?: PartialResult[];
   artifact_path?: string;
   governance_url?: string;
   errors?: string[];
+  // === NEW FIELDS ===
+  waves?: string[][];
+  current_wave?: number;
+  ascii_dag?: string;
+  review_pass_results?: Array<{ type: string; severity: string; message: string }>;
+  aer_log?: Array<{ timestamp: string; intent: string; observation: string; inference?: string; plan?: string }>;
 }
 
 interface SwarmStatePanelProps {
@@ -42,7 +49,7 @@ export default function SwarmStatePanel({ executionId }: SwarmStatePanelProps) {
     
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/workflow/${executionId}/status`, {
+      const response = await fetch(`${API_BASE}/api/workflow/${executionId}/status`, {
         headers: { ...GOVERNANCE_HEADERS }
       });
       if (response.ok) {
@@ -159,8 +166,27 @@ export default function SwarmStatePanel({ executionId }: SwarmStatePanelProps) {
         </div>
       </div>
 
+      {/* Waves Visualization */}
+      {state?.waves && state.waves.length > 0 && (
+        <WaveTimeline 
+          waves={state.waves}
+          tasks={(state.plan || []).map(t => {
+            const res = state.partial_results?.find(r => r.task_id === t.task_id);
+            return {
+              task_id: t.task_id,
+              description: t.description,
+              status: res?.error ? 'failed' : res?.content ? 'completed' : (t.status as any),
+              wave: 0
+            };
+          })}
+          currentWave={state.current_wave || 0}
+          asciiDag={state.ascii_dag}
+          reviewFindings={state.review_pass_results}
+        />
+      )}
+
       {/* Progress */}
-      {totalTasks > 0 && (
+      {totalTasks > 0 && !state?.waves && (
         <div className="swarm-progress">
           <div className="swarm-progress-header">
             <span>Tasks</span>
@@ -207,6 +233,83 @@ export default function SwarmStatePanel({ executionId }: SwarmStatePanelProps) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Synthesis Narrative Feed */}
+      {state?.aer_log && state.aer_log.length > 0 && (
+        <div className="synthesis-narrative" style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Brain size={18} style={{ color: 'var(--primary)' }} />
+            <h3 style={{ margin: 0, fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Synthesis Narrative</h3>
+          </div>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '20px',
+            maxHeight: '500px',
+            overflowY: 'auto',
+            paddingRight: '8px',
+            scrollBehavior: 'smooth'
+          }} className="narrative-feed custom-scrollbar">
+            {state.aer_log.map((entry, i) => (
+              <div key={i} className="narrative-entry" style={{
+                position: 'relative',
+                paddingLeft: '24px',
+                borderLeft: '2px solid rgba(168, 139, 250, 0.2)',
+                animation: 'fadeIn 0.5s ease-out'
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  left: '-9px',
+                  top: '0',
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '50%',
+                  background: 'var(--surface)',
+                  border: '2px solid var(--primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                   <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--primary)' }} />
+                </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <Target size={12} style={{ color: '#8b5cf6' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#8b5cf6', textTransform: 'uppercase' }}>{entry.intent}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '13px', lineHeight: '1.6', color: 'var(--text-primary)', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                   {entry.observation}
+                </div>
+
+                {(entry.inference || entry.plan) && (
+                  <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                     {entry.inference && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#eab308', fontWeight: 'bold', marginBottom: '4px', textTransform: 'uppercase' }}>
+                             <Lightbulb size={12} /> Inference
+                           </div>
+                           {entry.inference}
+                        </div>
+                     )}
+                     {entry.plan && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#22c55e', fontWeight: 'bold', marginBottom: '4px', textTransform: 'uppercase' }}>
+                             <ClipboardList size={12} /> Next Step
+                           </div>
+                           {entry.plan}
+                        </div>
+                     )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

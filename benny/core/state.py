@@ -51,6 +51,16 @@ class TaskItem(TypedDict):
     description: str
     status: str  # pending, running, completed, failed
     skill_hint: Optional[str]  # Suggested skill from benny/skills/
+    assigned_skills: List[str]         # Specific MCP skills allowed for this task
+    parent_id: Optional[str]           # Link to the task that spawned this sub-task
+    depth: int                         # Recursive depth (0 = root)
+    # === NEW FIELDS ABOVE ===
+    wave: int                          # Wave assignment (0-indexed)
+    dependencies: List[str]            # List of task_ids this task depends on
+    assigned_model: Optional[str]      # Role-specific model
+    files_touched: List[str]           # Files this task will read/write
+    estimated_tokens: Optional[int]    # Estimated token cost
+    complexity: Optional[str]          # high, medium, low
 
 
 class PartialResult(TypedDict):
@@ -101,6 +111,22 @@ class SwarmState(TypedDict):
     # Configuration
     model: str
     max_concurrency: int
+    input_files: List[str]                  # Declared inputs from YAML
+    output_files: List[str]                 # Declared outputs from YAML
+    config: Dict[str, Any]                  # Full config dictionary from YAML
+
+    # Recursive Expansion
+    active_task_pool: List[TaskItem]              # All tasks (including dynamically added ones)
+    expansion_signals: List[Dict[str, Any]]       # Requests for new sub-tasks
+    # === NEW FIELDS ABOVE ===
+    dependency_graph: Dict[str, List[str]]       # task_id → [dependency_task_ids]
+    waves: List[List[str]]                        # Computed wave schedule: [[task_ids in wave 0], [wave 1], ...]
+    current_wave: int                             # Index of currently executing wave
+    wave_results: Dict[str, List[PartialResult]]  # Results grouped by wave index
+    context_handover: Dict[str, Any]              # Accumulated state delta passed between waves
+    review_pass_results: List[Dict[str, Any]]     # Findings from post-execution review
+    ascii_dag: Optional[str]                      # ASCII visualization
+    handover_summary_limit: int                   # Max chars per task result in handover
 
 
 def create_swarm_state(
@@ -108,7 +134,11 @@ def create_swarm_state(
     workspace: str = "default",
     original_request: str = "",
     model: str = "ollama/llama3.2",
-    max_concurrency: int = 1
+    max_concurrency: int = 1,
+    handover_summary_limit: int = 500,
+    input_files: Optional[List[str]] = None,
+    output_files: Optional[List[str]] = None,
+    config: Optional[Dict[str, Any]] = None
 ) -> SwarmState:
     """Create initial state for a new swarm workflow execution"""
     return SwarmState(
@@ -126,7 +156,22 @@ def create_swarm_state(
         errors=[],
         status="pending",
         model=model,
-        max_concurrency=max_concurrency
+        max_concurrency=max_concurrency,
+        input_files=input_files or [],
+        output_files=output_files or [],
+        config=config or {},
+        # === RECURSION DEFAULTS ===
+        active_task_pool=[],
+        expansion_signals=[],
+        # === NEW DEFAULTS ===
+        dependency_graph={},
+        waves=[],
+        current_wave=0,
+        wave_results={},
+        context_handover={},
+        review_pass_results=[],
+        ascii_dag=None,
+        handover_summary_limit=handover_summary_limit
     )
 
 

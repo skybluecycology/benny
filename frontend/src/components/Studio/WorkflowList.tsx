@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Plus, Trash2, Loader } from 'lucide-react';
+import { FileText, Plus, Trash2, Loader, Zap } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -7,7 +7,7 @@ interface Workflow {
   id: string;
   name: string;
   description?: string;
-  type: 'user' | 'example';
+  type: 'user' | 'example' | 'strategy';
   readonly?: boolean;
   nodes: any[];
   edges: any[];
@@ -23,6 +23,7 @@ export default function WorkflowList({ mode = 'flows' }: WorkflowListProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const setNodes = useWorkflowStore((state) => state.setNodes);
   const setEdges = useWorkflowStore((state) => state.setEdges);
+  const setCurrentWorkflow = useWorkflowStore((state) => state.setCurrentWorkflow);
 
   useEffect(() => {
     fetchWorkflows();
@@ -34,7 +35,7 @@ export default function WorkflowList({ mode = 'flows' }: WorkflowListProps) {
         headers: { ...GOVERNANCE_HEADERS }
       });
       const data = await response.json();
-      const workflowList = Array.isArray(data) ? data : (data.value || []);
+      const workflowList = Array.isArray(data) ? data : (data.workflows || []);
       setWorkflows(workflowList);
     } catch (error) {
       console.error('Failed to fetch workflows:', error);
@@ -44,7 +45,8 @@ export default function WorkflowList({ mode = 'flows' }: WorkflowListProps) {
   };
 
   const filteredWorkflows = workflows.filter(w => {
-    const isAgent = w.name.toLowerCase().includes('agent') || w.name.toLowerCase().includes('persona');
+    const isStrategy = w.type === 'strategy';
+    const isAgent = w.name.toLowerCase().includes('agent') || w.name.toLowerCase().includes('persona') || isStrategy;
     return mode === 'agents' ? isAgent : !isAgent;
   });
 
@@ -52,6 +54,7 @@ export default function WorkflowList({ mode = 'flows' }: WorkflowListProps) {
     setSelectedId(workflow.id);
     setNodes(workflow.nodes || []);
     setEdges(workflow.edges || []);
+    setCurrentWorkflow(workflow);
   };
 
   const deleteWorkflow = async (id: string) => {
@@ -114,7 +117,7 @@ export default function WorkflowList({ mode = 'flows' }: WorkflowListProps) {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                {mode === 'agents' ? <Plus size={16} style={{ color: 'var(--accent-llm)' }} /> : <FileText size={16} style={{ color: 'var(--accent-llm)' }} />}
+                {workflow.type === 'strategy' ? <Zap size={16} style={{ color: 'var(--accent-success)' }} /> : mode === 'agents' ? <Plus size={16} style={{ color: 'var(--accent-llm)' }} /> : <FileText size={16} style={{ color: 'var(--accent-llm)' }} />}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: '500' }}>{workflow.name}</div>
                   {workflow.description && (

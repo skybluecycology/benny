@@ -91,3 +91,69 @@ async def delete_skill(skill_id: str, workspace: str = "default"):
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to delete skill: {str(e)}")
+
+
+# =============================================================================
+# GATEWAY & REMIX SERVER ROUTES
+# =============================================================================
+
+from ..gateway.remix_server import (
+    RemixServerConfig, save_remix_config, list_remix_configs,
+    load_remix_config, create_remix_server,
+)
+from ..gateway.rbac import AgentRole, load_policy, save_policy, RBACPolicy
+
+
+@router.post("/remix-servers")
+async def create_remix_server_config(config: RemixServerConfig):
+    """Create a new Remix Server configuration."""
+    try:
+        return save_remix_config(config)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to save remix config: {str(e)}")
+
+
+@router.get("/remix-servers")
+async def get_remix_servers(workspace: str = "default"):
+    """List all Remix Server configurations for a workspace."""
+    try:
+        configs = list_remix_configs(workspace)
+        return {"remix_servers": [c.model_dump() for c in configs]}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list remix servers: {str(e)}")
+
+
+@router.get("/remix-servers/{remix_id}")
+async def get_remix_server(remix_id: str, workspace: str = "default"):
+    """Get a specific Remix Server and its available tools."""
+    try:
+        server = create_remix_server(workspace, remix_id)
+        if not server:
+            raise HTTPException(404, f"Remix Server not found: {remix_id}")
+        return {
+            "config": server.config.model_dump(),
+            "available_tools": server.list_tools(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get remix server: {str(e)}")
+
+
+@router.get("/rbac/policy")
+async def get_rbac_policy(workspace: str = "default"):
+    """Get the current RBAC policy for a workspace."""
+    try:
+        return load_policy(workspace).model_dump()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to load RBAC policy: {str(e)}")
+
+
+@router.put("/rbac/policy")
+async def update_rbac_policy(policy: RBACPolicy, workspace: str = "default"):
+    """Update the RBAC policy for a workspace."""
+    try:
+        save_policy(workspace, policy)
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update RBAC policy: {str(e)}")

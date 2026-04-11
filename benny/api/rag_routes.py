@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from pathlib import Path
 import fitz  # PyMuPDF
+import httpx
 
 from ..core.workspace import get_workspace_path
 from ..core.extraction import extract_structured_text
@@ -38,6 +39,23 @@ class QueryRequest(BaseModel):
     selected_sources: Optional[List[str]] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+
+class AdaptiveRAGRequest(BaseModel):
+    query: str
+    workspace: str = "default"
+    model: str = "Qwen3-8B-Hybrid"
+    max_retries: int = 3
+
+class AdaptiveRAGResponse(BaseModel):
+    answer: Optional[str]
+    route: str
+    route_explanation: str
+    documents_retrieved: int
+    documents_relevant: int
+    retry_count: int
+    execution_trace: List[str]
+    hallucination_check: Optional[bool]
+    answer_quality: Optional[bool]
 
 @router.post("/rag/ingest")
 async def ingest_files(request: IngestRequest):
@@ -88,7 +106,15 @@ async def ingest_files(request: IngestRequest):
         for idx, file_path in enumerate(file_paths):
             try:
                 msg = f"Processing {file_path.name} ({idx+1}/{len(file_paths)})..."
-                task_manager.update_task(run_id, message=msg, current_step=idx+1)
+                task_manager.update_task(
+                    run_id, 
+                    message=msg, 
+                    current_step=idx+1,
+                    metadata={
+                        "stage": "EXTRACTING",
+                        "current_file": file_path.name
+                    }
+                )
                 
                 # Emit AER for extraction
                 try:
@@ -101,6 +127,8 @@ async def ingest_files(request: IngestRequest):
                 chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
                 
                 if chunks:
+                    task_manager.update_task(run_id, metadata={"stage": "INDEXING", "current_file": file_path.name, "chunks": len(chunks)})
+                    
                     # 1. DELETE old entries for this source to prevent duplicates
                     collection.delete(where={"source": file_path.name})
 
@@ -115,6 +143,12 @@ async def ingest_files(request: IngestRequest):
                         
                         # Emit AER for commit
                         perc = (i + len(batch_chunks)) / len(chunks) * 100
+                        task_manager.update_task(run_id, metadata={
+                            "stage": "INDEXING", 
+                            "current_file": file_path.name, 
+                            "chunks": len(chunks),
+                            "indexed_count": i + len(batch_chunks)
+                        })
                         try:
                             track_aer(run_id, "rag_ingest", f"Committing chunks for {file_path.name}", f"Committed {i+len(batch_chunks)}/{len(chunks)} chunks ({perc:.0f}%)")
                         except Exception:
@@ -148,25 +182,19 @@ async def ingest_files(request: IngestRequest):
 
 @router.get("/rag/logs")
 async def get_rag_logs(workspace: str = "default"):
-    """Get the latest ingestion logs from TaskManager."""
+    """Get the latest ingestion tasks from TaskManager."""
     try:
         tasks = task_manager.list_tasks(workspace)
         rag_tasks = [t for t in tasks if t.type == "rag_ingest"]
         if not rag_tasks:
-            return {"logs": ["No ingestion tasks found."]}
+            return {"tasks": []}
         
         # Sort by updated_at descending
         rag_tasks.sort(key=lambda x: x.updated_at, reverse=True)
-        latest = rag_tasks[0]
         
-        # Translate task state/AER into log format for legacy UI compatibility
-        logs = [f"Task: {latest.task_id} - status: {latest.status}", latest.message]
-        for entry in latest.aer_log[-10:]: # last 10 steps
-            logs.append(f"[{entry['timestamp']}] {entry['intent']}: {entry['observation']}")
-            
-        return {"logs": logs}
+        return {"tasks": [t.model_dump() for t in rag_tasks[:5]]}
     except Exception as e:
-        return {"logs": [f"Error reading task logs: {str(e)}"]}
+        return {"error": str(e), "tasks": []}
 
 
 @router.get("/rag/status")
@@ -426,3 +454,40 @@ ANSWER:"""
 
     except Exception as e:
         raise HTTPException(500, f"Chat failed: {str(e)}")
+
+
+from fastapi import Response
+
+@router.post("/rag/adaptive-query", response_model=AdaptiveRAGResponse)
+async def adaptive_rag_query(request: AdaptiveRAGRequest, response: Response):
+    """
+    Adaptive RAG query — self-correcting retrieval pipeline.
+    Routes queries through no_retrieval / single_step / multi_hop 
+    with quality grading and automatic query rewriting.
+    """
+    from ..core.adaptive_rag import run_adaptive_rag
+    
+    try:
+        result = await run_adaptive_rag(
+            query=request.query,
+            workspace=request.workspace,
+            model=request.model,
+            max_retries=request.max_retries,
+        )
+        
+        # Set the strategy header
+        response.headers["X-RAG-Strategy"] = result.get("route", "single_step")
+        
+        return AdaptiveRAGResponse(
+            answer=result.get("generation"),
+            route=result.get("route", "single_step"),
+            route_explanation=result.get("route_explanation", ""),
+            documents_retrieved=len(result.get("documents", [])),
+            documents_relevant=len(result.get("graded_documents", [])),
+            retry_count=result.get("retry_count", 0),
+            execution_trace=result.get("execution_trace", []),
+            hallucination_check=result.get("hallucination_check"),
+            answer_quality=result.get("answer_quality"),
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Adaptive RAG failed: {str(e)}")

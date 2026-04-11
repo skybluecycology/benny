@@ -12,7 +12,8 @@ import {
   FileText,
   Database,
   Search,
-  Download
+  Download,
+  Globe
 } from 'lucide-react';
 
 const nodeCategories = [
@@ -31,6 +32,7 @@ const nodeCategories = [
       { type: 'llm', label: 'LLM', icon: Brain },
       { type: 'llm', label: 'Agent (with skills)', icon: Bot },
       { type: 'tool', label: 'Tool Executor', icon: Wrench },
+      { type: 'a2a', label: '🌐 A2A Agent', description: 'Delegate to external agent', icon: Globe },
     ],
   },
   {
