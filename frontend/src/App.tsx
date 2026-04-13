@@ -16,6 +16,7 @@ import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
 import SynthesisPanel from './components/Notebook/SynthesisPanel';
 import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
+import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { useWorkspaceStore } from './hooks/useWorkspaceStore';
 import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
@@ -306,7 +307,9 @@ function App() {
         )}
         
         {/* 5. Execution Audit Hub (Terminal) */}
-        <ExecutionAuditHub />
+        <ErrorBoundary name="AuditHub">
+          <ExecutionAuditHub />
+        </ErrorBoundary>
       </div>
     </ReactFlowProvider>
   );

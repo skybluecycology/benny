@@ -21,26 +21,16 @@ interface LLMNodeProps {
 }
 
 export default function LLMNode({ id, data, selected }: LLMNodeProps) {
-  const { status, output, reasoning, executionEvents } = useWorkflowStore(
+  const { status, output, reasoning, hasTools } = useWorkflowStore(
     useShallow((state) => ({
       status: state.executionStatus[id] || 'idle',
       output: state.nodeOutputs[id],
       reasoning: state.reasoningTraces[id],
-      executionEvents: state.executionEvents
+      hasTools: !!state.nodeHasTools[id]
     }))
   );
   
   const deleteNode = useWorkflowStore((state) => state.deleteNode);
-  
-  const events = useMemo(() => 
-    executionEvents.filter(e => e.nodeId === id), 
-    [executionEvents, id]
-  );
-  
-  const hasTools = useMemo(() => 
-    events.some(e => e.type === 'tool_used'),
-    [events]
-  );
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();

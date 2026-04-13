@@ -141,6 +141,46 @@ export default function ExecutionAuditHub() {
   );
 }
 
+function SafeJSON({ data, label }: { data: any, label?: string }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const jsonString = useMemo(() => {
+    try {
+      // Basic circular reference check/handling for common types
+      return JSON.stringify(data, (key, value) => {
+        if (typeof value === 'bigint') return value.toString();
+        if (value instanceof Error) return { message: value.message, stack: value.stack };
+        return value;
+      }, 2);
+    } catch (e) {
+      return `[Serialization Error: ${e instanceof Error ? e.message : 'Unknown'}]`;
+    }
+  }, [data]);
+
+  const preview = jsonString.length > 100 ? jsonString.substring(0, 100) + '...' : jsonString;
+
+  return (
+    <span style={{ cursor: 'pointer', fontFamily: 'monospace' }} onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}>
+      {isExpanded ? (
+        <pre style={{ 
+          margin: '4px 0', 
+          padding: '8px', 
+          background: 'rgba(0,0,0,0.3)', 
+          borderRadius: '4px',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+          maxHeight: '200px',
+          overflowY: 'auto'
+        }}>
+          {jsonString}
+        </pre>
+      ) : (
+        <span style={{ opacity: 0.8 }}>{preview}</span>
+      )}
+    </span>
+  );
+}
+
 function EventItem({ event }: { event: ExecutionEvent }) {
   switch (event.type) {
     case 'node_progress':
@@ -152,7 +192,7 @@ function EventItem({ event }: { event: ExecutionEvent }) {
     case 'tool_used':
       return (
         <span style={{ color: '#fab005' }}>
-          <span style={{ color: '#fab005', fontWeight: 600 }}>TOOL</span> [{event.nodeId}] call <span style={{ color: '#fff' }}>{event.data?.tool_name}</span>({JSON.stringify(event.data?.args)})
+          <span style={{ color: '#fab005', fontWeight: 600 }}>TOOL</span> [{event.nodeId}] call <span style={{ color: '#fff' }}>{event.data?.tool_name}</span>(<SafeJSON data={event.data?.args} />)
         </span>
       );
     case 'resource_usage':

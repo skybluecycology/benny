@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { API_BASE_URL } from '../../constants';
 
@@ -20,7 +21,24 @@ export default function LiveExecutionOverlay() {
     completedTasks,
     totalTasks,
     npuActive,
-  } = useWorkflowStore();
+  } = useWorkflowStore(useShallow((state) => ({
+    executionPhase: state.executionPhase,
+    executionRunId: state.executionRunId,
+    setExecutionPhase: state.setExecutionPhase,
+    setCurrentExecutingNodeId: state.setCurrentExecutingNodeId,
+    setHitlPendingData: state.setHitlPendingData,
+    addExecutionEvent: state.addExecutionEvent,
+    setReasoningTrace: state.setReasoningTrace,
+    startNodeTimer: state.startNodeTimer,
+    stopNodeTimer: state.stopNodeTimer,
+    nodes: state.nodes,
+    setNodes: state.setNodes,
+    toggleAuditHub: state.toggleAuditHub,
+    isAuditHubOpen: state.isAuditHubOpen,
+    completedTasks: state.completedTasks,
+    totalTasks: state.totalTasks,
+    npuActive: state.npuActive,
+  })));
   
   const eventSourceRef = useRef<EventSource | null>(null);
 

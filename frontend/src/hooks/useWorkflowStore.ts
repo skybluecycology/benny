@@ -56,6 +56,7 @@ interface WorkflowState {
   completedTasks: number;
   tokenUsage: number;
   npuActive: boolean;
+  nodeHasTools: Record<string, boolean>;
 
   // Actions
   setNodes: (nodes: Node[]) => void;
@@ -118,6 +119,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   completedTasks: 0,
   tokenUsage: 0,
   npuActive: false,
+  nodeHasTools: {},
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -231,22 +233,29 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   setExecutionRunId: (runId) => set({ executionRunId: runId }),
 
   addExecutionEvent: (event) => {
-    const { nodes, setNodes, executionEvents } = get();
+    const { nodes, executionEvents, nodeHasTools } = get();
     
     // Auto-update node status if possible
+    let nodesUpdated = false;
+    let nextNodes = nodes;
+    let nextStatus = get().executionStatus;
+
     if (event.nodeId && (event.type === 'node_started' || event.type === 'node_completed' || event.type === 'node_error')) {
       const status = event.type === 'node_started' ? 'running' 
                    : event.type === 'node_completed' ? 'success' 
                    : 'error';
                    
-      set({
-        nodes: nodes.map(n => n.id === event.nodeId ? { ...n, data: { ...n.data, status } } : n),
-        executionStatus: { ...get().executionStatus, [event.nodeId]: status }
-      });
+      nextNodes = nodes.map(n => n.id === event.nodeId ? { ...n, data: { ...n.data, status } } : n);
+      nextStatus = { ...get().executionStatus, [event.nodeId]: status };
+      nodesUpdated = true;
 
       if (event.type === 'node_completed') {
         set({ completedTasks: get().completedTasks + 1 });
       }
+    }
+
+    if (event.type === 'tool_used' && event.nodeId && !nodeHasTools[event.nodeId]) {
+      set({ nodeHasTools: { ...nodeHasTools, [event.nodeId]: true } });
     }
 
     if (event.type === 'resource_usage') {
@@ -263,8 +272,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       set({ totalTasks: event.data.total_steps });
     }
 
+    // Optimization: Cap events to last 1000 to prevent memory bloat
+    const updatedEvents = [...executionEvents, event];
+    const finalEvents = updatedEvents.length > 1000 ? updatedEvents.slice(-1000) : updatedEvents;
+
     set({ 
-      executionEvents: [...executionEvents, event] 
+      executionEvents: finalEvents,
+      ...(nodesUpdated ? { nodes: nextNodes, executionStatus: nextStatus } : {})
     });
   },
 
@@ -296,6 +310,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     completedTasks: 0,
     tokenUsage: 0,
     npuActive: false,
+    nodeHasTools: {},
   }),
   setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
   setRunHistory: (history) => set({ runHistory: history }),
