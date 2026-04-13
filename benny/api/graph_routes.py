@@ -522,6 +522,7 @@ async def _background_ingest_files(
         track_workflow_complete(
             run_id, 
             "graph_ingest", 
+            workspace, 
             ["extraction", "synthesis", "neo4j_store"], 
             0,
             outputs=[f"graph_run_{run_id}"]
@@ -596,7 +597,7 @@ async def _process_content_to_graph(
 
     # Trace AER for extraction
     try:
-        track_aer(run_id, "graph_ingest", f"Extracting triples from {source_name}", f"Split into {len(sections)} sections")
+        track_aer(run_id, "graph_ingest", workspace, f"Extracting triples from {source_name}", f"Split into {len(sections)} sections")
     except Exception as e:
         logger.warning("Lineage tracking failed (extraction): %s", e)
 
@@ -693,7 +694,7 @@ async def _process_content_to_graph(
 
     # Track AER for storage
     try:
-        track_aer(run_id, "graph_ingest", f"Storing triples for {source_name}", f"Committed {stored_result['count']} triples to Neo4j database")
+        track_aer(run_id, "graph_ingest", workspace, f"Storing triples for {source_name}", f"Committed {stored_result['count']} triples to Neo4j database")
     except Exception as e:
         logger.warning("Lineage tracking failed (storage): %s", e)
 

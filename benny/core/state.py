@@ -61,6 +61,8 @@ class TaskItem(TypedDict):
     files_touched: List[str]           # Files this task will read/write
     estimated_tokens: Optional[int]    # Estimated token cost
     complexity: Optional[str]          # high, medium, low
+    is_pillar: bool                    # True if this is a high-level bucket needing expansion
+    is_expanded: bool                  # True if this pillar has already been decomposed
 
 
 class PartialResult(TypedDict):
@@ -114,6 +116,8 @@ class SwarmState(TypedDict):
     input_files: List[str]                  # Declared inputs from YAML
     output_files: List[str]                 # Declared outputs from YAML
     config: Dict[str, Any]                  # Full config dictionary from YAML
+    target_pillar_id: Optional[str]         # ID of the pillar currently being expanded (JIT)
+    max_depth: int                          # Max recursion depth for planning
 
     # Recursive Expansion
     active_task_pool: List[TaskItem]              # All tasks (including dynamically added ones)
@@ -138,7 +142,8 @@ def create_swarm_state(
     handover_summary_limit: int = 500,
     input_files: Optional[List[str]] = None,
     output_files: Optional[List[str]] = None,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    max_depth: int = 3
 ) -> SwarmState:
     """Create initial state for a new swarm workflow execution"""
     return SwarmState(
@@ -171,7 +176,9 @@ def create_swarm_state(
         context_handover={},
         review_pass_results=[],
         ascii_dag=None,
-        handover_summary_limit=handover_summary_limit
+        handover_summary_limit=handover_summary_limit,
+        target_pillar_id=None,
+        max_depth=max_depth
     )
 
 

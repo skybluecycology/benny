@@ -24,6 +24,7 @@ from ..core.state import create_swarm_state
 from ..persistence.checkpointer import SQLiteCheckpointer, TimeTravelDebugger
 from ..persistence.workflow_storage import WorkflowStorage
 from ..governance.lineage import track_workflow_start, track_workflow_complete
+from ..core.event_bus import event_bus
 from ..governance.tracing import init_tracing, trace_span
 
 
@@ -46,9 +47,7 @@ workflow_storage = WorkflowStorage()
 # In-memory execution tracking (use Redis in production)
 executions: Dict[str, Dict] = {}
 
-# SSE event buffers for real-time streaming (execution_id → list of events)
-_swarm_events: Dict[str, list] = {}
-_swarm_event_flags: Dict[str, asyncio.Event] = {}
+# Shared via event_bus
 
 
 # =============================================================================
@@ -77,23 +76,8 @@ class WorkflowResponse(BaseModel):
 # =============================================================================
 
 def _emit_swarm_event(execution_id: str, event_type: str, data: Dict[str, Any]):
-    """Emit an event for swarm SSE streaming."""
-    if execution_id not in _swarm_events:
-        _swarm_events[execution_id] = []
-    
-    event = {
-        "type": event_type,
-        "timestamp": datetime.now().isoformat(),
-        **data,
-    }
-    _swarm_events[execution_id].append(event)
-    logging.info(f"[AUDIT] Swarm event emitted | execution_id: {execution_id} | type: {event_type} | total events: {len(_swarm_events[execution_id])}")
-    
-    # Signal SSE consumer
-    flag = _swarm_event_flags.get(execution_id)
-    if flag:
-        flag.set()
-        logging.info(f"[AUDIT] Signaled SSE flag for {execution_id}")
+    """Emit an event for swarm SSE streaming via centralized EventBus."""
+    event_bus.emit(execution_id, event_type, data)
 
 
 # =============================================================================
@@ -158,7 +142,7 @@ async def _execute_workflow_async(
             
             try:
                 nodes_executed = ["process_input", "call_llm", "format_output"]
-                track_workflow_complete(execution_id, request.workflow, nodes_executed, execution_time_ms)
+                track_workflow_complete(execution_id, request.workflow, request.workspace, nodes_executed, execution_time_ms)
             except Exception:
                 pass
         
@@ -166,6 +150,11 @@ async def _execute_workflow_async(
         executions[execution_id]["status"] = "failed"
         executions[execution_id]["error"] = str(e)
         executions[execution_id]["failed_at"] = datetime.now().isoformat()
+        try:
+            from ..governance.lineage import track_workflow_fail
+            track_workflow_fail(execution_id, request.workflow, request.workspace, str(e))
+        except Exception:
+            pass
 
 
 async def _execute_swarm_async(
@@ -276,9 +265,8 @@ async def execute_workflow(request: WorkflowRequest, background_tasks: Backgroun
         if wf_def and wf_def.get("type") == "strategy":
             is_swarm = True
             logging.info(f"[AUDIT] Workflow '{request.workflow}' is strategy type - routing to swarm")
-            # Initialize SSE buffers for swarm
-            _swarm_events[execution_id] = []
-            logging.info(f"[AUDIT] Initialized SSE event buffer for swarm: {execution_id}")
+            # Events are handled via centralized EventBus
+            logging.info(f"[AUDIT] Initialized EventBus tracking for swarm: {execution_id}")
             
     # Route to appropriate workflow handler
     if is_swarm:

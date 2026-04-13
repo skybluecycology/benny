@@ -11,6 +11,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional
 from pathlib import Path
 import json
+import yaml
+import re
 
 from .workspace import get_workspace_path
 from ..governance.permission_manifest import validate_tool_access
@@ -40,6 +42,8 @@ class Skill:
     parameters: List[SkillParameter] = field(default_factory=list)
     builtin: bool = True
     workspace: Optional[str] = None  # None = global built-in
+    content: Optional[str] = None  # Full Markdown instructions from SKILL.md
+    metadata: Dict[str, Any] = field(default_factory=dict) # Extensible attributes (priority, author, etc.)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +54,8 @@ class Skill:
             "parameters": [asdict(p) for p in self.parameters],
             "builtin": self.builtin,
             "workspace": self.workspace,
+            "content": self.content,
+            "metadata": self.metadata,
         }
 
     def to_openai_tool_schema(self) -> dict:
@@ -263,6 +269,8 @@ class SkillRegistry:
             return []
 
         custom_skills = []
+        
+        # Format 1: Standalone JSON skills
         for skill_file in skills_dir.glob("*.json"):
             try:
                 data = json.loads(skill_file.read_text(encoding="utf-8"))
@@ -275,10 +283,54 @@ class SkillRegistry:
                     parameters=params,
                     builtin=False,
                     workspace=workspace,
+                    metadata=data.get("metadata", {})
                 )
                 custom_skills.append(skill)
             except Exception as e:
-                print(f"Warning: Could not load skill {skill_file}: {e}")
+                print(f"Warning: Could not load JSON skill {skill_file}: {e}")
+
+        # Format 2: Agent Skills Standard (Folder based with SKILL.md)
+        for skill_folder in skills_dir.iterdir():
+            if not skill_folder.is_dir():
+                continue
+            
+            skill_md = skill_folder / "SKILL.md"
+            if not skill_md.exists():
+                continue
+                
+            try:
+                raw_content = skill_md.read_text(encoding="utf-8")
+                
+                # Extract YAML frontmatter
+                fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", raw_content, re.DOTALL)
+                if fm_match:
+                    yaml_fm = fm_match.group(1)
+                    instructions = fm_match.group(2)
+                    data = yaml.safe_load(yaml_fm)
+                else:
+                    # Fallback: Treat whole file as instructions if no frontmatter
+                    data = {"name": skill_folder.name, "description": f"Skill from {skill_folder.name}"}
+                    instructions = raw_content
+                
+                # Align with Skill model
+                skill_id = data.get("id") or data.get("name", skill_folder.name).lower().replace(" ", "-")
+                params_data = data.get("parameters", [])
+                params = [SkillParameter(**p) for p in params_data]
+                
+                skill = Skill(
+                    id=skill_id,
+                    name=data.get("name", skill_folder.name),
+                    description=data.get("description", ""),
+                    category=data.get("category", "custom"),
+                    parameters=params,
+                    builtin=False,
+                    workspace=workspace,
+                    content=instructions.strip(),
+                    metadata=data.get("metadata", data) # Keep all FM data in metadata
+                )
+                custom_skills.append(skill)
+            except Exception as e:
+                print(f"Warning: Could not load Agent Skill {skill_md}: {e}")
 
         return custom_skills
 
@@ -297,6 +349,11 @@ class SkillRegistry:
         """Get specific skills by their IDs."""
         all_skills = {s.id: s for s in self.get_all_skills(workspace)}
         return [all_skills[sid] for sid in skill_ids if sid in all_skills]
+
+    def get_skill_by_id(self, skill_id: str, workspace: str) -> Optional[Skill]:
+        """Get a specific skill by its ID."""
+        all_skills = {s.id: s for s in self.get_all_skills(workspace)}
+        return all_skills.get(skill_id)
 
     def get_tool_schemas(self, skill_ids: List[str], workspace: str) -> List[dict]:
         """Get OpenAI function-calling schemas for given skill IDs."""

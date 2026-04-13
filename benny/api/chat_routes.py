@@ -259,6 +259,7 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
             track_workflow_complete(
                 run_id, 
                 "notebook_chat", 
+                workspace, 
                 ["rag_retrieval", "generation"], 
                 0,
                 outputs=[f"chat_reply_{run_id}"]

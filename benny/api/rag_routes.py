@@ -163,7 +163,14 @@ async def ingest_files(request: IngestRequest):
         
         task_manager.update_task(run_id, status="completed", progress=100, message="Ingestion finished successfully")
         try:
-            track_workflow_complete(run_id, "rag_ingest", ["extraction", "chunking", "upsert"], 0, outputs=[f"chromadb:{collection_name}"]) # time tracking not vital here yet
+            track_workflow_complete(
+                run_id, 
+                "rag_ingest", 
+                request.workspace, 
+                ["extraction", "chunking", "upsert"], 
+                0, 
+                outputs=[f"chromadb:{collection_name}"]
+            ) 
         except Exception:
             pass
         

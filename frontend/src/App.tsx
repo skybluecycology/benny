@@ -15,6 +15,7 @@ import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
 import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
 import SynthesisPanel from './components/Notebook/SynthesisPanel';
 import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
+import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { useWorkspaceStore } from './hooks/useWorkspaceStore';
 import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
@@ -303,6 +304,9 @@ function App() {
           </div>
           </>
         )}
+        
+        {/* 5. Execution Audit Hub (Terminal) */}
+        <ExecutionAuditHub />
       </div>
     </ReactFlowProvider>
   );

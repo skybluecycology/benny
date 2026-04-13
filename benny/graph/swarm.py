@@ -12,13 +12,13 @@ Architecture:
 from __future__ import annotations
 
 import logging
-
 import os
 import json
 import asyncio
 import uuid
+import re
 from datetime import datetime
-from typing import Literal, Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any, Tuple
 from pathlib import Path
 
 from langgraph.graph import StateGraph, START, END
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 from ..core.state import SwarmState, TaskItem, PartialResult, create_swarm_state
 from ..core.workspace import get_workspace_path
-from ..core.models import MODEL_REGISTRY, get_model_config
+from ..core.models import MODEL_REGISTRY, get_model_config, call_model
 from ..governance.lineage import (
     track_workflow_start, 
     track_workflow_complete,
@@ -47,14 +47,123 @@ from .wave_scheduler import (
 )
 from ..governance.permission_manifest import create_ephemeral_manifest, register_manifest
 from ..core.skill_registry import registry
+from ..core.task_manager import task_manager
+from ..core.event_bus import event_bus
+
 
 
 # =============================================================================
-# CONFIGURATION
+# UTILS
 # =============================================================================
+
+def parse_json_safe(text: str) -> Tuple[Dict[str, Any], str]:
+    """
+    Robust JSON parsing that handles:
+    - Extraction of <think> blocks (reasoning)
+    - Leading/trailing garbage
+    - Markdown code blocks
+    - Simple truncation
+    - Trailing commas
+    """
+    thinking = ""
+    # Extract think blocks (common in DeepSeek-R1 and similar reasoning models)
+    think_match = re.search(r'<think>(.*?)(?:</think>|$)', text, re.DOTALL)
+    if think_match:
+        thinking = think_match.group(1).strip()
+    
+    # Strip think blocks for JSON cleaning
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    
+    # Remove markdown code fences
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json")[1].split("```")[0]
+    elif "```" in cleaned:
+        blocks = cleaned.split("```")
+        for block in blocks:
+            if "{" in block and ":" in block:
+                cleaned = block
+                break
+        else:
+            cleaned = blocks[1] if len(blocks) > 1 else cleaned
+    
+    cleaned = cleaned.strip()
+    
+    # Boundary detection: Find first '{' or '['
+    start_idx = -1
+    for i, char in enumerate(cleaned):
+        if char in "{[":
+            start_idx = i
+            break
+    
+    if start_idx != -1:
+        cleaned = cleaned[start_idx:]
+    
+    # Boundary detection: Find last '}' or ']'
+    end_idx = -1
+    for i in range(len(cleaned) - 1, -1, -1):
+        if cleaned[i] in "}]":
+            end_idx = i
+            break
+            
+    if end_idx != -1:
+        cleaned = cleaned[:end_idx + 1]
+    
+    if not cleaned:
+        raise ValueError("Could not find any JSON structure in text")
+
+    # Clean up trailing commas in objects/arrays (common model error)
+    cleaned = re.sub(r',\s*([\]}])', r'\1', cleaned)
+
+    # Handle truncation: if it ends abruptly without closing
+    if not (cleaned.endswith("}") or cleaned.endswith("]")):
+        # 1. Close open strings
+        quote_count = 0
+        escaped = False
+        for char in cleaned:
+            if char == "\\" and not escaped:
+                escaped = True
+            elif char == '"' and not escaped:
+                quote_count += 1
+                escaped = False
+            else:
+                escaped = False
+        
+        if quote_count % 2 != 0:
+            cleaned += '"'
+            
+        # 2. Close brackets using a stack
+        stack = []
+        for char in cleaned:
+            if char in "{[":
+                stack.append(char)
+            elif char == "}":
+                if stack and stack[-1] == "{": stack.pop()
+            elif char == "]":
+                if stack and stack[-1] == "[": stack.pop()
+        
+        while stack:
+            cleaned = cleaned.rstrip(", ")
+            top = stack.pop()
+            if top == "{": cleaned += "}"
+            else: cleaned += "]"
+    
+    try:
+        return json.loads(cleaned), thinking
+    except json.JSONDecodeError as e:
+        # Fallback: try to replace single quotes if that was the issue
+        # Only if it looks like it might fix it
+        if "'" in cleaned and '"' not in cleaned:
+            try:
+                # Naive replacement for simple cases
+                repaired = cleaned.replace("'", '"')
+                return json.loads(repaired), thinking
+            except:
+                pass
+                
+        logger.debug(f"JSON repair failed. Original length: {len(text)}, Cleaned: {cleaned[:100]}...")
+        raise e
 
 MAX_CONCURRENCY = int(os.getenv("SWARM_MAX_CONCURRENCY", "1"))
-SKILLS_DIR = Path(__file__).parent.parent / "skills"
 MARQUEZ_WEB_URL = os.getenv("MARQUEZ_WEB_URL", "http://localhost:3001")
 
 
@@ -63,50 +172,12 @@ def get_governance_url(execution_id: str, workflow_name: str = "swarm") -> str:
     return f"{MARQUEZ_WEB_URL}/lineage/benny/workflow.{workflow_name}/{execution_id}"
 
 
-# =============================================================================
-# SKILL DISCOVERY (Bricolage Pattern)
-# =============================================================================
-
-def discover_skills() -> Dict[str, Dict[str, Any]]:
-    """
-    Discover available skills from benny/skills/ directory.
-    Returns dict of skill_name -> {description, priority}.
-    Skills with 'priority: high' in front-matter are ranked first.
-    """
-    skills = {}
-    if SKILLS_DIR.exists():
-        for skill_file in SKILLS_DIR.glob("*.md"):
-            if skill_file.name.startswith("_"):
-                continue
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-                # Extract first line as description
-                first_line = content.split("\n")[0].strip("# ")
-                # Extract priority from front-matter if present
-                priority = "normal"
-                if content.startswith("---"):
-                    fm_end = content.find("---", 3)
-                    if fm_end != -1:
-                        fm = content[3:fm_end]
-                        if "priority: high" in fm:
-                            priority = "high"
-                        elif "priority: low" in fm:
-                            priority = "low"
-                skills[skill_file.stem] = {
-                    "description": first_line,
-                    "priority": priority 
-                }
-            except Exception:
-                skills[skill_file.stem] = {"description": "Skill available", "priority": "normal"}
-    return skills
+def discover_skills(workspace_id: str = "default") -> List[Dict[str, Any]]:
+    """Refactored to use the central SkillRegistry."""
+    skills = registry.get_all_skills(workspace_id)
+    return [s.to_dict() for s in skills]
 
 
-def get_skill_content(skill_name: str) -> Optional[str]:
-    """Load skill content for execution"""
-    skill_path = SKILLS_DIR / f"{skill_name}.md"
-    if skill_path.exists():
-        return skill_path.read_text(encoding="utf-8")
-    return None
 
 
 # =============================================================================
@@ -115,167 +186,161 @@ def get_skill_content(skill_name: str) -> Optional[str]:
 
 async def planner_node(state: SwarmState) -> Dict[str, Any]:
     """
-    Planner node - decomposes request into tasks with dependencies.
-    Acts as a "bricoleur" by looking for existing skills first.
+    Hierarchical Planner Node - supports Macro Strategy and JIT Micro Expansion.
     """
+    workspace_id = state.get("workspace", "default")
+    execution_id = state.get("execution_id", "")
+    request = state.get("original_request", "")
+    plan = list(state.get("plan", []) or [])
+    dependency_graph = dict(state.get("dependency_graph", {}))
+    target_pillar_id = state.get("target_pillar_id")
     expansion_signals = state.get("expansion_signals", [])
-    if expansion_signals:
-        tasks = list(state.get("plan", []) or [])
-        dependency_graph = dict(state.get("dependency_graph", {}))
-        
-        for sig in expansion_signals:
-            # Simple expansion: 1 signal = 1 sub-task
-            # Depth check is already done in monitor, but let's be safe
-            if sig["depth"] >= 2:
-                continue
-                
-            new_id = f"{sig['parent_id']}.{len([t for t in tasks if t.get('parent_id') == sig['parent_id']]) + 1}"
-            new_task = TaskItem(
-                task_id=new_id,
-                description=sig["description"],
-                status="pending",
-                skill_hint=None,
-                assigned_skills=[],
-                parent_id=sig["parent_id"],
-                depth=sig["depth"] + 1,
-                wave=0,
-                dependencies=[sig["parent_id"]],
-                files_touched=[],
-                complexity="medium",
-                assigned_model=None,
-                estimated_tokens=None
-            )
-            tasks.append(new_task)
-            dependency_graph[new_id] = [sig["parent_id"]]
-            
-        return {
-            "plan": tasks,
-            "active_task_pool": tasks,
-            "dependency_graph": dependency_graph,
-            "expansion_signals": [], # Clear signals
-            "status": "planning"
-        }
+    max_depth = state.get("max_depth", 3)
 
-    available_skills = discover_skills()
-    # Sort by priority (high first)
-    priority_order = {"high": 0, "normal": 1, "low": 2}
-    sorted_skills = sorted(available_skills.items(), key=lambda x: priority_order.get(x[1].get("priority", "normal"), 1))
-    skills_list = "\n".join([f"- {name}: {info['description']} [priority: {info['priority']}]" for name, info in sorted_skills])
+    # 1. Handle JIT Micro Expansion (Targeted) or Legacy Expansion Signals
+    target_task = None
+    depth = 0
+    if target_pillar_id:
+        target_task = next((t for t in plan if t["task_id"] == target_pillar_id), None)
+        depth = target_task.get("depth", 0) if target_task else 0
+    elif expansion_signals:
+        sig = expansion_signals[0]
+        target_task = {"task_id": sig["parent_id"], "description": sig["description"]}
+        depth = sig["depth"]
+        expansion_signals = expansion_signals[1:]
+
+    if target_task:
+        if depth >= max_depth:
+             logger.warning(f"Reaching max planning depth ({max_depth}) for {target_task['task_id']}")
+             if target_pillar_id:
+                 for t in plan:
+                     if t["task_id"] == target_pillar_id:
+                         t["is_expanded"] = True
+             return {"plan": plan, "target_pillar_id": None, "expansion_signals": expansion_signals}
+
+        task_manager.update_task(execution_id, status="running", message=f"Expanding pillar: {target_task['task_id']}...")
+        task_manager.add_aer_entry(
+            execution_id,
+            intent=f"Decompose pillar '{target_task['task_id']}' into atomic steps",
+            observation=f"Parent Description: {target_task['description'][:100]}...",
+            nodeId="planner"
+        )
+        mode = "MICRO_EXPANSION"
+        user_prompt = f"Objective: {target_task['description']}\n\nDecompose this specifically into 3-5 sub-tasks or sub-pillars."
+    else:
+        task_manager.update_task(execution_id, status="running", message="Generating initial strategy...")
+        task_manager.add_event(execution_id, "node_started", {"nodeId": "planner", "nodeName": "Hierarchical Planner"})
+        task_manager.add_aer_entry(
+            execution_id,
+            intent="Generate high-level strategic pillars",
+            observation=f"Request: {request[:100]}...",
+            nodeId="planner"
+        )
+        mode = "MACRO_STRATEGY"
+        user_prompt = f"Generate a high-level strategic plan for:\n\n{request}"
+
+    available_skills = discover_skills(workspace_id)
+    skills_context = "\n".join([f"- {s['id']}: {s.get('description', 'No description')}" for s in available_skills])
     
-    system_prompt = f"""You are a task decomposition expert. Break down the user's request into 3-7 discrete, executable tasks.
+    system_prompt = f"""You are a Hierarchical Task Planner for the Benny Swarm.
+MODE: {mode}
 
-AVAILABLE SKILLS (prefer these over custom generation):
-{skills_list if skills_list else "No pre-built skills available."}
+Rules:
+1. Break complexity down. Use `is_pillar: true` for high-level workstreams that need further decomposition later.
+2. Use `is_pillar: false` for atomic tasks that can be executed directly by tools.
+3. OUTPUT STRICT JSON.
 
-OUTPUT FORMAT (JSON only, no markdown):
+OUTPUT FORMAT:
 {{
     "tasks": [
         {{
-            "task_id": "1", 
-            "description": "Task description", 
-            "skill_hint": "skill_name or null",
-            "dependencies": [],
-            "files_touched": ["output.md"],
+            "task_id": "unique_string", 
+            "description": "Clear description", 
+            "is_pillar": true|false,
+            "skill_hint": "skill_id_if_atomic_or_null",
+            "dependencies": ["parent_task_id_if_nested"],
             "complexity": "high|medium|low"
         }}
     ]
 }}
+"""
 
-Rules:
-1. Each task MUST have a unique task_id (use simple strings: "1", "2", "3")
-2. dependencies is a list of task_ids that MUST complete before this task starts
-3. tasks with no dependencies should have an empty list []
-4. files_touched lists any files this task will create or modify
-5. complexity helps assign the right model: "high" for analysis, "medium" for writing, "low" for lookups
-6. Keep descriptions actionable and specific"""
-
-    user_prompt = f"Decompose this request into tasks:\n\n{state['original_request']}"
-    
-    try:
-        # Resolve model configuration
-        # If no model is provided in state, use the active model from the workspace's manager
-        workspace_id = state.get("workspace", "default")
-        model_id = state.get("model")
-        
-        if not model_id:
-            try:
-                model_id = await get_active_model(workspace_id)
-                logger.info("Planner using auto-detected model: %s", model_id)
-            except Exception as e:
-                logger.warning("Could not auto-detect model, falling back to ollama: %s", e)
-                model_id = "ollama/llama3.2"
-        
-        model_cfg = get_model_config(model_id)
-        
-        payload = {
-            "model": model_cfg["model"],
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 2000
-        }
-        
-        if "base_url" in model_cfg:
-            payload["api_base"] = model_cfg["base_url"]
-        if "api_key" in model_cfg:
-            payload["api_key"] = model_cfg["api_key"]
-            
-        response = await acompletion(**payload)
-        
-        response_text = response.choices[0].message.content
-        
-        # Parse JSON from response
+    max_retries = 2
+    response_text = ""
+    for attempt in range(max_retries):
         try:
-            # Handle potential markdown code blocks
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
+            model_id = state.get("model") or "local_lemonade"
+            response_text = await call_model(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt + f"\n\nRef: workspace:{workspace_id}"},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                max_tokens=2000,
+                run_id=execution_id
+            )
             
-            parsed = json.loads(response_text.strip())
-            tasks = []
-            dependency_graph = {}
-            for t in parsed.get("tasks", []):
-                tid = str(t.get("task_id", str(uuid.uuid4())[:8]))
-                deps = t.get("dependencies", [])
-                tasks.append(TaskItem(
+            parsed, thinking = parse_json_safe(response_text)
+            tasks_data = parsed.get("tasks", [])
+            if not tasks_data:
+                 raise ValueError("No tasks generated")
+
+            new_tasks = []
+            for t in tasks_data:
+                prefix = f"{target_task['task_id']}." if target_task else ""
+                raw_tid = str(t.get("task_id", str(uuid.uuid4())[:4]))
+                tid = f"{prefix}{raw_tid}" if not raw_tid.startswith(prefix) else raw_tid
+                
+                new_tasks.append(TaskItem(
                     task_id=tid,
                     description=t.get("description", ""),
                     status="pending",
                     skill_hint=t.get("skill_hint"),
-                    assigned_skills=t.get("assigned_skills", []),
-                    parent_id=None,
-                    depth=0,
+                    assigned_skills=[],
+                    parent_id=target_task["task_id"] if target_task else None,
+                    depth=depth + 1,
                     wave=0,
-                    dependencies=deps,
-                    files_touched=t.get("files_touched", []),
+                    dependencies=t.get("dependencies", []),
+                    files_touched=[],
                     complexity=t.get("complexity", "medium"),
                     assigned_model=None,
-                    estimated_tokens=None
+                    estimated_tokens=None,
+                    is_pillar=t.get("is_pillar", False),
+                    is_expanded=False
                 ))
-                dependency_graph[tid] = deps
             
+            updated_plan = list(plan)
+            for nt in new_tasks:
+                if not any(et["task_id"] == nt["task_id"] for et in updated_plan):
+                    updated_plan.append(nt)
+                    dependency_graph[nt["task_id"]] = nt["dependencies"]
+
+            if target_pillar_id:
+                for t in updated_plan:
+                    if t["task_id"] == target_pillar_id:
+                        t["is_expanded"] = True
+            
+            task_manager.add_event(execution_id, "node_completed", {"nodeId": "planner", "mode": mode, "count": len(new_tasks)})
             return {
-                "plan": tasks,
-                "active_task_pool": tasks,
+                "plan": updated_plan,
+                "active_task_pool": updated_plan,
                 "dependency_graph": dependency_graph,
+                "target_pillar_id": None, 
+                "expansion_signals": expansion_signals,
                 "status": "planning",
+                "workspace": workspace_id,
                 "revision_count": state.get("revision_count", 0) + 1
             }
-        except json.JSONDecodeError:
-            return {
-                "errors": [f"Failed to parse planner response: {response_text[:200]}"],
-                "status": "failed"
-            }
-            
-    except Exception as e:
-        logger.error("Planner LLM error: %s", e)
-        return {
-            "errors": [f"Planner LLM error: {str(e)}"],
-            "status": "failed"
-        }
+        except Exception as e:
+            logger.warning("Planner failure (attempt %d): %s", attempt+1, e)
+            if attempt == max_retries - 1:
+                diag_dir = get_workspace_path(workspace_id, f"runs/{execution_id}/diagnostics")
+                diag_dir.mkdir(parents=True, exist_ok=True)
+                (diag_dir / "failed_planner_response.txt").write_text(f"Error: {str(e)}\n\n{response_text}")
+                return {"status": "failed", "errors": [str(e)]}
+    return {"status": "failed", "errors": ["Planner retry loop exhausted"]}
+
 
 
 # =============================================================================
@@ -289,9 +354,15 @@ def wave_scheduler_node(state: SwarmState) -> Dict[str, Any]:
     """
     plan = state.get("plan", [])
     dependency_graph = state.get("dependency_graph", {})
+    execution_id = state.get("execution_id", "")
     
     if not plan:
-        return {"status": "failed", "errors": ["No plan to schedule"]}
+        error_msg = "No plan to schedule"
+        task_manager.update_task(execution_id, status="failed", message=error_msg)
+        return {"status": "failed", "errors": [error_msg]}
+    
+    task_manager.update_task(execution_id, message=f"Scheduling {len(plan)} tasks into waves...")
+    task_manager.add_event(execution_id, "node_started", {"nodeId": "wave_scheduler", "nodeName": "Wave Scheduler"})
     
     try:
         # Step 1: Compute waves from dependencies
@@ -324,10 +395,20 @@ def wave_scheduler_node(state: SwarmState) -> Dict[str, Any]:
             if task["task_id"] in model_assignments:
                 task["assigned_model"] = model_assignments[task["task_id"]]
         
+        # Step 6: Find first incomplete wave (for JIT re-scheduling)
+        first_incomplete = 0
+        for i, wave in enumerate(waves):
+            wave_tasks = [t for t in updated_plan if t["task_id"] in wave]
+            if any(t.get("status") == "pending" for t in wave_tasks):
+                first_incomplete = i
+                break
+
+        task_manager.add_event(execution_id, "node_completed", {"nodeId": "wave_scheduler", "output": waves})
+        
         return {
             "plan": updated_plan,
             "waves": waves,
-            "current_wave": 0,
+            "current_wave": first_incomplete,
             "ascii_dag": ascii_dag,
             "status": "scheduled",
         }
@@ -344,33 +425,50 @@ def wave_scheduler_node(state: SwarmState) -> Dict[str, Any]:
 # =============================================================================
 
 def orchestrator_node(state: SwarmState) -> Command:
-    """Reviews plan and wave schedule, then routes to dispatcher."""
+    """
+    Reviews current wave for unexpanded pillars.
+    If a pillar is found in the current wave and not expanded, routes to planner for Micro Expansion.
+    Otherwise, routes to dispatcher for execution.
+    """
     plan = state.get("plan", [])
     waves = state.get("waves", [])
-    revision_count = state.get("revision_count", 0)
+    current_wave_idx = state.get("current_wave", 0)
+    execution_id = state.get("execution_id", "")
     
     if not plan:
         return Command(update={"status": "failed", "errors": ["No plan generated"]}, goto=END)
     
     if not waves:
-        return Command(update={"status": "failed", "errors": ["No waves computed"]}, goto=END)
+        # If no waves but we have a plan, it might be the initial skeleton.
+        # Check if first level has pillars.
+        pillars = [t for t in plan if t.get("is_pillar") and not t.get("is_expanded")]
+        if pillars:
+             # Route to expand the first available pillar
+             return Command(
+                 update={"target_pillar_id": pillars[0]["task_id"], "status": "planning"},
+                 goto="planner"
+             )
+        return Command(update={"status": "failed", "errors": ["No waves computed and no pillars to expand"]}, goto=END)
     
-    if len(plan) <= 10 and revision_count < 3:
-        return Command(
-            update={"plan_approved": True, "status": "executing"},
-            goto="dispatcher"
-        )
-    
-    if revision_count >= 3:
-        return Command(
-            update={"plan_approved": True, "status": "executing", "errors": ["Plan approved after max revisions"]},
-            goto="dispatcher"
-        )
+    # Check current wave for pillars
+    if current_wave_idx < len(waves):
+        current_wave_ids = waves[current_wave_idx]
+        current_wave_tasks = [t for t in plan if t["task_id"] in current_wave_ids]
+        
+        # JIT Expansion: Find FIRST unexpanded pillar in this wave
+        for task in current_wave_tasks:
+            if task.get("is_pillar") and not task.get("is_expanded"):
+                logger.info(f"Orchestrator: Routing JIT expansion for pillar {task['task_id']}")
+                return Command(
+                    update={"target_pillar_id": task["task_id"], "status": "planning"},
+                    goto="planner"
+                )
     
     return Command(
-        update={"errors": ["Plan has too many tasks, requesting simplification"]},
-        goto="planner"
+        update={"plan_approved": True, "status": "executing"},
+        goto="dispatcher"
     )
+
 
 
 # =============================================================================
@@ -400,6 +498,10 @@ def dispatch_tasks(state: SwarmState) -> List[Send]:
     
     sends = []
     for task in wave_tasks:
+        # Skip pillars - they are handled by the Orchestrator -> Planner JIT loop
+        if task.get("is_pillar"):
+            continue
+            
         sends.append(Send("executor", {
             "task": task,
             "execution_id": execution_id,
@@ -425,19 +527,36 @@ async def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
     description = task.get("description", "")
     skill_hint = task.get("skill_hint")
     model = state.get("model", "ollama/llama3.2")
+    workspace_id = state.get("workspace", "default")
+    execution_id = state.get("execution_id")
+    
+    # Update Task Manager and Event Bus
+    task_manager.add_event(execution_id, "node_started", {"nodeId": "executor", "nodeName": f"Executor: Task {task_id}"})
+    
+    task_manager.add_aer_entry(
+        execution_id,
+        intent=f"Executing task: {task_id}",
+        observation=f"Description: {description[:100]}... [Model: {model}]",
+        nodeId="executor"
+    )
     
     start_time = datetime.now()
     
     try:
         # Check for skill to use
         skill_content = None
+        workspace_id = state.get("workspace", "default")
         if skill_hint:
-            skill_content = get_skill_content(skill_hint)
+            skill_obj = registry.get_skill_by_id(skill_hint, workspace_id)
+            if skill_obj:
+                skill_content = skill_obj.content
 
         # NEW: Least Skills Security
         assigned_skills = task.get("assigned_skills", [])
         manifest = create_ephemeral_manifest(task_id, assigned_skills)
         register_manifest(manifest)
+        
+        execution_id = state.get("execution_id")
         
         # Build tool schemas for LLM
         tools = None
@@ -486,54 +605,83 @@ Do this sparingly and only for significant knowledge gaps."""
         while current_step < max_steps:
             current_step += 1
             
-            # Resolve model configuration
-            workspace_id = state.get("workspace", "default")
-            model_id = state.get("model")
+            # Use call_model for standardized execution, auditing, and NPU routing
+            # call_model now handles the Operating Manual and lineage tracking
+            # But here we need to handle multi-step tools if tools are enabled
             
-            if not model_id:
-                try:
-                    model_id = await get_active_model(workspace_id)
-                except Exception:
-                    model_id = "ollama/llama3.2"
-                    
-            model_cfg = get_model_config(model_id)
+            response_text = await call_model(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                run_id=execution_id
+            )
             
-            payload = {
+            # Extract content and thinking
+            final_content, thinking = parse_json_safe(f'{{"content": {json.dumps(response_text)}}}')
+            # Wait, response_text is usually a string from call_model, but if it's JSON from a tool call...
+            # Actually, call_model for executor usually returns the completion text.
+            
+            # Let's handle thinking block extraction directly if it's text
+            thinking = ""
+            think_match = re.search(r'<think>(.*?)(?:</think>|$)', response_text, re.DOTALL)
+            if think_match:
+                thinking = think_match.group(1).strip()
+            
+            final_content = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
+            
+            if thinking:
+                task_manager.add_aer_entry(
+                    execution_id,
+                    intent=f"Executing task: {task_id}",
+                    observation="Reasoning step detected during execution",
+                    inference=thinking,
+                    nodeId="executor"
+                )
+
+            # Note: call_model returns text. If we want tool calling, 
+            # we currently bypass call_model's text-only return for the raw interaction
+            # OR we update call_model to support tool calls.
+            # For now, let's use acompletion directly for tool calls to maintain the loop logic,
+            # but ensure we track it manually.
+            
+            model_cfg = get_model_config(model)
+            raw_payload = {
                 "model": model_cfg["model"],
                 "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 3000
             }
-            
             if "base_url" in model_cfg:
-                payload["api_base"] = model_cfg["base_url"]
+                raw_payload["api_base"] = model_cfg["base_url"]
             if "api_key" in model_cfg:
-                payload["api_key"] = model_cfg["api_key"]
-                
+                raw_payload["api_key"] = model_cfg["api_key"]
             if tools:
-                payload["tools"] = tools
+                raw_payload["tools"] = tools
 
-            response = await acompletion(**payload)
+            response = await acompletion(**raw_payload)
             message = response.choices[0].message
             messages.append(message)
 
-            if "tool_calls" in message and message["tool_calls"]:
-                for tc in message["tool_calls"]:
-                    func_name = tc["function"]["name"]
-                    call_id = tc["id"]
+            if hasattr(message, "tool_calls") and message.tool_calls:
+                for tc in message.tool_calls:
+                    func_name = tc.function.name
+                    call_id = tc.id
                     try:
-                        args = json.loads(tc["function"]["arguments"])
+                        args = json.loads(tc.function.arguments)
                     except:
                         args = {}
                     
                     # Execute skill with Least Skill agent_id
                     result_str = registry.execute_skill(
                         func_name, 
-                        state.get("workspace", "default"),
+                        workspace_id,
                         agent_id=f"task_{task_id}",
                         **args
                     )
                     executed_tools.append({"name": func_name, "args": args})
+                    
+                    # Log tool usage to UI
+                    task_manager.add_tool_event(execution_id, func_name, args, result_str, nodeId="executor")
                     
                     messages.append({
                         "role": "tool",
@@ -543,10 +691,12 @@ Do this sparingly and only for significant knowledge gaps."""
                     })
                 continue
             else:
-                final_content = message.get("content", "")
+                final_content = message.content or ""
                 break
 
         execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        task_manager.add_event(execution_id, "node_completed", {"nodeId": "executor", "output": final_content})
         
         return {
             "partial_results": [PartialResult(
@@ -559,6 +709,7 @@ Do this sparingly and only for significant knowledge gaps."""
         
     except Exception as e:
         execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        task_manager.add_event(execution_id, "node_error", {"nodeId": "executor", "error": str(e)})
         return {
             "partial_results": [PartialResult(
                 task_id=task_id,
@@ -628,17 +779,54 @@ def aggregator_node(state: SwarmState) -> Dict[str, Any]:
     successful = [r for r in all_results if r.get("content")]
     failed = [r for r in all_results if r.get("error")]
     
-    # Build document sections
+    # Sort results by original plan order for consistency
+    task_order = {t["task_id"]: i for i, t in enumerate(plan)} if plan else {}
+    
+    # Group results by parent_id for hierarchical reporting
+    results_by_parent = {None: []}
+    for result in successful:
+        task = next((t for t in plan if t["task_id"] == result["task_id"]), None)
+        parent_id = task.get("parent_id") if task else None
+        if parent_id not in results_by_parent:
+            results_by_parent[parent_id] = []
+        results_by_parent[parent_id].append(result)
+    
+    # Build sections hierarchically
     sections = []
     
-    # Sort by original plan order
-    task_order = {t["task_id"]: i for i, t in enumerate(plan)} if plan else {}
-    successful.sort(key=lambda r: task_order.get(r["task_id"], 999))
+    # Start with root tasks (parent_id is None)
+    root_results = results_by_parent.get(None, [])
+    root_results.sort(key=lambda r: task_order.get(r["task_id"], 999))
     
-    for result in successful:
+    for result in root_results:
         task = next((t for t in plan if t["task_id"] == result["task_id"]), None)
         task_desc = task["description"] if task else f"Task {result['task_id']}"
         sections.append(f"## {task_desc}\n\n{result['content']}")
+        
+        # If this task was a pillar (even if executed, though usually skipped), check for children
+        # OR if it was a pillar and we want to list its children under it
+        # Actually, if we follow the parent_id chain:
+        curr_id = result["task_id"]
+        if curr_id in results_by_parent:
+            for sub_res in results_by_parent[curr_id]:
+                 sub_task = next((t for t in plan if t["task_id"] == sub_res["task_id"]), None)
+                 sub_desc = sub_task["description"] if sub_task else f"Sub-task {sub_res['task_id']}"
+                 sections.append(f"### {sub_desc}\n\n{sub_res['content']}")
+
+    # Handle orphans or pillars where children had results but parent didn't have a 'result' slot
+    # (Pillars are typically skipped by dispatcher, so they don't have a result in 'successful')
+    for parent_id, children in results_by_parent.items():
+        if parent_id is None: continue
+        # If the parent itself didn't have a result, we still want to show its children
+        parent_has_result = any(r["task_id"] == parent_id for r in successful)
+        if not parent_has_result:
+             parent_task = next((t for t in plan if t["task_id"] == parent_id), None)
+             parent_desc = parent_task["description"] if parent_task else f"Pillar {parent_id}"
+             sections.append(f"## {parent_desc}")
+             for child in children:
+                 child_task = next((t for t in plan if t["task_id"] == child["task_id"]), None)
+                 child_desc = child_task["description"] if child_task else f"Task {child['task_id']}"
+                 sections.append(f"### {child_desc}\n\n{child['content']}")
     
     # Build final document
     document_parts = [
@@ -681,10 +869,19 @@ def aggregator_node(state: SwarmState) -> Dict[str, Any]:
     else:
         artifact_filename = f"{execution_id}_swarm_output.md"
 
-    data_in_path = get_workspace_path(workspace, "data_in")
-    data_in_path.mkdir(parents=True, exist_ok=True)
-    artifact_path = data_in_path / artifact_filename
+    # NORMALIZE: Save to reports directory
+    reports_path = get_workspace_path(workspace, "reports")
+    reports_path.mkdir(parents=True, exist_ok=True)
+    artifact_path = reports_path / artifact_filename
     artifact_path.write_text(final_document, encoding="utf-8")
+    
+    # Update Task Manager
+    task_manager.update_task(
+        execution_id, 
+        status="completed", 
+        progress=100, 
+        message=f"Swarm execution complete. Report saved to {artifact_filename}."
+    )
     
     # Record output in state
     if artifact_filename not in output_files_cfg:
@@ -692,6 +889,8 @@ def aggregator_node(state: SwarmState) -> Dict[str, Any]:
     
     # Generate governance URL
     governance_url = get_governance_url(execution_id)
+    
+    task_manager.add_event(execution_id, "workflow_completed", {"artifact_path": str(artifact_path)})
     
     return {
         "final_document": final_document,
@@ -928,14 +1127,34 @@ async def run_swarm_workflow(
     }
     
     start_time = datetime.now()
-    result = await graph.ainvoke(initial_state, thread_config)
+    try:
+        result = await graph.ainvoke(initial_state, thread_config)
+    except Exception as e:
+        execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        try:
+            track_workflow_fail(execution_id, "swarm", workspace, str(e))
+        except:
+            pass
+        raise e
+
     execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
     
     # Track workflow completion
     try:
         nodes_executed = ["planner", "wave_scheduler", "orchestrator", "dispatcher", "executor", "expansion_monitor", "context_handover", "review", "aggregator"]
-        outputs = [f"data_in/{os.path.basename(result.get('artifact_path', ''))}" if result.get('artifact_path') else f"swarm_output_{execution_id}.md"]
-        track_workflow_complete(execution_id, "swarm", nodes_executed, execution_time_ms, outputs=outputs)
+        # NORMALIZE: Point to reports directory in lineage
+        outputs = [f"reports/{os.path.basename(result.get('artifact_path', ''))}" if result.get('artifact_path') else f"reports/swarm_output_{execution_id}.md"]
+        
+        # Pass actual workspace and execution status to lineage
+        track_workflow_complete(
+            execution_id, 
+            "swarm", 
+            workspace, 
+            nodes_executed, 
+            execution_time_ms, 
+            outputs=outputs,
+            status=result.get("status", "completed")
+        )
         print(f"[LINEAGE] Completed tracking workflow {execution_id} ({execution_time_ms}ms) with outputs: {outputs}")
     except Exception as e:
         print(f"[LINEAGE] Failed to track completion: {e}")

@@ -169,6 +169,7 @@ class Task(BaseModel):
     message: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom task metrics and stage info")
     aer_log: List[Dict[str, Any]] = Field(default_factory=list, description="Agent Execution Record narrative")
+    event_log: List[Dict[str, Any]] = Field(default_factory=list, description="Historical record of SSE events for this run")
     lineage_run_id: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())

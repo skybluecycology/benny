@@ -1,13 +1,15 @@
 import threading
 import json
 import uuid
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from datetime import datetime
 from pathlib import Path
 
 from .schema import Task, TaskStatus
 from .workspace import get_workspace_path
 from ..governance.audit import emit_governance_event
+from .event_bus import event_bus
+from ..governance.lineage import track_aer
 
 class TaskManager:
     """
@@ -45,6 +47,8 @@ class TaskManager:
                     # Handle Pydantic model attribute updates
                     if key == "aer_log" and isinstance(value, list):
                         task.aer_log.extend(value)
+                    elif key == "event_log" and isinstance(value, list):
+                        task.event_log.extend(value)
                     elif key == "status":
                         setattr(task, key, TaskStatus(value))
                     else:
@@ -54,16 +58,79 @@ class TaskManager:
             self.save_task(task)
             return task
 
-    def add_aer_entry(self, task_id: str, intent: str, observation: str, inference: str = "", plan: str = ""):
+    def add_aer_entry(self, task_id: str, intent: str, observation: str, inference: str = "", plan: str = "", nodeId: Optional[str] = None, type: str = "think"):
         """Helper to add a structured Agent Execution Record entry."""
         entry = {
             "timestamp": datetime.now().isoformat(),
             "intent": intent,
             "observation": observation,
             "inference": inference,
-            "plan": plan
+            "plan": plan,
+            "type": type
         }
         self.update_task(task_id, aer_log=[entry])
+        
+        # Also mirror as a progress event to EventBus for real-time UI logs
+        event_bus.emit(task_id, "node_progress", {
+            "nodeId": nodeId or "task_manager",
+            "message": intent,
+            "inference": inference,
+            "reasoning": entry,
+            "type": type,
+            "data": entry
+        })
+
+        # NEW: Log to OpenLineage for formal audit trail
+        try:
+            with self._lock:
+                task = self._tasks.get(task_id)
+                workspace = task.workspace if task else "default"
+            
+            track_aer(
+                run_id=task_id,
+                job_name=f"agent_reasoning_{task_id}",
+                workspace=workspace,
+                intent=intent,
+                observation=observation,
+                inference=inference,
+                plan=plan
+            )
+        except Exception as e:
+            # Don't let lineage failures crash the task
+            print(f"[WARNING] Failed to track AER in lineage: {e}")
+
+    def add_tool_event(self, task_id: str, tool_name: str, args: Dict[str, Any], result: Any, nodeId: str = "executor"):
+        """Record a tool invocation event."""
+        data = {
+            "tool_name": tool_name,
+            "args": args,
+            "result": str(result)[:1000],  # Truncate large results
+            "nodeId": nodeId,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.add_event(task_id, "tool_used", data)
+        # Also add as a thinking step for node-level visibility
+        self.add_aer_entry(
+            task_id,
+            intent=f"Using tool: {tool_name}",
+            observation=f"Args: {json.dumps(args)}",
+            inference=f"Result: {str(result)[:500]}...",
+            nodeId=nodeId,
+            type="tool"
+        )
+
+    def add_event(self, task_id: str, event_type: str, data: Dict[str, Any]):
+        """Record an SSE event into the persistent task log and emit to EventBus."""
+        if "nodeId" not in data:
+            data["nodeId"] = "task_manager"
+            
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "type": event_type,
+            "data": data
+        }
+        self.update_task(task_id, event_log=[entry])
+        event_bus.emit(task_id, event_type, data)
 
     def get_task(self, task_id: str) -> Optional[Task]:
         """Retrieve a task by ID."""

@@ -9,6 +9,8 @@ import logging
 from .litert_engine import LiteRTEngine
 from ..governance.lineage import track_llm_call
 from ..governance.operating_manual import build_system_prompt_augmentation
+from .event_bus import event_bus
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -469,17 +471,20 @@ async def call_model(
         print(f"DEBUG: FINAL LiteLLM call: completion(model='{litellm_model}', api_base='{kwargs.get('api_base')}')")
         response = completion(**kwargs)
         
-        # Unified Audit Tracking
-        if run_id:
-            try:
-                track_llm_call(
-                    parent_run_id=run_id,
-                    model=litellm_model,
-                    provider=provider,
-                    usage=response.get("usage")
-                )
-            except Exception as audit_err:
-                print(f"DEBUG: Audit tracking failed: {audit_err}")
+        # Emit Resource Usage for UI
+        try:
+             usage = response.get("usage", {})
+             duration_ms = response.get("response_ms", 0) # litellm sometimes provides this
+             
+             event_bus.emit(run_id, "resource_usage", {
+                 "model": litellm_model,
+                 "provider": provider,
+                 "usage": usage,
+                 "duration_ms": duration_ms,
+                 "timestamp": datetime.now().isoformat()
+             })
+        except Exception as e:
+             logging.debug(f"Failed to emit resource_usage: {e}")
 
         return response.choices[0].message.content
     except Exception as e:

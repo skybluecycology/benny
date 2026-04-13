@@ -15,6 +15,11 @@ export default function LiveExecutionOverlay() {
     stopNodeTimer,
     nodes,
     setNodes,
+    toggleAuditHub,
+    isAuditHubOpen,
+    completedTasks,
+    totalTasks,
+    npuActive,
   } = useWorkflowStore();
   
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -85,6 +90,29 @@ export default function LiveExecutionOverlay() {
             ));
             break;
 
+          case 'node_progress':
+            console.log('[AUDIT] Node progress:', data.nodeId, '| message:', data.message);
+            // Update reasoning trace in real-time if provided
+            if (data.reasoning || data.inference) {
+              const trace = data.reasoning || {
+                intent: data.message || '',
+                observation: '',
+                inference: data.inference || '',
+                plan: ''
+              };
+              setReasoningTrace(data.nodeId, trace);
+            }
+            
+            // Optionally update node status data with the progress message
+            if (data.message) {
+              setNodes(nodes.map(n =>
+                n.id === data.nodeId
+                  ? { ...n, data: { ...n.data, statusMessage: data.message } }
+                  : n
+              ));
+            }
+            break;
+
           case 'hitl_required':
             console.log('[AUDIT] HITL required');
             setHitlPendingData({
@@ -100,12 +128,21 @@ export default function LiveExecutionOverlay() {
             });
             break;
 
+          case 'tool_used':
+            console.log('[AUDIT] Tool used:', data.tool_name, '| node:', data.nodeId);
+            // Tool usage is also piped as reasoning, but we can store it specifically if needed
+            break;
+
+          case 'resource_usage':
+            console.log('[AUDIT] Resource usage:', data.model, '| tokens:', data.usage?.total_tokens);
+            break;
+
           case 'workflow_completed':
             console.log('[AUDIT] Workflow completed');
             setExecutionPhase('completed');
             setCurrentExecutingNodeId(null);
-            // Auto hide after 3 seconds
-            setTimeout(() => setExecutionPhase('idle'), 3000);
+            // Keep completed for longer if hub is open
+            setTimeout(() => setExecutionPhase('idle'), 5000);
             break;
 
           case 'workflow_failed':
@@ -157,29 +194,55 @@ export default function LiveExecutionOverlay() {
           borderRadius: '20px',
           fontSize: '12px',
           fontWeight: 600,
-          background: executionPhase === 'running'
-            ? 'rgba(139, 92, 246, 0.2)'
-            : executionPhase === 'paused_hitl'
-            ? 'rgba(245, 158, 11, 0.2)'
-            : executionPhase === 'completed'
-            ? 'rgba(34, 197, 94, 0.2)'
-            : 'rgba(239, 68, 68, 0.2)',
-          border: `1px solid ${
-            executionPhase === 'running' ? '#8b5cf6'
-            : executionPhase === 'paused_hitl' ? '#f59e0b'
-            : executionPhase === 'completed' ? '#22c55e'
-            : '#ef4444'
-          }`,
           color: '#fff',
           backdropFilter: 'blur(8px)',
+          boxShadow: npuActive ? '0 0 20px rgba(139, 92, 246, 0.4)' : 'none',
+          transition: 'all 0.3s ease',
         }}>
           {executionPhase === 'running' && (
-            <span className="animate-pulse" style={{ width: 8, height: 8, borderRadius: '50%', background: '#8b5cf6', display: 'inline-block' }} />
+            <span className={npuActive ? "animate-bounce" : "animate-pulse"} style={{ 
+              width: 8, 
+              height: 8, 
+              borderRadius: '50%', 
+              background: npuActive ? '#10b981' : '#8b5cf6', 
+              display: 'inline-block',
+              boxShadow: npuActive ? '0 0 10px #10b981' : 'none'
+            }} />
           )}
-          {executionPhase === 'running' ? '⚡ Executing Workflow...'
+          {executionPhase === 'running' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>{npuActive ? '🚀 NPU ACTIVE' : '⚡ EXECUTING'}</span>
+              {totalTasks > 0 && (
+                <span style={{ opacity: 0.6, fontSize: '10px' }}>
+                  [{completedTasks}/{totalTasks}]
+                </span>
+              )}
+            </div>
+          )
             : executionPhase === 'paused_hitl' ? '⏸ Waiting for Approval'
             : executionPhase === 'completed' ? '✅ Completed'
             : '❌ Failed'}
+          
+          <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.2)', margin: '0 4px' }} />
+          
+          <button 
+            onClick={toggleAuditHub}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: isAuditHubOpen ? '#8b5cf6' : '#fff',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 4px',
+              transition: 'all 0.2s',
+            }}
+          >
+            {isAuditHubOpen ? '✕ Close Audit' : '📜 View Audit'}
+          </button>
         </div>
       </div>
     </div>

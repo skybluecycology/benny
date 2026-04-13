@@ -16,9 +16,9 @@ export interface HITLRequest {
 }
 
 export interface ExecutionEvent {
-  type: 'node_started' | 'node_completed' | 'node_error' | 'hitl_required' | 'workflow_completed' | 'workflow_failed';
+  type: 'node_started' | 'node_completed' | 'node_error' | 'hitl_required' | 'workflow_completed' | 'workflow_failed' | 'node_progress' | 'tool_used' | 'resource_usage';
   nodeId?: string;
-  timestamp: number;
+  timestamp: string | number;
   data?: any;
 }
 
@@ -47,6 +47,15 @@ interface WorkflowState {
   executionEvents: ExecutionEvent[];
   reasoningTraces: Record<string, AERTrace>;
   currentWorkflow: any | null;
+  
+  // High-level run tracking
+  activeRuns: Record<string, { status: string, progress: number }>;
+  runHistory: any[];
+  isAuditHubOpen: boolean;
+  totalTasks: number;
+  completedTasks: number;
+  tokenUsage: number;
+  npuActive: boolean;
 
   // Actions
   setNodes: (nodes: Node[]) => void;
@@ -78,6 +87,10 @@ interface WorkflowState {
   stopNodeTimer: (nodeId: string) => void;
   resetExecution: () => void;
   setCurrentWorkflow: (workflow: any | null) => void;
+  setRunHistory: (history: any[]) => void;
+  updateActiveRun: (runId: string, data: { status: string, progress: number }) => void;
+  setAuditHubOpen: (isOpen: boolean) => void;
+  toggleAuditHub: () => void;
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
@@ -98,6 +111,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   executionEvents: [],
   reasoningTraces: {},
   currentWorkflow: null,
+  activeRuns: {},
+  runHistory: [],
+  isAuditHubOpen: false,
+  totalTasks: 0,
+  completedTasks: 0,
+  tokenUsage: 0,
+  npuActive: false,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -210,9 +230,43 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   setExecutionRunId: (runId) => set({ executionRunId: runId }),
 
-  addExecutionEvent: (event) => set({ 
-    executionEvents: [...get().executionEvents, event] 
-  }),
+  addExecutionEvent: (event) => {
+    const { nodes, setNodes, executionEvents } = get();
+    
+    // Auto-update node status if possible
+    if (event.nodeId && (event.type === 'node_started' || event.type === 'node_completed' || event.type === 'node_error')) {
+      const status = event.type === 'node_started' ? 'running' 
+                   : event.type === 'node_completed' ? 'success' 
+                   : 'error';
+                   
+      set({
+        nodes: nodes.map(n => n.id === event.nodeId ? { ...n, data: { ...n.data, status } } : n),
+        executionStatus: { ...get().executionStatus, [event.nodeId]: status }
+      });
+
+      if (event.type === 'node_completed') {
+        set({ completedTasks: get().completedTasks + 1 });
+      }
+    }
+
+    if (event.type === 'resource_usage') {
+      const tokens = event.data?.usage?.total_tokens || 0;
+      set({ 
+        tokenUsage: get().tokenUsage + tokens,
+        npuActive: true 
+      });
+      // Deactivate NPU glow after 2 seconds
+      setTimeout(() => set({ npuActive: false }), 2000);
+    }
+
+    if (event.type === 'node_progress' && event.data?.total_steps) {
+      set({ totalTasks: event.data.total_steps });
+    }
+
+    set({ 
+      executionEvents: [...executionEvents, event] 
+    });
+  },
 
   setReasoningTrace: (nodeId, trace) => set({
     reasoningTraces: { ...get().reasoningTraces, [nodeId]: trace }
@@ -238,7 +292,17 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     reasoningTraces: {},
     executionStatus: {},
     nodeOutputs: {},
+    totalTasks: 0,
+    completedTasks: 0,
+    tokenUsage: 0,
+    npuActive: false,
   }),
   setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
+  setRunHistory: (history) => set({ runHistory: history }),
+  updateActiveRun: (runId, data) => set({
+    activeRuns: { ...get().activeRuns, [runId]: data }
+  }),
+  setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
+  toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
 }));
 

@@ -232,9 +232,11 @@ class BennyLineageClient:
         self,
         workflow_id: str,
         workflow_name: str,
+        workspace: str,
         nodes_executed: List[str],
         execution_time_ms: int,
-        outputs: Optional[List[str]] = None
+        outputs: Optional[List[str]] = None,
+        status: str = "completed"
     ) -> None:
         """Emit COMPLETE event for workflow execution"""
         # Lookup the Run object (which contains the valid OpenLineage UUID)
@@ -249,16 +251,16 @@ class BennyLineageClient:
         facets = {
             "workflow_execution": WorkflowExecutionFacet(
                 workflow_id=workflow_id,
-                workspace="default",
+                workspace=workspace,
                 nodes_executed=nodes_executed,
                 execution_time_ms=execution_time_ms,
-                status="completed"
+                status=status
             )
         }
         if workflow_id in self._run_id_map:
              facets["benny_context"] = BennyContextFacet(
                 benny_run_id=workflow_id,
-                workspace="default"
+                workspace=workspace
             )
 
         run = Run(
@@ -274,14 +276,14 @@ class BennyLineageClient:
                 producer=PRODUCER,
                 job=job,
                 inputs=[],
-                outputs=[self._create_dataset(name, "default") for name in (outputs or [])]
+                outputs=[self._create_dataset(name, workspace) for name in (outputs or [])]
             )
             self.client.emit(event)
             # Local Audit Log
             emit_governance_event(
                 event_type="LINEAGE_COMPLETE_WORKFLOW",
                 data=attr.asdict(event),
-                workspace_id="default"
+                workspace_id=workspace
             )
         except Exception as e:
             logger.warning("Failed to emit lineage complete_workflow event: %s", e)
@@ -292,6 +294,7 @@ class BennyLineageClient:
         self,
         workflow_id: str,
         workflow_name: str,
+        workspace: str,
         error_message: str
     ) -> None:
         """Emit FAIL event for workflow execution"""
@@ -316,7 +319,7 @@ class BennyLineageClient:
             emit_governance_event(
                 event_type="LINEAGE_FAIL_WORKFLOW",
                 data=attr.asdict(event),
-                workspace_id="default"
+                workspace_id=workspace
             )
         except Exception as e:
             logger.warning("Failed to emit lineage fail_workflow event: %s", e)
@@ -511,6 +514,7 @@ class BennyLineageClient:
         self,
         run_id: str,
         job_name: str,
+        workspace: str,
         intent: str,
         observation: str,
         inference: str = "",
@@ -556,7 +560,7 @@ class BennyLineageClient:
             emit_governance_event(
                 event_type="LINEAGE_AER",
                 data=attr.asdict(event),
-                workspace_id="default"
+                workspace_id=workspace
             )
         except Exception as e:
             logger.warning("Failed to emit AER lineage event: %s", e)
@@ -567,7 +571,8 @@ class BennyLineageClient:
         node_id: str,
         rule: str,
         description: str,
-        content_snippet: str
+        content_snippet: str,
+        workspace: str = "default"
     ) -> None:
         """Emit a RUNNING event with a PolicyBreachFacet to signal HITL intervention."""
         run = self._runs.get(run_id)
@@ -604,7 +609,7 @@ class BennyLineageClient:
             emit_governance_event(
                 event_type="POLICY_BREACH_INTERVENTION",
                 data=attr.asdict(event),
-                workspace_id="default"
+                workspace_id=workspace
             )
         except Exception as e:
             logger.warning("Failed to emit policy breach lineage: %s", e)
@@ -645,13 +650,27 @@ def track_workflow_start(
 def track_workflow_complete(
     workflow_id: str,
     workflow_name: str,
+    workspace: str,
     nodes_executed: List[str],
     execution_time_ms: int,
-    outputs: Optional[List[str]] = None
+    outputs: Optional[List[str]] = None,
+    status: str = "completed"
 ) -> None:
     """Track workflow completion - convenience function"""
     get_lineage_client().complete_workflow(
-        workflow_id, workflow_name, nodes_executed, execution_time_ms, outputs=outputs
+        workflow_id, workflow_name, workspace, nodes_executed, execution_time_ms, outputs=outputs, status=status
+    )
+
+
+def track_workflow_fail(
+    workflow_id: str,
+    workflow_name: str,
+    workspace: str,
+    error_message: str
+) -> None:
+    """Track workflow failure - convenience function"""
+    get_lineage_client().fail_workflow(
+        workflow_id, workflow_name, workspace, error_message
     )
 
 
@@ -697,6 +716,7 @@ def track_file_conversion(
 def track_aer(
     run_id: str,
     job_name: str,
+    workspace: str,
     intent: str,
     observation: str,
     inference: str = "",
@@ -704,7 +724,7 @@ def track_aer(
 ) -> None:
     """Track reasoning step - convenience function"""
     get_lineage_client().emit_aer(
-        run_id, job_name, intent, observation, inference, plan
+        run_id, job_name, workspace, intent, observation, inference, plan
     )
 
 
@@ -713,9 +733,10 @@ def track_policy_breach(
     node_id: str,
     rule: str,
     description: str,
-    content_snippet: str
+    content_snippet: str,
+    workspace: str = "default"
 ) -> None:
     """Track policy breach and intervention - convenience function"""
     get_lineage_client().emit_policy_breach(
-        run_id, node_id, rule, description, content_snippet
+        run_id, node_id, rule, description, content_snippet, workspace
     )

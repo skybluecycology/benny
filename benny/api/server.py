@@ -74,7 +74,8 @@ GOVERNANCE_WHITELIST = [
     "/openapi.json",
     "/redoc",
     "/api/graph/ingest/events",
-    "/.well-known/agent.json"  # A2A discovery must be public
+    "/api/workflows/execute/",   # Studio and Swarm event streams (SSE)
+    "/.well-known/agent.json"    # A2A discovery must be public
 ]
 
 class GovHeaderMiddleware(BaseHTTPMiddleware):

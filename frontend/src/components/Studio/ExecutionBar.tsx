@@ -80,7 +80,9 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
     setSwarmExecutionId,
     executionRunId,
     swarmExecutionId,
-    currentWorkflow
+    currentWorkflow,
+    toggleAuditHub,
+    isAuditHubOpen,
   } = useWorkflowStore();
 
   const [saving, setSaving] = useState(false);
@@ -225,7 +227,9 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
         }
 
         console.log('Swarm started:', result);
-        alert(`Swarm started! Execution ID: ${result.execution_id}\n\nGovernance: ${result.governance_url}`);
+        // Link to real-time UI
+        setExecutionRunId(result.execution_id);
+        setExecutionPhase('running');
       } else {
         alert('Swarm execution failed');
       }
@@ -304,6 +308,15 @@ export default function ExecutionBar({ onNavigateToLLM }: ExecutionBarProps) {
         >
           {saving ? <Loader className="animate-spin" size={16} /> : <Save size={16} />}
           {saving ? 'Saving...' : 'Save'}
+        </button>
+
+        <button 
+          className={`btn btn-outline ${isAuditHubOpen ? 'active' : ''}`}
+          onClick={toggleAuditHub}
+          style={{ borderColor: isAuditHubOpen ? 'var(--primary)' : 'var(--border-color)', color: isAuditHubOpen ? 'var(--primary)' : 'inherit' }}
+        >
+          <Shield size={16} />
+          Logs
         </button>
         
         <div style={{ marginLeft: '8px', borderLeft: '1px solid var(--border-color)', paddingLeft: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>

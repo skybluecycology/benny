@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import re
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
 
 import httpx
 
@@ -270,53 +270,70 @@ async def call_llm(
 # ROBUST JSON PARSING
 # =============================================================================
 
-def _parse_json_from_llm(text: str) -> Any:
+def _parse_json_from_llm(text: str) -> Tuple[Any, str]:
     """
     Robustly extract JSON from LLM output that may contain markdown fences,
     <think> reasoning blocks, or truncated arrays.
+    Now returns (parsed_data, thinking_string).
     """
-    text = text.strip()
-
-    # Strip <think> blocks common in reasoning models like DeepSeek-R1
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    thinking = ""
+    # Extract think blocks (common in DeepSeek-R1 and similar reasoning models)
+    think_match = re.search(r'<think>(.*?)(?:</think>|$)', text, re.DOTALL)
+    if think_match:
+        thinking = think_match.group(1).strip()
+    
+    # Strip think blocks for JSON cleaning
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
     # Strip markdown code fences
-    if text.startswith("```"):
-        lines = text.split("\n")
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+        cleaned = "\n".join(lines).strip()
+    
+    # Find JSON boundaries
+    start_char = ""
+    start_idx = -1
+    for i, char in enumerate(cleaned):
+        if char in "{[":
+            start_idx = i
+            start_char = char
+            break
+            
+    if start_idx == -1:
+        # Fallback to older logic if no brackets found
+        try:
+            return json.loads(cleaned), thinking
+        except:
+             return [], thinking
 
-    # Try direct parse
+    # Find last corresponding bracket
+    end_char = "}" if start_char == "{" else "]"
+    end_idx = cleaned.rfind(end_char)
+    
+    if end_idx != -1:
+        json_str = cleaned[start_idx:end_idx + 1]
+    else:
+        json_str = cleaned[start_idx:]
+
+    # Clean up trailing commas
+    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+
     try:
-        return json.loads(text)
+        return json.loads(json_str), thinking
     except json.JSONDecodeError:
-        pass
-
-    # Try to find a JSON array or object in the text
-    for start_char, end_char in [("[", "]"), ("{", "}")]:
-        start = text.find(start_char)
-        end = text.rfind(end_char)
-        if start != -1 and end != -1 and end > start:
+        # Simple recovery for truncated arrays/objects
+        if not (json_str.endswith("}") or json_str.endswith("]")):
+            # Naive close
+            if start_char == "{": json_str += "}"
+            else: json_str += "]"
             try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                continue
-
-    # Recovery: try to close a truncated JSON array
-    array_start = text.find("[")
-    if array_start != -1:
-        fragment = text[array_start:]
-        # Find the last complete object (ending with "}")
-        last_brace = fragment.rfind("}")
-        if last_brace != -1:
-            candidate = fragment[:last_brace + 1] + "]"
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
+                return json.loads(json_str), thinking
+            except:
                 pass
-
-    logger.warning("Failed to parse JSON from LLM output (%d chars). Returning empty list.", len(text))
-    return []
+        
+        logger.warning("Failed to parse JSON from LLM output (%d chars).", len(text))
+        return [], thinking
 
 
 # =============================================================================
@@ -407,7 +424,12 @@ async def extract_triples(
     prompt = TRIPLE_EXTRACTION_PROMPT.format(text=safe_text)
 
     raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-    raw_triples = _parse_json_from_llm(raw)
+    raw_triples, thinking = _parse_json_from_llm(raw)
+    
+    if thinking and run_id:
+        from ..core.task_manager import task_manager
+        task_manager.add_aer_entry(run_id, intent="Extracting knowledge triples", observation="Reasoning block detected", inference=thinking)
+        
     return _validate_and_convert_triples(raw_triples, config=cfg)
 
 
@@ -443,8 +465,17 @@ async def extract_directed_triples_from_section(
         text=safe_text
     )
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-    raw_triples = _parse_json_from_llm(raw)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id if 'run_id' in locals() else None)
+    # Wait, run_id is not always in locals here. Let's check config or pass it.
+    
+    raw_triples, thinking = _parse_json_from_llm(raw)
+    
+    # Try to find a run_id for logging
+    actual_run_id = run_id if 'run_id' in locals() else None
+    if thinking and actual_run_id:
+         from ..core.task_manager import task_manager
+         task_manager.add_aer_entry(actual_run_id, intent=f"Extracting section: {section_title}", observation="Reasoning detected", inference=thinking)
+
     return _validate_and_convert_triples(raw_triples, section_title=section_title, config=cfg)
 
 
@@ -554,7 +585,11 @@ async def detect_conflicts(
 
     try:
         raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-        conflicts = _parse_json_from_llm(raw)
+        conflicts, thinking = _parse_json_from_llm(raw)
+
+        if thinking and run_id:
+             from ..core.task_manager import task_manager
+             task_manager.add_aer_entry(run_id, intent="Detecting conflicts", observation="Reasoning detected", inference=thinking)
 
         if not isinstance(conflicts, list):
             return []
@@ -582,7 +617,11 @@ async def find_synthesis(
     prompt = SYNTHESIS_PROMPT.format(graph_summary=graph_summary)
 
     raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-    analogies = _parse_json_from_llm(raw)
+    analogies, thinking = _parse_json_from_llm(raw)
+
+    if thinking and run_id:
+         from ..core.task_manager import task_manager
+         task_manager.add_aer_entry(run_id, intent="Searching for synthesis/analogies", observation="Reasoning detected", inference=thinking)
 
     if not isinstance(analogies, list):
         return []
@@ -608,7 +647,11 @@ async def cross_domain_analogy(
     )
 
     raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-    result = _parse_json_from_llm(raw)
+    result, thinking = _parse_json_from_llm(raw)
+
+    if thinking and run_id:
+         from ..core.task_manager import task_manager
+         task_manager.add_aer_entry(run_id, intent=f"Generating cross-domain analogy: {target_domain}", observation="Reasoning detected", inference=thinking)
 
     if isinstance(result, dict):
         return result

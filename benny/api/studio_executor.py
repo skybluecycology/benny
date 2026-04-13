@@ -31,12 +31,11 @@ from ..governance.execution_audit import (
 from ..core.task_manager import task_manager
 from ..core.workspace import get_workspace_path
 from ..tools.knowledge import get_chromadb_client
+from ..core.event_bus import event_bus
 
 router = APIRouter()
 
-# Event buffers for SSE streaming (run_id → list of SSE event dicts)
-_execution_events: Dict[str, list] = {}
-_execution_event_flags: Dict[str, asyncio.Event] = {}
+# Shared with workflow_routes.py via event_bus
 # HITL responses waiting to be picked up (run_id → asyncio.Queue)
 _hitl_responses: Dict[str, asyncio.Queue] = {}
 
@@ -44,71 +43,17 @@ _hitl_responses: Dict[str, asyncio.Queue] = {}
 
 
 def _emit_execution_event(run_id: str, event_type: str, data: Dict[str, Any]):
-    """Push an event into the buffer for SSE consumers."""
-    if run_id not in _execution_events:
-        logging.warning(f"[AUDIT] _emit_execution_event called but run_id not found: {run_id}")
-        _execution_events[run_id] = []
-    
-    event = {
-        "type": event_type,
-        "timestamp": datetime.now().isoformat(),
-        **data,
-    }
-    _execution_events[run_id].append(event)
-    logging.info(f"[AUDIT] Event emitted | run_id: {run_id} | type: {event_type} | total events: {len(_execution_events[run_id])}")
-    
-    # Signal any waiting SSE consumers
-    flag = _execution_event_flags.get(run_id)
-    if flag:
-        flag.set()
-        logging.info(f"[AUDIT] Signaled event flag for {run_id}")
-    else:
-        logging.warning(f"[AUDIT] No event flag found for {run_id}")
+    """Push an event into the buffer for SSE consumers via centralized EventBus."""
+    event_bus.emit(run_id, event_type, data)
 
 
 @router.get("/workflows/execute/{run_id}/events")
 async def stream_execution_events(run_id: str):
-    """SSE endpoint for real-time execution events."""
+    """SSE endpoint for real-time execution events via centralized EventBus."""
     logging.info(f"[AUDIT] SSE stream requested for run_id: {run_id}")
-    logging.info(f"[AUDIT] Active run_ids in _execution_events: {list(_execution_events.keys())}")
-    
-    if run_id not in _execution_events:
-        logging.error(f"[AUDIT] Run ID not found in _execution_events: {run_id}")
-        logging.error(f"[AUDIT] Available run_ids: {list(_execution_events.keys())}")
-    
-    async def event_generator() -> AsyncGenerator[str, None]:
-        _execution_event_flags[run_id] = asyncio.Event()
-        last_index = 0
-        logging.info(f"[AUDIT] Event generator started for {run_id}")
-        
-        while True:
-            events = _execution_events.get(run_id, [])
-            logging.info(f"[AUDIT] Checking events for {run_id} | total events: {len(events)} | last_index: {last_index}")
-            
-            while last_index < len(events):
-                event = events[last_index]
-                event_json = json.dumps(event)
-                logging.info(f"[AUDIT] Yielding event #{last_index} for {run_id} | type: {event.get('type')}")
-                yield f"data: {event_json}\n\n"
-                last_index += 1
-                
-                # Check if execution is done
-                if event["type"] in ("workflow_completed", "workflow_failed"):
-                    logging.info(f"[AUDIT] Execution complete for {run_id} | final event: {event['type']}")
-                    return
-            
-            # Wait for new events
-            _execution_event_flags[run_id].clear()
-            try:
-                # 30s heartbeat timeout
-                await asyncio.wait_for(_execution_event_flags[run_id].wait(), timeout=30.0)
-                logging.info(f"[AUDIT] Event flag signaled for {run_id}")
-            except asyncio.TimeoutError:
-                logging.info(f"[AUDIT] Heartbeat sent for {run_id}")
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
     
     return StreamingResponse(
-        event_generator(),
+        event_bus.subscribe(run_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -693,7 +638,14 @@ async def _run_workflow_background(
         
         # Finalize Audit
         task_manager.update_task(run_id, status=overall_status, progress=100)
-        track_workflow_complete(run_id, "studio_workflow", [r.node_type for r in node_results], 0)
+        track_workflow_complete(
+            run_id, 
+            "studio_workflow", 
+            request.workspace, 
+            [r.node_type for r in node_results], 
+            0,
+            status=overall_status
+        )
 
 
 @router.post("/workflows/execute")
@@ -717,7 +669,6 @@ async def execute_studio_workflow(request: StudioExecuteRequest):
     logging.info(f"[AUDIT] Created run_id: {run_id}")
     
     # Initialize buffers
-    _execution_events[run_id] = []
     _hitl_responses[run_id] = asyncio.Queue()
     logging.info(f"[AUDIT] Initialized execution buffers for {run_id}")
     
@@ -787,7 +738,8 @@ async def execute_intervention_node(node: StudioNode, context: Dict, workspace: 
             node_id=node.id,
             rule=rule,
             description=description,
-            content_snippet=input_text[:200]
+            content_snippet=input_text[:200],
+            workspace=workspace
         )
         
         # 2. Emit HITL Required Event

@@ -1,12 +1,14 @@
 import { Handle, Position } from '@xyflow/react';
 import { Wrench, X } from 'lucide-react';
 import { useWorkflowStore } from '../../../hooks/useWorkflowStore';
+import ReasoningTracePopover from '../ReasoningTracePopover';
 
 interface ToolNodeData {
   label?: string;
   config?: {
     tool?: string;
   };
+  statusMessage?: string;
 }
 
 interface ToolNodeProps {
@@ -40,10 +42,26 @@ export default function ToolNode({ id, data, selected }: ToolNodeProps) {
 
       {/* Header */}
       <div className="node-header">
-        <div className="node-icon node-icon--tool">
+        <div className="node-icon node-icon--tool" title="View Reasoning Trace (AER)">
           <Wrench size={14} />
+          {id && <ReasoningTracePopover nodeId={id} />}
         </div>
-        <span className="node-title">{data.label || 'Tool'}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <span className="node-title">{data.label || 'Tool'}</span>
+          {data.statusMessage && (
+            <span style={{ 
+              fontSize: '9px', 
+              color: 'var(--accent-tool)', 
+              opacity: 0.8, 
+              whiteSpace: 'nowrap', 
+              overflow: 'hidden', 
+              textOverflow: 'ellipsis',
+              animation: 'fadeIn 0.3s ease-in'
+            }}>
+              {data.statusMessage}
+            </span>
+          )}
+        </div>
         <div className={`node-status node-status--${status}`} />
         <button 
           className="node-delete-btn" 
