@@ -58,6 +58,11 @@ class TaskManager:
             self.save_task(task)
             return task
 
+    def update_task_topology(self, task_id: str, topology: Dict[str, Any]):
+        """Register the 3D graph structure for a run."""
+        self.update_task(task_id, topology=topology)
+        event_bus.emit(task_id, "topology_updated", topology)
+
     def add_aer_entry(self, task_id: str, intent: str, observation: str, inference: str = "", plan: str = "", nodeId: Optional[str] = None, type: str = "think"):
         """Helper to add a structured Agent Execution Record entry."""
         entry = {
@@ -131,6 +136,12 @@ class TaskManager:
         }
         self.update_task(task_id, event_log=[entry])
         event_bus.emit(task_id, event_type, data)
+
+    def add_v2_telemetry(self, task_id: str, node_id: str, telemetry: Dict[str, Any]):
+        """Emit high-frequency telemetry for V2 God-Mode visuals."""
+        telemetry["nodeId"] = node_id
+        telemetry["timestamp"] = datetime.now().isoformat()
+        event_bus.emit(task_id, "v2_telemetry", telemetry)
 
     def get_task(self, task_id: str) -> Optional[Task]:
         """Retrieve a task by ID."""

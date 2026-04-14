@@ -29,6 +29,8 @@ export interface AERTrace {
   plan: string;
 }
 
+export type UIVersion = 'v1' | 'v2';
+
 interface WorkflowState {
   nodes: Node[];
   edges: Edge[];
@@ -57,8 +59,11 @@ interface WorkflowState {
   tokenUsage: number;
   npuActive: boolean;
   nodeHasTools: Record<string, boolean>;
+  uiVersion: UIVersion;
+  playbackIndex: number | null; // NEW: The specific event index being 'scrubbed'
 
   // Actions
+
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   setSwarmExecutionId: (id: string | null) => void;
@@ -92,7 +97,11 @@ interface WorkflowState {
   updateActiveRun: (runId: string, data: { status: string, progress: number }) => void;
   setAuditHubOpen: (isOpen: boolean) => void;
   toggleAuditHub: () => void;
+  setUIVersion: (version: UIVersion) => void;
+  toggleUIVersion: () => void;
+  setPlaybackIndex: (index: number | null) => void;
 }
+
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   nodes: [],
@@ -120,6 +129,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   tokenUsage: 0,
   npuActive: false,
   nodeHasTools: {},
+  uiVersion: 'v2', // Default to V2 for God-Mode testing
+  playbackIndex: null,
+
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -319,5 +331,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   }),
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
   toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
+  setUIVersion: (version) => set({ uiVersion: version }),
+  toggleUIVersion: () => set({ uiVersion: get().uiVersion === 'v1' ? 'v2' : 'v1' }),
+  setPlaybackIndex: (index) => set({ playbackIndex: index }),
 }));
+
 

@@ -19,6 +19,10 @@ import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { useWorkspaceStore } from './hooks/useWorkspaceStore';
+import AppV2 from './AppV2Beta';
+
+
+
 import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
 
 type View = 'studio' | 'notebook' | 'llm' | 'admin';
@@ -87,8 +91,17 @@ function App() {
     };
   }, [isDraggingRight, isDraggingLeft]);
 
+  const uiVersion = useWorkflowStore((state) => state.uiVersion);
+
+  if (uiVersion === 'v2') {
+    return <AppV2 />;
+  }
+
+
+
   return (
     <ReactFlowProvider>
+
       <div className="app-layout">
         {/* 1. Global Navigation Rail */}
         <div className="nav-rail">
@@ -99,11 +112,13 @@ function App() {
             borderRadius: '8px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 'bold',
-            marginBottom: '24px',
-            fontSize: '20px'
-          }}>B</div>
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => useWorkflowStore.getState().setUIVersion('v2')}
+          title="Switch to God-Mode (V2)"
+          >B</div>
+
           
           <button 
             className={`nav-rail-item ${view === 'studio' ? 'active' : ''}`}

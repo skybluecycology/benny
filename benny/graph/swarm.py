@@ -235,6 +235,11 @@ async def planner_node(state: SwarmState) -> Dict[str, Any]:
     else:
         task_manager.update_task(execution_id, status="running", message="Generating initial strategy...")
         task_manager.add_event(execution_id, "node_started", {"nodeId": "planner", "nodeName": "Hierarchical Planner"})
+        task_manager.add_v2_telemetry(execution_id, "planner", {
+            "status": "thinking",
+            "hex_heartbeat": "0x4F2A",
+            "message": "Initializing global strategy..."
+        })
         task_manager.add_aer_entry(
             execution_id,
             intent="Generate high-level strategic pillars",
@@ -408,6 +413,14 @@ def wave_scheduler_node(state: SwarmState) -> Dict[str, Any]:
                 first_incomplete = i
                 break
 
+        # Step 7: Topology Registration for V2
+        topology = {
+            "waves": waves,
+            "nodes": [{"id": t["task_id"], "is_pillar": t.get("is_pillar")} for t in updated_plan],
+            "edges": [{"source": src, "target": target} for target, srcs in dependency_graph.items() for src in srcs]
+        }
+        task_manager.update_task_topology(execution_id, topology)
+
         task_manager.add_event(execution_id, "node_completed", {"nodeId": "wave_scheduler", "output": waves})
         
         return {
@@ -537,6 +550,12 @@ async def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Update Task Manager and Event Bus
     task_manager.add_event(execution_id, "node_started", {"nodeId": "executor", "nodeName": f"Executor: Task {task_id}"})
+    task_manager.add_v2_telemetry(execution_id, f"executor_{task_id}", {
+        "status": "running",
+        "task_id": task_id,
+        "model": model,
+        "message": f"Compiling approach for {task_id}..."
+    })
     
     task_manager.add_aer_entry(
         execution_id,

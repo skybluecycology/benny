@@ -2456,3 +2456,85 @@ body {
 .sidebar-tab-btn.active svg {
   filter: drop-shadow(0 0 4px rgba(165, 110, 255, 0.4));
 }
+
+/* =============================================================================
+   V2: God-Mode Obsidian Theme
+   ============================================================================= */
+
+[data-ui-version="v2"] {
+  --bg-canvas: #020408;
+  --bg-panel: rgba(2, 4, 8, 0.7);
+  --bg-card: rgba(10, 10, 15, 0.4);
+  --bg-hover: rgba(0, 255, 255, 0.1);
+  
+  --text-primary: #ffffff;
+  --text-secondary: rgba(0, 255, 255, 0.7);
+  --text-muted: rgba(0, 255, 255, 0.4);
+  
+  --accent-cyan: #00FFFF;
+  --accent-orange: #FF5F1F;
+  --accent-green: #39FF14;
+  
+  --border-color: rgba(0, 255, 255, 0.2);
+  --border-active: #00FFFF;
+}
+
+.obsidian-theme {
+  background-color: #020408;
+  color: #ffffff;
+}
+
+.glass-panel {
+  background: rgba(2, 4, 8, 0.4);
+  backdrop-filter: blur(25px) saturate(150%);
+  -webkit-backdrop-filter: blur(25px) saturate(150%);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.glow-text-cyan {
+  color: #00FFFF;
+  text-shadow: 0 0 8px rgba(0, 255, 255, 0.8);
+}
+
+.glow-text-orange {
+  color: #FF5F1F;
+  text-shadow: 0 0 8px rgba(255, 95, 31, 0.8);
+}
+
+.glow-text-green {
+  color: #39FF14;
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.8);
+}
+
+.v2-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.v2-main-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 255, 255, 0.05);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 255, 0.2);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 255, 0.4);
+}
+
+
+
+

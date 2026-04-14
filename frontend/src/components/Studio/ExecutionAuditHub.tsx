@@ -3,6 +3,8 @@ import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import type { ExecutionEvent } from '../../hooks/useWorkflowStore';
 
 export default function ExecutionAuditHub() {
+  // God-Mode synchronized audit stream
+
   const { isAuditHubOpen, toggleAuditHub } = useWorkflowStore();
   const executionEvents = useWorkflowStore((state) => state.executionEvents);
   const scrollRef = useRef<HTMLDivElement>(null);
