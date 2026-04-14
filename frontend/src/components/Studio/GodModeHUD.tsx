@@ -1,8 +1,10 @@
-import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import V2WorkspaceSelector from './V2WorkspaceSelector';
+import { DynamicOverlay } from './DynamicOverlay';
 
 function SonicWave({ active }: { active: boolean }) {
   return (
@@ -31,9 +33,7 @@ function SynapticStream() {
   const executionEvents = useWorkflowStore((state) => state.executionEvents);
   const currentWorkspace = useWorkspaceStore((state) => state.currentWorkspace);
   
-  // High-fidelity integrated stream
   const stream = useMemo(() => {
-    // Merge real events with occasional "governance/workspace" injections for the sci-fi feel
     const baseStream = executionEvents.slice(-15).map((event, i) => {
       let timestamp = '00:00:00';
       try {
@@ -41,7 +41,6 @@ function SynapticStream() {
       } catch (e) {
         timestamp = 'ERR_TS';
       }
-      const hex = Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
       const addr = Math.floor(Math.random() * 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
       
       let text = event.type.toUpperCase();
@@ -50,7 +49,7 @@ function SynapticStream() {
 
       return {
         id: `evt-${i}`,
-        text: `[${timestamp}] >> WORKSPACE:${currentWorkspace} >> ADDR:0x${addr} >> ${text}`,
+        text: `[${timestamp}] >> 0x${addr} >> ${text}`,
         type: event.type.includes('error') ? 'warn' : event.type.includes('completed') ? 'success' : 'info'
       };
     });
@@ -59,7 +58,7 @@ function SynapticStream() {
   }, [executionEvents, currentWorkspace]);
 
   return (
-    <div className="flex flex-col justify-end h-full font-mono text-[9px] leading-relaxed tracking-wider overflow-hidden">
+    <div className="flex flex-col justify-end h-full font-mono text-[9px] leading-relaxed tracking-wider overflow-y-auto custom-scrollbar p-4">
       <AnimatePresence initial={false}>
         {stream.map((msg) => (
           <motion.div 
@@ -80,179 +79,177 @@ function SynapticStream() {
   );
 }
 
-export function GodModeHUD({ onViewChange, currentView }: { onViewChange: (view: 'swarm' | 'knowledge' | 'marketplace') => void, currentView: string }) {
+interface HUDProps {
+  onViewChange: (view: any) => void;
+  currentView: string;
+  onToggleChat: () => void;
+  isChatOpen: boolean;
+}
+
+export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen }: HUDProps) {
   const { uiVersion, toggleUIVersion, tokenUsage, executionPhase } = useWorkflowStore();
+  const { currentWorkspace } = useWorkspaceStore();
   const [glitchMode, setGlitchMode] = useState(false);
   const [lowPower, setLowPower] = useState(false);
   
   const activeRuns = 4; // Placeholder
 
   return (
-    <div className="absolute inset-0 pointer-events-none z-50 flex flex-col justify-between p-6 overflow-hidden border-[1px] border-[#00FFFF]/5 rounded-sm">
+    <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
       
-      {/* Top Bar: Global Status & Toggle */}
-      <div className="flex justify-between items-start w-full relative">
-        <motion.div 
-          initial={{ y: -50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="glass-panel p-4 pointer-events-auto w-80 shadow-[0_0_40px_rgba(0,255,255,0.1)]"
-        >
+      {/* 1. Top-Left: System Diagnostics */}
+      <DynamicOverlay 
+        title="SYS_DIAGNOSTICS_C3" 
+        defaultPosition={{ x: 48, y: 48 }}
+        defaultSize={{ width: 384, height: 350 }}
+      >
+        <div className="p-6 space-y-6">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="glow-text-cyan text-[12px] font-bold flex items-center gap-2 tracking-[0.2em]">
-              <Activity className="w-3 h-3" />
-              COGNITIVE_MESH_OS
+            <h1 className="glow-text-cyan text-[13px] font-black flex items-center gap-2 tracking-[0.3em]">
+              <Activity className="w-4 h-4" />
+              BENNY_CORE_G3
             </h1>
             <SonicWave active={executionPhase === 'running'} />
           </div>
+
+          <div className="flex items-center gap-4 bg-white/5 p-4 rounded-sm border border-[#00FFFF]/10">
+             <div className="flex flex-col gap-1">
+                <span className="text-[8px] font-black text-[#00FFFF]/40 tracking-[0.2em] mb-1">ACTIVE_CLUSTER</span>
+                <V2WorkspaceSelector />
+             </div>
+             <div className="flex-1 text-right">
+                <span className="text-[8px] font-black text-[#00FFFF]/40 tracking-[0.2em] mb-1">NODE_STATUS</span>
+                <span className={`text-[10px] font-black tracking-widest ${executionPhase === 'failed' ? 'glow-text-orange glitch-text' : 'glow-text-green'}`}>
+                  {executionPhase === 'running' ? 'OPTIMIZING' : 'STABLE_IDLE'}
+                </span>
+             </div>
+          </div>
           
-          <div className="space-y-3 text-[9px] text-[#00FFFF]/70 uppercase font-bold tracking-widest">
-            <div className="flex justify-between">
-              <span>SYSTEM_CORE</span>
-              <span className={executionPhase === 'failed' ? 'glow-text-orange glitch-text' : 'glow-text-green'}>
-                {executionPhase === 'running' ? 'OPTIMIZING' : 'STABLE_IDLE'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>ACTIVE_MESH_CLUSTERS</span>
-              <span>0x0{activeRuns}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>NEURAL_BURN_RATE</span>
+          <div className="space-y-3 text-[10px] text-[#00FFFF]/70 uppercase font-black tracking-widest">
+            <div className="flex justify-between items-baseline">
+              <span>NEURAL_THROUGHPUT</span>
               <span className="glow-text-cyan">{(tokenUsage / 60).toFixed(1)} T/S</span>
             </div>
             
-            <div className="h-[1px] w-full bg-[#00FFFF]/10 my-2" />
+            <div className="h-[1px] w-full bg-[#00FFFF]/10 my-4" />
             
-            <div className="grid grid-cols-2 gap-2 mt-4">
-               <button 
-                 onClick={() => setGlitchMode(!glitchMode)}
-                 className={`flex items-center gap-2 px-2 py-1 rounded border transition-all ${glitchMode ? 'bg-[#FF5F1F]/20 border-[#FF5F1F] text-[#FF5F1F]' : 'bg-[#00FFFF]/5 border-[#00FFFF]/20 text-[#00FFFF]/50 hover:text-[#00FFFF]'}`}
-               >
-                 <Zap size={10} />
-                 <span>GLITCH_{glitchMode ? 'ON' : 'OFF'}</span>
+            <div className="flex gap-4">
+               <button onClick={() => setGlitchMode(!glitchMode)} className={`btn-pill flex-1 ${glitchMode ? 'active' : ''}`}>
+                 <Zap size={12} /> AURORA
                </button>
-               <button 
-                 onClick={() => setLowPower(!lowPower)}
-                 className={`flex items-center gap-2 px-2 py-1 rounded border transition-all ${lowPower ? 'bg-[#39FF14]/20 border-[#39FF14] text-[#39FF14]' : 'bg-[#00FFFF]/5 border-[#00FFFF]/20 text-[#00FFFF]/50 hover:text-[#00FFFF]'}`}
-               >
-                 <Eye size={10} />
-                 <span>LOD_{lowPower ? 'ECO' : 'MAX'}</span>
+               <button onClick={() => setLowPower(!lowPower)} className={`btn-pill flex-1 ${lowPower ? 'active' : ''}`}>
+                 <Eye size={12} /> LOD_MAX
                </button>
             </div>
           </div>
-        </motion.div>
+        </div>
+      </DynamicOverlay>
 
-        {/* View Mode Toggle (Center) */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 flex gap-2 glass-panel rounded-full p-1 z-50 pointer-events-auto">
-          <button 
-            onClick={() => onViewChange('swarm')}
-            className={`px-6 py-2 rounded-full text-[9px] font-bold tracking-[0.2em] transition-all ${currentView === 'swarm' ? 'bg-[#00FFFF]/20 text-[#00FFFF] shadow-[0_0_15px_rgba(0,255,255,0.4)]' : 'text-white/30 hover:text-white'}`}
-          >
-            SWARM_DAG
+      {/* 2. Top-Center: Navigation Control */}
+      <DynamicOverlay 
+        title="NAVIGATION_MODAL" 
+        defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) / 2 - 250, y: 24 }}
+        defaultSize={{ width: 500, height: 80 }}
+        minSize={{ width: 450, height: 80 }}
+      >
+        <div className="flex items-center justify-center h-full gap-2 px-2">
+          <button onClick={() => onViewChange('swarm')} className={`btn-pill ${currentView === 'swarm' ? 'active' : ''}`}>
+            <FastForward size={14} /> SWARM
           </button>
-          <button 
-            onClick={() => onViewChange('knowledge')}
-            className={`px-6 py-2 rounded-full text-[9px] font-bold tracking-[0.2em] transition-all ${currentView === 'knowledge' ? 'bg-[#c084fc]/20 text-[#c084fc] shadow-[0_0_15px_rgba(192,132,252,0.4)]' : 'text-white/30 hover:text-white'}`}
-          >
-            NEURAL_WEB
+          <button onClick={() => onViewChange('knowledge')} className={`btn-pill ${currentView === 'knowledge' ? 'active' : ''}`}>
+            <Activity size={14} /> NEURAL
           </button>
-          <button 
-            onClick={() => onViewChange('marketplace')}
-            className={`px-6 py-2 rounded-full text-[9px] font-bold tracking-[0.2em] transition-all ${currentView === 'marketplace' ? 'bg-[#39FF14]/20 text-[#39FF14] shadow-[0_0_15px_rgba(57,255,20,0.4)]' : 'text-white/30 hover:text-white'}`}
-          >
-            FORGE_HUB
+          <button onClick={() => onViewChange('marketplace')} className={`btn-pill ${currentView === 'marketplace' ? 'active' : ''}`}>
+            <Cpu size={14} /> FORGE
+          </button>
+          <div className="w-[1px] h-6 bg-[#00FFFF]/20 mx-1" />
+          <button onClick={() => onViewChange('llm')} className={`btn-pill ${currentView === 'llm' ? 'active' : ''}`}>
+            <Link size={14} /> LINK
+          </button>
+          <button onClick={onToggleChat} className={`btn-pill-orange btn-pill ${isChatOpen ? 'active' : ''}`}>
+            <MessageSquare size={14} /> COMMS
           </button>
         </div>
+      </DynamicOverlay>
 
-        {/* Kill Switch (Right) */}
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="pointer-events-auto"
-        >
-          <button className="relative group flex items-center justify-center w-28 h-28 rounded-full bg-[#020408]/60 border-2 border-[#FF5F1F] shadow-[0_0_40px_rgba(255,95,31,0.2)] hover:shadow-[0_0_60px_rgba(255,95,31,0.6)] hover:bg-[#FF5F1F]/10 transition-all duration-500 backdrop-blur-xl">
-            {/* Holographic Signal Rings */}
-            <div className="absolute inset-[-8px] border-[1px] border-dashed border-[#FF5F1F]/40 rounded-full animate-[spin_8s_linear_infinite]" />
-            <div className="absolute inset-[-16px] border-[1px] border-[#FF5F1F]/10 rounded-full animate-[spin_12s_linear_infinite_reverse]" />
-            <div className="absolute inset-[-24px] border-[1px] border-dashed border-[#FF5F1F]/5 rounded-full animate-[spin_20s_linear_infinite]" />
-            
-            <div className="flex flex-col items-center gap-1 z-10">
-              <Power className="w-10 h-10 text-[#FF5F1F] drop-shadow-[0_0_12px_rgba(255,95,31,1)]" />
-              <span className="text-[10px] font-black text-[#FF5F1F] tracking-[0.3em]">HALT</span>
-            </div>
-            
-            {/* Scanline inside button */}
-            <div className="absolute inset-0 rounded-full overflow-hidden opacity-20 pointer-events-none">
-              <div className="scanline" />
-            </div>
-          </button>
-        </motion.div>
+      {/* 3. Top-Right: Kill Switch & Settings (Static for stability) */}
+      <div className="absolute top-12 right-12 flex flex-col items-end gap-6 pointer-events-auto">
+        <button className="relative group flex items-center justify-center w-24 h-24 rounded-full bg-[#020408]/60 border-2 border-[#FF5F1F] shadow-[0_0_30px_rgba(255,95,31,0.2)] hover:shadow-[0_0_50px_rgba(255,95,31,0.6)] transition-all duration-500 backdrop-blur-xl">
+          <div className="absolute inset-[-6px] border-[1px] border-dashed border-[#FF5F1F]/40 rounded-full animate-spin-slow" />
+          <div className="flex flex-col items-center gap-1 z-10">
+            <Power className="w-8 h-8 text-[#FF5F1F] drop-shadow-[0_0_12px_rgba(255,95,31,1)]" />
+            <span className="text-[9px] font-black text-[#FF5F1F] tracking-[0.2em]">HALT</span>
+          </div>
+        </button>
+        <button onClick={toggleUIVersion} className="btn-pill">
+          <ExternalLink size={14} /> EXIT_OS
+        </button>
       </div>
 
-      {/* Middle: HUD Overlays */}
-      <div className="flex justify-between items-end w-full flex-1 pb-24">
-        {/* Left: Governance & Security (Detailed logs) */}
-        <motion.div 
-          initial={{ x: -100, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          className="glass-panel p-4 pointer-events-auto w-80 h-[450px] flex flex-col border-l-2 border-l-[#FF5F1F]/40"
-        >
-          <h2 className="glow-text-orange text-[12px] font-bold mb-4 flex items-center gap-2 tracking-[0.2em]">
-            <ShieldAlert className="w-3 h-3" />
-            GOVERNANCE_PROTOCOL
+      {/* 4. Bottom-Left: Security Protocol */}
+      <DynamicOverlay 
+        title="SEC_AUDIT_LOG" 
+        defaultPosition={{ x: 48, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 500 }}
+        defaultSize={{ width: 384, height: 400 }}
+      >
+        <div className="p-6 h-full flex flex-col">
+          <h2 className="glow-text-orange text-[11px] font-black mb-4 flex items-center gap-2 tracking-[0.3em] uppercase">
+            <ShieldAlert className="w-4 h-4" /> SEC_PROTOCOL
           </h2>
-          <div className="flex-1 overflow-y-auto space-y-2 text-[9px] font-mono pr-2 custom-scrollbar">
-            <div className="p-2 border border-[#FF5F1F]/20 bg-[#FF5F1F]/5 rounded text-[#FF5F1F]/80">
-              [WRN] WORKSPACE_ISOLATION:STRICT // ADDR_BOUNDS_CHECK ... FAIL_NON_CRIT
-            </div>
-            <div className="p-2 border border-[#39FF14]/20 bg-[#39FF14]/5 rounded glow-text-green">
-              [OK] AER_VALIDATION :: RUN_ID:0x{Math.floor(Math.random()*1000).toString(16)} ... SYNCED
-            </div>
-            <div className="p-2 border border-[#00FFFF]/20 bg-[#00FFFF]/5 rounded text-[#00FFFF]/60">
-              [INF] LINEAGE_REGISTERED :: OBJECT:ARCHITECTURE.MD ... PROVENANCE_PATH_RECONSTRUCTED
-            </div>
-            <div className="p-2 border border-[#FF5F1F]/20 bg-[#FF5F1F]/5 rounded text-[#FF5F1F]/80 italic">
-              [SYS] NP_KERNEL_SWITCH:LOCAL_ACCEL_ACTIVE
-            </div>
+          <div className="flex-1 overflow-y-auto space-y-3 text-[9px] font-mono pr-2 custom-scrollbar">
+             <div className="p-3 border border-[#FF5F1F]/20 bg-[#FF5F1F]/5 rounded-sm text-[#FF5F1F]/80">
+                [CRIT] AUTH_TOKEN_EXPIRING :: REFRESH_PENDING
+             </div>
+             <div className="p-3 border border-[#00FFFF]/20 bg-[#00FFFF]/5 rounded-sm text-[#00FFFF]/60">
+                [LOG] WORKSPACE_SYNC_COMPLETE: {currentWorkspace?.toUpperCase() || 'DEFAULT'}
+             </div>
+             <div className="p-3 border border-[#39FF14]/20 bg-[#39FF14]/5 rounded-sm glow-text-green">
+                [OK] NP_KERNEL: LOCAL_ACCEL_ENABLED
+             </div>
           </div>
-        </motion.div>
+        </div>
+      </DynamicOverlay>
 
-        {/* Right: Synaptic Stream (Live machine thought) */}
-        <motion.div 
-          initial={{ x: 100, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          className="glass-panel p-4 pointer-events-auto w-[450px] h-[550px] flex flex-col relative overflow-hidden border-r-2 border-r-[#00FFFF]/40"
-        >
-          <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-[#020408] to-transparent z-10" />
-          <div className="flex justify-between items-center mb-4 z-20 relative">
-            <h2 className="glow-text-cyan text-[12px] font-bold flex items-center gap-2 tracking-[0.2em]">
-              <Cpu className="w-3 h-3" />
-              SYNAPTIC_STREAM
+      {/* 5. Bottom-Right: Synaptic Stream */}
+      <DynamicOverlay 
+        title="SYNAPTIC_PULSE_STREAM" 
+        defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 600, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 650 }}
+        defaultSize={{ width: 550, height: 500 }}
+      >
+        <div className="h-full flex flex-col">
+          <div className="px-6 py-4 border-b border-[#00FFFF]/10 flex justify-between items-center bg-white/2">
+            <h2 className="glow-text-cyan text-[11px] font-black flex items-center gap-2 tracking-[0.3em] uppercase">
+              <Cpu className="w-4 h-4" /> SYNAPTIC
             </h2>
-            <div className="text-[8px] text-[#00FFFF]/40 font-mono">
-              BUF_0x42_LOAD: {Math.floor(Math.random()*40+20)}%
+            <div className="text-[8px] text-[#00FFFF]/40 font-mono tracking-widest uppercase">
+              BUFFER_0x{Math.floor(Math.random()*255).toString(16).toUpperCase()}
             </div>
           </div>
-          <div className="flex-1 relative z-0">
+          <div className="flex-1 overflow-hidden">
             <SynapticStream />
           </div>
-        </motion.div>
-      </div>
+        </div>
+      </DynamicOverlay>
 
-      {/* Bottom: Intent Broadcast */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-6 pointer-events-auto w-full max-w-4xl">
-        <div className="glass-panel w-full rounded-sm p-3 flex items-center gap-4 bg-[#020408]/80 border-[#00FFFF]/30 shadow-[0_0_50px_rgba(0,255,255,0.15)] group transition-all hover:border-[#00FFFF]/60">
-          <Terminal className="w-4 h-4 text-[#00FFFF] ml-2 animate-pulse" />
+      {/* 6. Bottom-Center: Intent Broadcast */}
+      <DynamicOverlay 
+        title="INTENT_BROADCAST_LINK" 
+        defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) / 2 - 400, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 150 }}
+        defaultSize={{ width: 800, height: 80 }}
+        minSize={{ width: 500, height: 80 }}
+      >
+        <div className="flex items-center gap-4 h-full px-6 bg-[#020408]/60">
+          <Terminal className="w-5 h-5 text-[#00FFFF] animate-pulse" />
           <input 
             type="text" 
-            placeholder="BROADCAST_INTENT >> e.g. 'Optimize graph traversal for large datasets'"
-            className="flex-1 bg-transparent border-none outline-none text-[11px] font-mono text-white placeholder:text-[#00FFFF]/30 tracking-wider"
+            placeholder="BROADCAST_INTENT >> e.g. 'Optimize graph traversal'"
+            className="flex-1 bg-transparent border-none outline-none text-[12px] font-mono text-white placeholder:text-[#00FFFF]/30 tracking-[0.1em] font-black"
           />
-          <button className="px-6 py-2 rounded-sm bg-[#00FFFF]/10 border border-[#00FFFF]/40 text-[#00FFFF] text-[10px] font-black tracking-[0.4em] hover:bg-[#00FFFF]/20 hover:shadow-[0_0_20px_rgba(0,255,255,0.3)] transition-all">
-            EXECUTE_CMD [0x42]
+          <button className="btn-pill h-10 px-8 bg-[#00FFFF]/10 border border-[#00FFFF]/60 text-[#00FFFF] text-[10px] font-black tracking-[0.4em] hover:bg-[#00FFFF]/20">
+             EXECUTE
           </button>
         </div>
-      </div>
+      </DynamicOverlay>
 
     </div>
   );

@@ -2483,13 +2483,103 @@ body {
   to { background-position: 0 100%; }
 }
 
+
+/* Dynamic Overlay Utilities */
+.cursor-grab { cursor: grab; }
+.cursor-grabbing { cursor: grabbing; }
+.cursor-nwse-resize { cursor: nwse-resize; }
+
 .glass-panel {
-  background: rgba(2, 4, 8, 0.4) !important;
-  backdrop-filter: blur(25px) saturate(200%) brightness(1.2) !important;
-  -webkit-backdrop-filter: blur(25px) saturate(200%) brightness(1.2) !important;
-  border: 1px solid rgba(0, 255, 255, 0.2) !important;
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.05) !important;
-  border-radius: 12px;
+  background: rgba(2, 4, 8, 0.45) !important;
+  backdrop-filter: blur(25px) saturate(210%) brightness(1.2) !important;
+  -webkit-backdrop-filter: blur(25px) saturate(210%) brightness(1.2) !important;
+  border: 1px solid rgba(0, 255, 255, 0.15) !important;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6), inset 0 0 10px rgba(0, 255, 255, 0.05) !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-panel:hover {
+  border-color: rgba(0, 255, 255, 0.3) !important;
+}
+
+.glass-panel:active {
+  border-color: rgba(0, 255, 255, 0.5) !important;
+  box-shadow: 0 0 60px rgba(0, 255, 255, 0.1), inset 0 0 15px rgba(0, 255, 255, 0.1) !important;
+}
+
+/* Pill Button Style */
+.btn-pill {
+  border-radius: 9999px !important;
+  padding: 0.6rem 1.4rem !important;
+  border: 1px solid rgba(0, 255, 255, 0.3) !important;
+  background: rgba(0, 255, 255, 0.05) !important;
+  color: #00FFFF !important;
+  font-family: "JetBrains Mono", monospace !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.6rem !important;
+  white-space: nowrap !important;
+}
+
+.btn-pill:hover {
+  background: rgba(0, 255, 255, 0.15) !important;
+  border-color: #00FFFF !important;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-pill.active {
+  background: #00FFFF !important;
+  color: #020408 !important;
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.5) !important;
+}
+
+.btn-pill-orange {
+  border-color: rgba(255, 95, 31, 0.3) !important;
+  color: #FF5F1F !important;
+}
+
+.btn-pill-orange:hover {
+  border-color: #FF5F1F !important;
+  box-shadow: 0 0 15px rgba(255, 95, 31, 0.4) !important;
+}
+
+/* Workspace Chip Style */
+.v2-workspace-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: rgba(0, 255, 255, 0.05);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  padding: 0.4rem 1rem;
+  border-radius: 9999px;
+  color: #00FFFF;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.v2-workspace-chip:hover {
+  border-color: #00FFFF;
+  background: rgba(0, 255, 255, 0.1);
+}
+
+.v2-workspace-chip select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  cursor: pointer;
 }
 
 .glow-text-cyan {
