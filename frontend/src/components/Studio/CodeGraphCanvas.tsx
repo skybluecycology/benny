@@ -49,34 +49,31 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
   };
 
   return (
-    <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-      <mesh 
-        ref={meshRef} 
-        position={position} 
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
-      >
-        {getGeometry()}
-        <MeshDistortMaterial 
-          color={getColor()} 
-          speed={2} 
-          distort={isSelected ? 0.3 : 0} 
-          transparent 
-          opacity={0.8}
-          emissive={getColor()}
-          emissiveIntensity={isSelected ? 3 : 0.5}
-        />
-      </mesh>
-      <Text
-        position={[0, -0.8, 0]}
-        fontSize={0.2}
-        color="#ffffff"
-        opacity={0.6}
-        maxWidth={2}
-        textAlign="center"
-      >
-        {name}
-      </Text>
-    </Float>
+    <group position={position}>
+      <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
+        <mesh 
+          ref={meshRef} 
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
+        >
+          {getGeometry()}
+          <MeshDistortMaterial 
+            color={getColor()} 
+            speed={2} 
+            distort={isSelected ? 0.3 : 0} 
+            transparent 
+            opacity={0.8}
+            emissive={getColor()}
+            emissiveIntensity={isSelected ? 3 : 0.5}
+          />
+        </mesh>
+      </Float>
+      
+      <Html distanceFactor={10} position={[0, -0.8, 0]}>
+        <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-opacity ${isSelected ? 'opacity-100 scale-110' : 'opacity-40'}`}>
+          {name}
+        </div>
+      </Html>
+    </group>
   );
 }
 
@@ -207,19 +204,25 @@ export function CodeGraphCanvas() {
         ))}
 
         {processedGraph.edges.map((edge: any, i: number) => {
-          const color = edge.type === 'INHERITS' ? '#00FFFF' : 
-                        edge.type === 'DEFINES' ? '#ffffff' : 
-                        '#FF5F1F';
-          const opacity = edge.type === 'DEFINES' ? 0.1 : 0.4;
+          const getColor = () => {
+            switch(edge.type) {
+              case 'INHERITS': return '#39FF14'; // Bright green for inheritance
+              case 'DEFINES': return '#ffffff';  // White for ownership
+              case 'CALLS': return '#FF5F1F';    // Orange for execution
+              case 'DEPENDS_ON': return '#00FFFF'; // Cyan for imports
+              default: return '#888888';
+            }
+          };
           
           return (
             <Line 
                key={`${edge.source}-${edge.target}-${i}`}
                points={[edge.sourcePos, edge.targetPos]}
-               color={color}
+               color={getColor()}
                transparent
-               opacity={opacity}
-               dashed={edge.type === 'DEPENDS_ON'}
+               opacity={edge.type === 'DEFINES' ? 0.2 : 0.6}
+               lineWidth={edge.type === 'INHERITS' ? 2 : 1}
+               dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS'}
                dashScale={2}
                dashSize={0.5}
             />
