@@ -45,6 +45,7 @@ from ..governance.lineage import (
     track_tool_execution,
     track_aer
 )
+from ..graph.code_analyzer import CodeGraphAnalyzer, get_workspace_graph, list_workspace_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,11 @@ class RunIDRequest(BaseModel):
     workspace: str = "default"
 
 
+class CodeGraphGenerateRequest(BaseModel):
+    workspace: str = "default"
+    root_dir: str = ""
+
+
 # =============================================================================
 # STATUS & SCHEMA
 # =============================================================================
@@ -151,6 +157,15 @@ async def initialize_graph():
         return result
     except Exception as e:
         raise HTTPException(500, f"Schema init failed: {str(e)}")
+
+
+@router.post("/graph/centrality")
+async def trigger_centrality_update(workspace: str = "default"):
+    """Recalculate node centrality (PageRank) across the graph."""
+    try:
+        return update_graph_centrality(workspace)
+    except Exception as e:
+        raise HTTPException(500, f"Centrality update failed: {str(e)}")
 
 
 # =============================================================================
@@ -260,6 +275,54 @@ async def get_recent_graph_updates(workspace: str = "default", seconds: int = 10
         return get_recent_updates(workspace, seconds)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch recent updates: {str(e)}")
+
+
+# =============================================================================
+# CODE GRAPH (Tree-sitter & Logic)
+# =============================================================================
+
+@router.get("/graph/code")
+async def fetch_code_graph(workspace: str = "default"):
+    """Fetch the analyzed code graph for 3D visualization."""
+    try:
+        return get_workspace_graph(workspace)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch code graph: {str(e)}")
+
+
+@router.post("/graph/code/generate")
+async def generate_code_graph(request: CodeGraphGenerateRequest, background_tasks: BackgroundTasks):
+    """Trigger a recursive tree-sitter scan of the workspace."""
+    run_id = str(uuid.uuid4())
+    
+    def _run_analyzer():
+        try:
+            # We use the actual workspace path
+            ws_path = get_workspace_path(request.workspace)
+            analyzer = CodeGraphAnalyzer(str(ws_path))
+            analyzer.analyze_workspace(request.root_dir)
+            analyzer.save_to_neo4j(request.workspace)
+            logger.info(f"Code graph generated for {request.workspace} (root: {request.root_dir})")
+        except Exception as e:
+            logger.error(f"Code graph generation failed: {e}", exc_info=True)
+
+    background_tasks.add_task(_run_analyzer)
+    
+    return {
+        "status": "accepted",
+        "run_id": run_id,
+        "message": "Neural code analysis started in background"
+    }
+
+
+@router.get("/graph/dirs")
+async def list_workspace_directories(workspace: str = "default"):
+    """List directories for the folder picker."""
+    try:
+        ws_path = get_workspace_path(workspace)
+        return {"directories": list_workspace_dirs(str(ws_path))}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list directories: {str(e)}")
 
 
 @router.post("/graph/triple")

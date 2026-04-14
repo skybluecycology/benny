@@ -11,13 +11,11 @@ import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { V2ChatOverlay } from './components/Studio/V2ChatOverlay';
 import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
-
-type ViewMode = 'swarm' | 'knowledge' | 'marketplace' | 'llm';
+import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
 
 export default function AppV2Beta() {
-  const [viewMode, setViewMode] = useState<ViewMode>('swarm');
+  const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const uiVersion = useWorkflowStore((state) => state.uiVersion);
 
   if (uiVersion !== 'v2') return null;
 
@@ -40,6 +38,7 @@ export default function AppV2Beta() {
             {viewMode === 'knowledge' && <SynopticWeb />}
             {viewMode === 'marketplace' && <MarketplaceV2 />}
             {viewMode === 'llm' && <V2LLMOverlay onClose={() => setViewMode('swarm')} />}
+            {viewMode === 'graph' && <CodeGraphCanvas />}
           </motion.div>
         </AnimatePresence>
         

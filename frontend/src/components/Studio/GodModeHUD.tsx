@@ -1,10 +1,11 @@
-import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import V2WorkspaceSelector from './V2WorkspaceSelector';
 import { DynamicOverlay } from './DynamicOverlay';
+import { GraphManager } from './GraphManager';
 
 function SonicWave({ active }: { active: boolean }) {
   return (
@@ -87,7 +88,7 @@ interface HUDProps {
 }
 
 export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen }: HUDProps) {
-  const { uiVersion, toggleUIVersion, tokenUsage, executionPhase } = useWorkflowStore();
+  const { uiVersion, toggleUIVersion, tokenUsage, executionPhase, viewMode, setIsCodeGraphScanOpen, isGraphManagerOpen, setIsGraphManagerOpen } = useWorkflowStore();
   const { currentWorkspace } = useWorkspaceStore();
   const [glitchMode, setGlitchMode] = useState(false);
   const [lowPower, setLowPower] = useState(false);
@@ -140,6 +141,11 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
                <button onClick={() => setLowPower(!lowPower)} className={`btn-pill flex-1 ${lowPower ? 'active' : ''}`}>
                  <Eye size={12} /> LOD_MAX
                </button>
+               {viewMode === 'graph' && (
+                 <button onClick={() => setIsCodeGraphScanOpen(true)} className="btn-pill-orange btn-pill flex-1 active">
+                   <RefreshCw size={12} className="animate-pulse" /> NEURAL_SCAN
+                 </button>
+               )}
             </div>
           </div>
         </div>
@@ -166,8 +172,18 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           <button onClick={() => onViewChange('llm')} className={`btn-pill ${currentView === 'llm' ? 'active' : ''}`}>
             <Link size={14} /> LINK
           </button>
+          <button onClick={() => onViewChange('graph')} className={`btn-pill ${currentView === 'graph' ? 'active' : ''}`}>
+            <Share2 size={14} /> GRAPH
+          </button>
           <button onClick={onToggleChat} className={`btn-pill-orange btn-pill ${isChatOpen ? 'active' : ''}`}>
             <MessageSquare size={14} /> COMMS
+          </button>
+          <div className="w-[1px] h-6 bg-white/10 mx-1" />
+          <button 
+            onClick={() => setIsGraphManagerOpen(!isGraphManagerOpen)} 
+            className={`btn-pill ${isGraphManagerOpen ? 'active' : ''}`}
+          >
+            <Settings size={14} className={isGraphManagerOpen ? "animate-spin" : ""} /> MANAGE
           </button>
         </div>
       </DynamicOverlay>
@@ -250,7 +266,12 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           </button>
         </div>
       </DynamicOverlay>
-
-    </div>
+ 
+      <AnimatePresence>
+        {isGraphManagerOpen && (
+          <GraphManager onClose={() => setIsGraphManagerOpen(false)} />
+        )}
+      </AnimatePresence>
+     </div>
   );
 }
