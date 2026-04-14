@@ -1,59 +1,32 @@
-/* =============================================================================
-   Benny Design System - n8n-inspired dark theme
-   ============================================================================= */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 /* ----------------------------------------------------------------------------- 
    CSS Variables - Color Palette & Tokens
    ----------------------------------------------------------------------------- */
 :root {
-  /* Background colors (InfraNodus High Contrast) */
-  --bg-canvas: #0a0a0f;
+  /* Obsidian Theme Core */
+  --bg-obsidian: #020408;
+  --bg-panel-v2: rgba(2, 4, 8, 0.4);
+  
+  /* Neon Palette */
+  --electric-cyan: #00FFFF;
+  --phosphor-orange: #FF5F1F;
+  --bios-green: #39FF14;
+  --synaptic-purple: #c084fc;
+  
+  /* Legacy/Support Tokens */
+  --bg-canvas: var(--bg-obsidian);
   --bg-panel: #12121e;
-  --bg-card: #18182b;
-  --bg-hover: #21213d;
-  --bg-input: #080812;
-
-  /* Text colors */
   --text-primary: #ffffff;
   --text-secondary: #b0b0c0;
   --text-muted: #6e6e80;
-
-  /* MindNode Branch Palette */
-  --branch-teal: #4dbbff;
-  --branch-purple: #a56eff;
-  --branch-orange: #ff9f0a;
-  --branch-blue: #007aff;
-  --branch-pink: #ff3b30;
-  --branch-green: #34c759;
-  
-  /* Continent Backgrounds (Transparent) */
-  --continent-teal: rgba(77, 187, 255, 0.08);
-  --continent-purple: rgba(165, 110, 255, 0.08);
-  --continent-orange: rgba(255, 159, 10, 0.08);
-  --continent-green: rgba(52, 199, 89, 0.08);
-
-  /* Logic & Intelligence */
-  --accent-bridge: #ffcc00; /* InfraNodus Gap/Bridge */
-  --accent-llm: var(--branch-purple);
-  --accent-error: #ff453a;
-  --accent-success: #32d74b;
-
-  /* Borders & Effects */
   --border-color: rgba(255, 255, 255, 0.08);
-  --border-active: var(--branch-purple);
-  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 15px rgba(165, 110, 255, 0.3);
-
-  /* Sizing (MindNode Pill Design) */
+  --border-active: #00FFFF;
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 24px;
   --radius-pill: 99px;
-  --radius-full: 9999px;
-
-  /* Animation */
   --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -2458,12 +2431,12 @@ body {
 }
 
 /* =============================================================================
-   V2: God-Mode Obsidian Theme
+   V2: God-Mode Obsidian Theme (Sci-Fi Epic)
    ============================================================================= */
 
 [data-ui-version="v2"] {
   --bg-canvas: #020408;
-  --bg-panel: rgba(2, 4, 8, 0.7);
+  --bg-panel: rgba(2, 4, 8, 0.4);
   --bg-card: rgba(10, 10, 15, 0.4);
   --bg-hover: rgba(0, 255, 255, 0.1);
   
@@ -2477,48 +2450,124 @@ body {
   
   --border-color: rgba(0, 255, 255, 0.2);
   --border-active: #00FFFF;
+
+  font-family: "JetBrains Mono", monospace;
 }
 
-.obsidian-theme {
-  background-color: #020408;
-  color: #ffffff;
-}
-
-.glass-panel {
-  background: rgba(2, 4, 8, 0.4);
-  backdrop-filter: blur(25px) saturate(150%);
-  -webkit-backdrop-filter: blur(25px) saturate(150%);
-  border: 1px solid rgba(0, 255, 255, 0.2);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
-}
-
-.glow-text-cyan {
-  color: #00FFFF;
-  text-shadow: 0 0 8px rgba(0, 255, 255, 0.8);
-}
-
-.glow-text-orange {
-  color: #FF5F1F;
-  text-shadow: 0 0 8px rgba(255, 95, 31, 0.8);
-}
-
-.glow-text-green {
-  color: #39FF14;
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.8);
-}
-
+/* Global Sci-Fi Experience Layers */
 .v2-root {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-family: "JetBrains Mono", monospace;
 }
 
-.v2-main-content {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
+.scanline {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: linear-gradient(
+    to bottom,
+    transparent 50%,
+    rgba(0, 255, 255, 0.02) 50%
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+  z-index: 1000;
+  animation: scanlineMove 10s linear infinite;
+}
+
+@keyframes scanlineMove {
+  from { background-position: 0 0; }
+  to { background-position: 0 100%; }
+}
+
+.glass-panel {
+  background: rgba(2, 4, 8, 0.4) !important;
+  backdrop-filter: blur(25px) saturate(200%) brightness(1.2) !important;
+  -webkit-backdrop-filter: blur(25px) saturate(200%) brightness(1.2) !important;
+  border: 1px solid rgba(0, 255, 255, 0.2) !important;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.05) !important;
+  border-radius: 12px;
+}
+
+.glow-text-cyan {
+  color: #00FFFF !important;
+  text-shadow: 0 0 8px rgba(0, 255, 255, 0.8) !important;
+}
+
+.glow-text-orange {
+  color: #FF5F1F !important;
+  text-shadow: 0 0 8px rgba(255, 95, 31, 0.8) !important;
+}
+
+.glow-text-green {
+  color: #39FF14 !important;
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.8) !important;
+}
+
+.glitch-text {
+  animation: textGlitch 0.3s cubic-bezier(.25,.46,.45,.94) both infinite;
+}
+
+@keyframes textGlitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(-2px, -2px); }
+  60% { transform: translate(2px, 2px); }
+  80% { transform: translate(2px, -2px); }
+  100% { transform: translate(0); }
+}
+
+/* =============================================================================
+   V2: God-Mode Layout Utilities (Tailwind-like fallback)
+   ============================================================================= */
+
+.absolute { position: absolute; }
+.relative { position: relative; }
+.fixed { position: fixed; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.top-0 { top: 0; }
+.bottom-0 { bottom: 0; }
+.left-0 { left: 0; }
+.right-0 { right: 0; }
+
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.flex-1 { flex: 1 1 0%; }
+
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.w-80 { width: 20rem; }
+.w-[450px] { width: 450px; }
+.h-[450px] { height: 450px; }
+.h-[550px] { height: 550px; }
+
+.p-4 { padding: 1rem; }
+.p-6 { padding: 1.5rem; }
+.p-12 { padding: 3rem; }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.pb-24 { padding-bottom: 6rem; }
+
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-30 { z-index: 30; }
+.z-50 { z-index: 50; }
+
+.pointer-events-none { pointer-events: none; }
+.pointer-events-auto { pointer-events: auto; }
+
+.v2-main-content canvas {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
