@@ -252,12 +252,7 @@ def assign_models(
 ) -> Dict[str, str]:
     """
     Assign optimal models to tasks based on their role/complexity and keywords.
-    
-    Heuristic:
-    - Complexity "high" or keywords "plan", "analyze" → reasoning model
-    - Keywords "write", "generate" → writing model
-    - Keywords "search", "find" → fast model
-    - All others → assigned_model or default
+    Prefers local NPU-accelerated models if they match the desired capability.
     """
     assignment: Dict[str, str] = {}
     
@@ -265,19 +260,26 @@ def assign_models(
     writing_keywords = {"write", "generate", "create", "compose", "draft", "document"}
     fast_keywords = {"search", "find", "explore", "list", "check", "verify"}
     
+    # Identify best local candidates from registry
+    local_reasoning = next((k for k, v in model_registry.items() if "reasoning" in v.get("use_for", []) and v.get("cost_per_1k", 1.0) == 0), None)
+    local_writing = next((k for k, v in model_registry.items() if "content_generation" in v.get("use_for", []) and v.get("cost_per_1k", 1.0) == 0), None)
+    local_fast = next((k for k, v in model_registry.items() if "simple_tasks" in v.get("use_for", []) and v.get("cost_per_1k", 1.0) == 0), None)
+
     for task in tasks:
         desc_lower = task.get("description", "").lower()
         words = set(desc_lower.split())
         complexity = task.get("complexity", "medium")
         
+        # Determine the "functional type" of the task
         if complexity == "high" or (words & reasoning_keywords):
-            assignment[task["task_id"]] = model_registry.get("reasoning", {}).get("model", "gpt-4-turbo")
+            # Prefer local reasoning (e.g. DeepSeek-R1-FLM) if available
+            assignment[task["task_id"]] = local_reasoning or model_registry.get("reasoning", {}).get("model", "gpt-4-turbo")
         elif words & writing_keywords:
-            assignment[task["task_id"]] = model_registry.get("writing", {}).get("model", "claude-3-sonnet-20240229")
+            assignment[task["task_id"]] = local_writing or model_registry.get("writing", {}).get("model", "claude-3-sonnet-20240229")
         elif words & fast_keywords:
-            assignment[task["task_id"]] = model_registry.get("fast", {}).get("model", "gpt-3.5-turbo")
+            assignment[task["task_id"]] = local_fast or model_registry.get("fast", {}).get("model", "gpt-3.5-turbo")
         else:
-            # Default to the task's pre-assigned model or a safe fallback
-            assignment[task["task_id"]] = task.get("assigned_model") or "Qwen3-8B-Hybrid"
+            # Default to the task's pre-assigned model or a safe local fallback
+            assignment[task["task_id"]] = task.get("assigned_model") or local_fast or "local_ollama"
     
     return assignment

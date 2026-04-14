@@ -114,51 +114,56 @@ def parse_json_safe(text: str) -> Tuple[Dict[str, Any], str]:
     # Clean up trailing commas in objects/arrays (common model error)
     cleaned = re.sub(r',\s*([\]}])', r'\1', cleaned)
 
-    # Handle truncation: if it ends abruptly without closing
-    if not (cleaned.endswith("}") or cleaned.endswith("]")):
-        # 1. Close open strings
-        quote_count = 0
-        escaped = False
-        for char in cleaned:
-            if char == "\\" and not escaped:
-                escaped = True
-            elif char == '"' and not escaped:
-                quote_count += 1
-                escaped = False
-            else:
-                escaped = False
-        
-        if quote_count % 2 != 0:
-            cleaned += '"'
-            
-        # 2. Close brackets using a stack
-        stack = []
-        for char in cleaned:
+    # 1. Handle missing commas between properties/items (common in some local models)
+    # Match "... "value" "next_key": ..." or "... } { ..."
+    # This regex handles both string values and non-string values (numbers, booleans, null)
+    cleaned = re.sub(r'("(?:\\["\\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"\s*:\s*(?:"(?:\\["\\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"|[^,\s{}[]]+))\s*(")', r'\1, \2', cleaned)
+    cleaned = re.sub(r'(\})\s*(\{)', r'\1, \2', cleaned)
+    cleaned = re.sub(r'(\])\s*(\[)', r'\1, \2', cleaned)
+
+    # 2. Balance strings and brackets
+    # This must be done carefully to handle truncated strings or objects
+    
+    # First: identify open strings and brackets
+    stack = []
+    in_string = False
+    escaped = False
+    for char in cleaned:
+        if char == "\\" and not escaped:
+            escaped = True
+            continue
+        if char == '"' and not escaped:
+            in_string = not in_string
+        elif not in_string:
             if char in "{[":
                 stack.append(char)
             elif char == "}":
                 if stack and stack[-1] == "{": stack.pop()
             elif char == "]":
                 if stack and stack[-1] == "[": stack.pop()
-        
-        while stack:
-            cleaned = cleaned.rstrip(", ")
-            top = stack.pop()
-            if top == "{": cleaned += "}"
-            else: cleaned += "]"
+        escaped = False
+    
+    # Repair
+    if in_string:
+        cleaned += '"'
+    
+    while stack:
+        cleaned = cleaned.rstrip(", :\n\r\t")
+        top = stack.pop()
+        if top == "{": cleaned += "}"
+        else: cleaned += "]"
     
     try:
         return json.loads(cleaned), thinking
     except json.JSONDecodeError as e:
-        # Fallback: try to replace single quotes if that was the issue
-        # Only if it looks like it might fix it
-        if "'" in cleaned and '"' not in cleaned:
-            try:
-                # Naive replacement for simple cases
-                repaired = cleaned.replace("'", '"')
-                return json.loads(repaired), thinking
-            except:
-                pass
+        # Emergency repair for truncated properties like "key": "val
+        if "Expecting" in str(e) and not (cleaned.endswith("}") or cleaned.endswith("]")):
+             try:
+                 # Try adding a recursive set of closers
+                 repair_attempt = cleaned.rstrip(", :") + "}"
+                 return json.loads(repair_attempt), thinking
+             except:
+                 pass
                 
         logger.debug(f"JSON repair failed. Original length: {len(text)}, Cleaned: {cleaned[:100]}...")
         raise e
