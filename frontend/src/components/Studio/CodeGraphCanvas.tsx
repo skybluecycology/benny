@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
-import { Folder, Play, RefreshCw, Layers, Filter } from 'lucide-react';
+import { Folder, Play, RefreshCw, Layers, Filter, Terminal } from 'lucide-react';
+import { SymbolInspector } from './SymbolInspector';
 
 // --- Visual Components ---
 
@@ -20,10 +21,20 @@ interface CodeNodeProps {
 
 function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeProps) {
   const meshRef = useRef<THREE.Mesh>(null);
+  const [hovered, setHovered] = useState(false);
   
+  useEffect(() => {
+    document.body.style.cursor = hovered ? 'pointer' : 'auto';
+  }, [hovered]);
+
   useFrame((state) => {
     if (meshRef.current) {
       meshRef.current.rotation.y += 0.01;
+      if (isSelected || hovered) {
+         meshRef.current.scale.lerp(new THREE.Vector3(1.2, 1.2, 1.2), 0.1);
+      } else {
+         meshRef.current.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
+      }
     }
   });
 
@@ -39,6 +50,7 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
 
   const getColor = () => {
     if (isSelected) return "#FFFFFF";
+    if (hovered) return "#00FFFF";
     switch (type) {
       case 'File': return "#00FFFF";
       case 'Class': return "#007ACC";
@@ -49,7 +61,11 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
   };
 
   return (
-    <group position={position}>
+    <group 
+      position={position}
+      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
+      onPointerOut={() => setHovered(false)}
+    >
       <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
         <mesh 
           ref={meshRef} 
@@ -59,20 +75,79 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
           <MeshDistortMaterial 
             color={getColor()} 
             speed={2} 
-            distort={isSelected ? 0.3 : 0} 
+            distort={isSelected || hovered ? 0.3 : 0} 
             transparent 
             opacity={0.8}
             emissive={getColor()}
-            emissiveIntensity={isSelected ? 3 : 0.5}
+            emissiveIntensity={isSelected || hovered ? 3 : 0.5}
           />
         </mesh>
       </Float>
       
       <Html distanceFactor={10} position={[0, -0.8, 0]}>
-        <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-opacity ${isSelected ? 'opacity-100 scale-110' : 'opacity-40'}`}>
+        <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-all duration-300 ${isSelected || hovered ? 'opacity-100 scale-110 border-[#00FFFF]/40 shadow-[0_0_10px_rgba(0,255,255,0.2)]' : 'opacity-40'}`}>
           {name}
         </div>
       </Html>
+    </group>
+  );
+}
+
+// --- Interactive Edge Component ---
+
+function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: any, isSelected: boolean, isNodeSelected: boolean, onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  
+  useEffect(() => {
+    if (hovered) document.body.style.cursor = 'pointer';
+    return () => { document.body.style.cursor = 'auto'; };
+  }, [hovered]);
+
+  const getColor = () => {
+    if (isSelected || hovered) return '#FFFFFF';
+    switch(edge.type) {
+      case 'INHERITS': return '#39FF14'; 
+      case 'DEFINES': return '#ffffff';  
+      case 'CALLS': return '#FF5F1F';    
+      case 'DEPENDS_ON': return '#00FFFF'; 
+      default: return '#888888';
+    }
+  };
+
+  // Logic for hit-box cylinder orientation
+  const start = new THREE.Vector3(...edge.sourcePos);
+  const end = new THREE.Vector3(...edge.targetPos);
+  const distance = start.distanceTo(end);
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+
+  return (
+    <group>
+      {/* Visible Line */}
+      <Line 
+         points={[edge.sourcePos, edge.targetPos]}
+         color={getColor()}
+         transparent
+         opacity={isSelected || hovered ? 1 : isNodeSelected ? 0.8 : edge.type === 'DEFINES' ? 0.2 : 0.4}
+         lineWidth={(isSelected || hovered) ? 3 : (isNodeSelected ? 2 : (edge.type === 'INHERITS' ? 2 : 1))}
+         dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS'}
+         dashScale={2}
+         dashSize={0.5}
+      />
+
+      {/* Invisible Hit-Tube */}
+      <mesh 
+        position={midpoint} 
+        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
+        onPointerOut={() => setHovered(false)}
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        onUpdate={(self) => {
+           self.lookAt(end);
+           self.rotateX(Math.PI / 2); // Align cylinder axis with line
+        }}
+      >
+        <cylinderGeometry args={[0.4, 0.4, distance, 6]} />
+        <meshBasicMaterial visible={false} />
+      </mesh>
     </group>
   );
 }
@@ -86,14 +161,7 @@ export function CodeGraphCanvas() {
   const [selectedDir, setSelectedDir] = useState("/");
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDirs();
-    if (!codeGraph) {
-      setIsCodeGraphScanOpen(true);
-      fetchGraph();
-    }
-  }, [currentWorkspace]);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
   const fetchDirs = async () => {
     try {
@@ -101,7 +169,7 @@ export function CodeGraphCanvas() {
          headers: { ...GOVERNANCE_HEADERS }
       });
       if (resp.ok) {
-        const data = await resp.ok ? await resp.json() : { directories: [] };
+        const data = await resp.json();
         setDirectories(data.directories || ["/"]);
       }
     } catch (e) {
@@ -135,7 +203,6 @@ export function CodeGraphCanvas() {
         body: JSON.stringify({ workspace: currentWorkspace, root_dir: selectedDir === "/" ? "" : selectedDir })
       });
       if (resp.ok) {
-        // Wait a bit then fetch
         setTimeout(() => {
           fetchGraph();
           setIsGenerating(false);
@@ -148,13 +215,12 @@ export function CodeGraphCanvas() {
     }
   };
 
-  // Layout logic: simple force-ish spread based on path hierarchy
+  // Layout logic
   const processedGraph = useMemo(() => {
     if (!codeGraph) return { nodes: [], edges: [] };
     
     const nodes = codeGraph.nodes.map((node: any, i: number) => {
-       // Deterministic position based on path parts
-       const parts = node.path.split('/');
+       const parts = (node.path || "").split('/');
        const depth = parts.length;
        const angle = (i / codeGraph.nodes.length) * Math.PI * 2;
        const radius = depth * 4 + 5;
@@ -182,11 +248,33 @@ export function CodeGraphCanvas() {
     return { nodes, edges };
   }, [codeGraph]);
 
+  const selectedNode = useMemo(() => 
+    processedGraph.nodes.find((n: any) => n.id === selectedNodeId), 
+    [processedGraph.nodes, selectedNodeId]
+  );
+
+  const selectedEdge = useMemo(() => 
+    processedGraph.edges.find((e: any) => `${e.source}-${e.target}` === selectedEdgeId),
+    [processedGraph.edges, selectedEdgeId]
+  );
+
+  useEffect(() => {
+    fetchDirs();
+    if (!codeGraph) {
+      setIsCodeGraphScanOpen(true);
+      fetchGraph();
+    }
+  }, [currentWorkspace]);
+
+
   return (
-    <div className="absolute inset-0 bg-[#020408]">
+    <div className="absolute inset-0 bg-[#020408]" onClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}>
       
       {/* 3D Canvas */}
-      <Canvas camera={{ position: [0, 20, 40], fov: 60 }}>
+      <Canvas 
+        camera={{ position: [0, 20, 40], fov: 60 }}
+        onCreated={({ raycaster }) => { raycaster.params.Line.threshold = 0.5; }}
+      >
         <color attach="background" args={['#020408']} />
         <ambientLight intensity={0.4} />
         <pointLight position={[10, 10, 10]} intensity={1} color="#00FFFF" />
@@ -203,31 +291,18 @@ export function CodeGraphCanvas() {
           />
         ))}
 
-        {processedGraph.edges.map((edge: any, i: number) => {
-          const getColor = () => {
-            switch(edge.type) {
-              case 'INHERITS': return '#39FF14'; // Bright green for inheritance
-              case 'DEFINES': return '#ffffff';  // White for ownership
-              case 'CALLS': return '#FF5F1F';    // Orange for execution
-              case 'DEPENDS_ON': return '#00FFFF'; // Cyan for imports
-              default: return '#888888';
-            }
-          };
-          
-          return (
-            <Line 
-               key={`${edge.source}-${edge.target}-${i}`}
-               points={[edge.sourcePos, edge.targetPos]}
-               color={getColor()}
-               transparent
-               opacity={edge.type === 'DEFINES' ? 0.2 : 0.6}
-               lineWidth={edge.type === 'INHERITS' ? 2 : 1}
-               dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS'}
-               dashScale={2}
-               dashSize={0.5}
-            />
-          );
-        })}
+        {processedGraph.edges.map((edge: any, i: number) => (
+          <CodeGraphEdge 
+            key={`${edge.source}-${edge.target}-${i}`}
+            edge={edge}
+            isSelected={selectedEdgeId === `${edge.source}-${edge.target}`}
+            isNodeSelected={selectedNodeId === edge.source || selectedNodeId === edge.target}
+            onClick={() => {
+              setSelectedEdgeId(`${edge.source}-${edge.target}`);
+              setSelectedNodeId(null);
+            }}
+          />
+        ))}
 
         <OrbitControls enablePan enableZoom enableRotate />
       </Canvas>
@@ -284,7 +359,7 @@ export function CodeGraphCanvas() {
 
       {/* Floating Controls */}
       <div className="absolute top-24 right-12 flex flex-col gap-4 pointer-events-auto">
-         <button onClick={() => setIsCodeGraphScanOpen(true)} className="btn-pill px-6 h-12 flex items-center gap-3 bg-[#00FFFF]/10 border border-[#00FFFF]/40 hover:border-[#00FFFF] shadow-[0_0_15px_rgba(0,255,255,0.1)] transition-all">
+         <button onClick={(e) => { e.stopPropagation(); setIsCodeGraphScanOpen(true); }} className="btn-pill px-6 h-12 flex items-center gap-3 bg-[#00FFFF]/10 border border-[#00FFFF]/40 hover:border-[#00FFFF] shadow-[0_0_15px_rgba(0,255,255,0.1)] transition-all">
             <RefreshCw size={16} className={isGenerating ? "animate-spin text-[#00FFFF]" : "text-[#00FFFF]"} /> 
             <span className="text-[11px] font-black tracking-[0.2em] text-[#00FFFF]">RE_SCAN</span>
          </button>
@@ -295,15 +370,33 @@ export function CodeGraphCanvas() {
               <div className="space-y-2">
                  <div className="flex items-center justify-between gap-4">
                     <span className="text-[10px] text-white/40">INHERITANCE</span>
-                    <div className="w-8 h-4 rounded-full bg-[#00FFFF]/20 border border-[#00FFFF]/40" />
+                    <div className="w-8 h-4 rounded-full bg-[#39FF14]/20 border border-[#39FF14]/40" />
+                 </div>
+                 <div className="flex items-center justify-between gap-4">
+                    <span className="text-[10px] text-white/40">EXECUTION</span>
+                    <div className="w-8 h-4 rounded-full bg-[#FF5F1F]/20 border border-[#FF5F1F]/40" />
                  </div>
                  <div className="flex items-center justify-between gap-4">
                     <span className="text-[10px] text-white/40">DEPENDENCIES</span>
-                    <div className="w-8 h-4 rounded-full bg-[#FF5F1F]/20 border border-[#FF5F1F]/40" />
+                    <div className="w-8 h-4 rounded-full bg-[#00FFFF]/20 border border-[#00FFFF]/40" />
                  </div>
               </div>
            </div>
-        </div>
+      </div>
+
+       {/* Selection Inspector */}
+       <AnimatePresence>
+          {(selectedNode || selectedEdge) && (
+            <SymbolInspector 
+              selection={selectedNode ? { type: 'node', data: selectedNode } : { type: 'edge', data: {
+                ...selectedEdge,
+                sourceName: processedGraph.nodes.find((n: any) => n.id === selectedEdge.source)?.name,
+                targetName: processedGraph.nodes.find((n: any) => n.id === selectedEdge.target)?.name
+              } }} 
+              onClose={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
+            />
+          )}
+       </AnimatePresence>
 
     </div>
   );
