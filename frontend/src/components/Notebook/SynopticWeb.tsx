@@ -119,8 +119,8 @@ export function SynopticWeb() {
               points={[edge.start, edge.end]} 
               color="#00FFFF" 
               transparent 
-              opacity={0.1} 
-              lineWidth={0.5}
+              opacity={0.3} 
+              lineWidth={1}
             />
           ))}
         </group>

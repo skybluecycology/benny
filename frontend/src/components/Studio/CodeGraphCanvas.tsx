@@ -93,6 +93,42 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
   );
 }
 
+// --- Visual Components ---
+
+function UMLArrowhead({ start, end, type, color, opacity, isSelected }: { start: THREE.Vector3, end: THREE.Vector3, type: string, color: string, opacity: number, isSelected: boolean }) {
+  const dir = new THREE.Vector3().subVectors(end, start).normalize();
+  
+  // Offset to place arrowhead at the surface of the node (approximate)
+  const offsetEnd = end.clone().sub(dir.clone().multiplyScalar(0.4));
+  
+  const isInherits = type === 'INHERITS';
+  const isCalls = type === 'CALLS' || type === 'DEPENDS_ON';
+  
+  if (!isInherits && !isCalls) return null;
+
+  return (
+    <mesh 
+      position={offsetEnd} 
+      onUpdate={(self) => {
+        self.lookAt(end);
+        self.rotateX(Math.PI / 2);
+      }}
+    >
+      {isInherits ? (
+        <coneGeometry args={[0.25, 0.5, 3]} />
+      ) : (
+        <coneGeometry args={[0.15, 0.4, 8]} />
+      )}
+      <meshBasicMaterial 
+        color={isInherits ? "#ffffff" : color} 
+        transparent 
+        opacity={opacity * 1.5}
+        wireframe={isInherits}
+      />
+    </mesh>
+  );
+}
+
 // --- Interactive Edge Component ---
 
 function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: any, isSelected: boolean, isNodeSelected: boolean, onClick: () => void }) {
@@ -114,11 +150,13 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
     }
   };
 
-  // Logic for hit-box cylinder orientation
   const start = new THREE.Vector3(...edge.sourcePos);
   const end = new THREE.Vector3(...edge.targetPos);
   const distance = start.distanceTo(end);
   const midpoint = start.clone().add(end).multiplyScalar(0.5);
+
+  const edgeOpacity = isSelected || hovered ? 1 : isNodeSelected ? 0.9 : edge.type === 'DEFINES' ? 0.3 : 0.6;
+  const lineWidth = (isSelected || hovered) ? 4 : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
 
   return (
     <group>
@@ -127,11 +165,21 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
          points={[edge.sourcePos, edge.targetPos]}
          color={getColor()}
          transparent
-         opacity={isSelected || hovered ? 1 : isNodeSelected ? 0.8 : edge.type === 'DEFINES' ? 0.2 : 0.4}
-         lineWidth={(isSelected || hovered) ? 3 : (isNodeSelected ? 2 : (edge.type === 'INHERITS' ? 2 : 1))}
+         opacity={edgeOpacity}
+         lineWidth={lineWidth}
          dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS'}
          dashScale={2}
          dashSize={0.5}
+      />
+
+      {/* UML Grounding Marker */}
+      <UMLArrowhead 
+        start={start} 
+        end={end} 
+        type={edge.type} 
+        color={getColor()} 
+        opacity={edgeOpacity}
+        isSelected={isSelected || hovered}
       />
 
       {/* Invisible Hit-Tube */}
@@ -142,10 +190,10 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
         onClick={(e) => { e.stopPropagation(); onClick(); }}
         onUpdate={(self) => {
            self.lookAt(end);
-           self.rotateX(Math.PI / 2); // Align cylinder axis with line
+           self.rotateX(Math.PI / 2);
         }}
       >
-        <cylinderGeometry args={[0.4, 0.4, distance, 6]} />
+        <cylinderGeometry args={[0.5, 0.5, distance, 6]} />
         <meshBasicMaterial visible={false} />
       </mesh>
     </group>
