@@ -14,6 +14,7 @@ import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
 import V2GraphSelector from './components/Studio/V2GraphSelector';
 import { HybridLayout } from './components/Studio/HybridLayout';
+import DocumentManager from './components/Documents/DocumentManager';
 
 export default function AppV2Beta() {
   const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
@@ -40,6 +41,7 @@ export default function AppV2Beta() {
                 {viewMode === 'swarm' && <SwarmCanvas3D />}
                 {viewMode === 'knowledge' && <SynopticWeb />}
                 {viewMode === 'marketplace' && <MarketplaceV2 />}
+                {viewMode === 'documents' && <DocumentManager />}
                 {viewMode === 'llm' && <V2LLMOverlay onClose={() => setViewMode('swarm')} />}
                 {viewMode === 'graph' && <CodeGraphCanvas />}
               </motion.div>

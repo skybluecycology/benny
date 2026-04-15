@@ -24,7 +24,8 @@ def get_chromadb_client(workspace_id: str = "default") -> chromadb.PersistentCli
 def search_knowledge_workspace(
     query: str,
     workspace: str = "default",
-    top_k: int = 20
+    top_k: int = 20,
+    active_nexus_id: Optional[str] = None
 ) -> str:
     """
     Search the workspace knowledge base using semantic similarity.
@@ -44,10 +45,15 @@ def search_knowledge_workspace(
         if collection.count() == 0:
             return "📭 Knowledge base is empty. Ingest documents first."
         
-        results = collection.query(
-            query_texts=[query],
-            n_results=min(top_k, collection.count())
-        )
+        # Filter by run_id if a Nexus is active
+        query_params = {
+            "query_texts": [query],
+            "n_results": min(top_k, collection.count())
+        }
+        if active_nexus_id and active_nexus_id.strip() and active_nexus_id != "neural_nexus":
+            query_params["where"] = {"run_id": active_nexus_id.strip()}
+
+        results = collection.query(**query_params)
         
         if not results['documents'][0]:
             return "No relevant documents found."

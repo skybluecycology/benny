@@ -43,6 +43,22 @@
 }
 
 /* ----------------------------------------------------------------------------- 
+   Global Animations
+   ----------------------------------------------------------------------------- */
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+.animate-spin-slow {
+  animation: spin 3s linear infinite !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ----------------------------------------------------------------------------- 
    Base Styles
    ----------------------------------------------------------------------------- */
 * {
@@ -1292,22 +1308,6 @@ body {
   --surface: #1a1a2e;
   --surface-elevated: #242442;
   --primary: #8b5cf6;
-}
-
-/* ----------------------------------------------------------------------------- 
-   Loading Animations
-   ----------------------------------------------------------------------------- */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ----------------------------------------------------------------------------- 

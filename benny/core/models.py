@@ -495,10 +495,13 @@ async def call_model(
              usage = response.get("usage", {})
              duration_ms = response.get("response_ms", 0) # litellm sometimes provides this
              
+             # Convert LiteLLM Usage object to dict for JSON serialization
+             usage_data = usage if isinstance(usage, dict) else (usage.model_dump() if hasattr(usage, 'model_dump') else dict(usage))
+             
              event_bus.emit(run_id, "resource_usage", {
                  "model": litellm_model,
                  "provider": provider,
-                 "usage": usage,
+                 "usage": usage_data,
                  "duration_ms": duration_ms,
                  "timestamp": datetime.now().isoformat()
              })

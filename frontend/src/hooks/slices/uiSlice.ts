@@ -1,5 +1,5 @@
 export type UIVersion = 'v1' | 'v2';
-export type ViewMode = 'swarm' | 'knowledge' | 'marketplace' | 'llm' | 'graph';
+export type ViewMode = 'swarm' | 'knowledge' | 'marketplace' | 'llm' | 'graph' | 'documents';
 
 export interface UISlice {
   isAuditHubOpen: boolean;

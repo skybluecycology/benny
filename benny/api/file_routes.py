@@ -185,6 +185,87 @@ async def list_files(workspace: str = "default"):
         raise HTTPException(500, f"Failed to list files: {str(e)}")
 
 
+@router.get("/files/recursive-scan")
+async def recursive_scan(workspace: str = "default"):
+    """Recursively scan the entire workspace directory including hidden files."""
+    try:
+        base_dir = get_workspace_path(workspace)
+        if not base_dir.exists():
+            raise HTTPException(404, f"Workspace {workspace} not found")
+        
+        all_files = []
+        import os
+        from ..core.workspace import WORKSPACE_ROOT
+        
+        for root, dirs, files in os.walk(base_dir):
+            for name in files:
+                file_path = Path(root) / name
+                try:
+                    rel_path = file_path.relative_to(base_dir)
+                    all_files.append({
+                        "name": name,
+                        "path": str(rel_path),
+                        "full_path": str(file_path.relative_to(WORKSPACE_ROOT.absolute())),
+                        "size": file_path.stat().st_size,
+                        "modified": file_path.stat().st_mtime,
+                        "type": file_path.suffix.lower().lstrip('.') or "unknown",
+                        "is_hidden": name.startswith('.')
+                    })
+                except Exception:
+                    continue
+                    
+        return {
+            "workspace": workspace,
+            "files": all_files,
+            "total": len(all_files)
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Recursive scan failed: {str(e)}")
+
+
+@router.get("/files/preview")
+async def preview_file(path: str, workspace: str = "default"):
+    """Get content preview or metadata based on file type."""
+    try:
+        # Security: validate path is within workspace
+        file_path = get_workspace_path(workspace) / path
+        if not file_path.exists():
+            raise HTTPException(404, "File not found")
+            
+        ext = file_path.suffix.lower()
+        
+        # Metadata
+        stat = file_path.stat()
+        res = {
+            "name": file_path.name,
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+            "extension": ext.lstrip('.')
+        }
+        
+        # Content handling
+        if ext in ['.md', '.txt', '.json', '.py', '.ts', '.tsx', '.css', '.html', '.yaml', '.yml']:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                res["content"] = content
+                res["format"] = "text"
+            except Exception as e:
+                res["content"] = f"Error reading text content: {str(e)}"
+                res["format"] = "error"
+        elif ext == '.pdf':
+            # PDFs are handled as blobs in the browser usually, 
+            # but we can return the URL for the static file server
+            res["format"] = "pdf"
+            res["url"] = f"/api/static/{workspace}/{path}"
+        else:
+            res["format"] = "binary"
+            res["url"] = f"/api/static/{workspace}/{path}"
+            
+        return res
+    except Exception as e:
+        raise HTTPException(500, f"Preview failed: {str(e)}")
+
+
 @router.delete("/files/{filename}")
 async def delete_file(
     filename: str,
@@ -193,6 +274,7 @@ async def delete_file(
 ):
     """Delete a file from workspace"""
     try:
+        # Handle recursive paths if filename contains slashes
         file_path = get_workspace_path(workspace, subdir) / filename
         
         if not file_path.exists():

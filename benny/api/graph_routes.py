@@ -911,6 +911,25 @@ async def _process_content_to_graph(
             if emb:
                 set_concept_embedding(concept_name, emb, workspace)
                 embedded_count += 1
+        
+        # Step 5b: Sync to ChromaDB for semantic search (Snapshotted)
+        try:
+            from ..tools.knowledge import get_chromadb_client
+            client = get_chromadb_client(workspace)
+            collection = client.get_or_create_collection("knowledge")
+            
+            # Use paragraphs as simple chunks
+            chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
+            if chunks:
+                batch_ids = [f"{source_name}_{run_id[-4:]}_{j}" for j in range(len(chunks))]
+                batch_metadatas = [
+                    {"source": source_name, "chunk_index": j, "run_id": run_id} 
+                    for j in range(len(chunks))
+                ]
+                collection.add(documents=chunks, metadatas=batch_metadatas, ids=batch_ids)
+                logger.info(f"Synced {len(chunks)} chunks to ChromaDB (Nexus: {run_id})")
+        except Exception as e:
+            logger.warning(f"Failed to sync to ChromaDB: {e}")
 
     # Step 6: Update Graph Centrality for visual sizing
     try:

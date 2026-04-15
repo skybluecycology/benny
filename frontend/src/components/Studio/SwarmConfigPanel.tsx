@@ -116,6 +116,47 @@ export default function SwarmConfigPanel({ config, onChange }: SwarmConfigPanelP
             placeholder="default"
           />
         </div>
+        
+        {/* Guardrails Readout */}
+        <div style={{ 
+          marginTop: '16px', 
+          padding: '12px', 
+          background: 'rgba(59, 130, 246, 0.05)', 
+          border: '1px solid rgba(59, 130, 246, 0.15)',
+          borderRadius: '6px'
+        }}>
+          <div style={{ fontSize: '11px', color: '#60a5fa', marginBottom: '8px', fontWeight: 600 }}>🛡️ CONTEXT GUARDRAILS</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div style={{ fontSize: '10px' }}>
+              <div style={{ color: 'rgba(255,255,255,0.5)' }}>Max Payload</div>
+              <div style={{ color: '#fff' }}>~12,000 Chars</div>
+            </div>
+            <div style={{ fontSize: '10px' }}>
+              <div style={{ color: 'rgba(255,255,255,0.5)' }}>Tool Output</div>
+              <div style={{ color: '#fff' }}>2,500 Chars</div>
+            </div>
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '9px', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>
+            Active Profile: {config.model?.includes('gpt') ? 'Cloud-Burst' : 'Local-Hardened'}
+          </div>
+        </div>
+
+        {/* Discovery Mode Toggle */}
+        <div className="form-group" style={{ marginTop: '16px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: '#fff' }}>Progressive Discovery</span>
+            <input 
+              type="checkbox" 
+              checked={(config as any).discovery_mode || false}
+              onChange={(e) => handleChange('discovery_mode' as any, e.target.checked)}
+              style={{ width: '16px', height: '16px' }}
+            />
+          </label>
+          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '4px' }}>
+            Layered navigation (Arch &rarr; Symbol) for deep codebase analysis.
+          </div>
+        </div>
+
       </div>
     </div>
   );

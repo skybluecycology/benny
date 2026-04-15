@@ -261,6 +261,40 @@ def run_cypher(query: str, params: Optional[Dict[str, Any]] = None, workspace: s
         return [dict(record) for record in result]
 
 
+def scope_cypher_query(query: str, nexus_id: str) -> str:
+    """
+    Rewrites a Cypher query to enforce run_id or snapshot_id filtering.
+    Injects {run_id: $nexus_id} or {snapshot_id: $nexus_id} into relationship patterns.
+    """
+    import re
+    
+    # 1. Inject snapshot_id into CodeEntity node matches
+    # (n:CodeEntity) -> (n:CodeEntity {snapshot_id: $nexus_id})
+    query = re.sub(
+        r'\((\w+):CodeEntity\)', 
+        fr'(\1:CodeEntity {{snapshot_id: $nexus_id}})', 
+        query
+    )
+    
+    # 2. Inject run_id into RELATES_TO relationship matches
+    # -[r:RELATES_TO]-> -> -[r:RELATES_TO {run_id: $nexus_id}]->
+    query = re.sub(
+        r'-\[(\w+):RELATES_TO\]->', 
+        fr'-[\1:RELATES_TO {{run_id: $nexus_id}}]->', 
+        query
+    )
+    
+    # 3. Inject snapshot_id into CODE_REL relationship matches
+    # -[r:CODE_REL]-> -> -[r:CODE_REL {snapshot_id: $nexus_id}]->
+    query = re.sub(
+        r'-\[(\w+):CODE_REL\]->', 
+        fr'-[\1:CODE_REL {{snapshot_id: $nexus_id}}]->', 
+        query
+    )
+    
+    return query
+
+
 def batch_add_triples(
     triples: List[Any],
     workspace: str = "default",
@@ -411,11 +445,15 @@ def set_concept_embedding(concept_name: str, embedding: List[float], workspace: 
     return {"status": "embedding_set", "concept": concept_name, "dimensions": len(embedding)}
 
 
-def vector_search(query_embedding: List[float], workspace: str = "default", top_k: int = 10) -> List[dict]:
+def vector_search(query_embedding: List[float], workspace: str = "default", top_k: int = 10, run_id: Optional[str] = None) -> List[dict]:
     """Find the nearest concepts by vector similarity."""
     with read_session() as session:
         # Use Neo4j's native vector index
         try:
+            # Note: We filter by workspace, and optionally by run_id if it's stored on the node
+            # Concepts currently don't have run_id (they are merged), but we can filter by 
+            # whether they have a relationship in that run_id if needed.
+            # For now, we filter by workspace.
             result = session.run("""
                 CALL db.index.vector.queryNodes('concept_embedding', $topK, $embedding)
                 YIELD node, score
@@ -597,17 +635,24 @@ def get_node_count(workspace: str = "default") -> int:
         return result.single()["n"]
 
 
-def get_neighbors(concept_name: str, workspace: str = "default", depth: int = 1) -> dict:
-    """Get a concept's neighbourhood (nodes + edges) up to N hops."""
+def get_neighbors(concept_name: str, workspace: str = "default", depth: int = 1, run_id: Optional[str] = None) -> dict:
+    """Get a concept's neighbourhood (nodes + edges) up to N hops, optionally filtered by run_id."""
     with read_session() as session:
-        result = session.run("""
-            MATCH path = (c:Concept {name: $name, workspace: $workspace})-[*1..""" + str(depth) + """]->(n)
+        # If run_id is provided, we restrict to relationships within that run/snapshot
+        rel_filter = ""
+        if run_id:
+            rel_filter = " WHERE all(rel in relationships(path) WHERE rel.run_id = $run_id OR rel.snapshot_id = $run_id)"
+            
+        query = f"""
+            MATCH path = (c:Concept {{name: $name, workspace: $workspace}})-[*1..{depth}]->(n)
+            {rel_filter}
             UNWIND relationships(path) AS r
             WITH DISTINCT startNode(r) AS a, r, endNode(r) AS b
             RETURN elementId(a) AS src_id, a.name AS src_name, labels(a) AS src_labels,
                    type(r) AS rel_type, r.predicate AS predicate,
                    elementId(b) AS tgt_id, b.name AS tgt_name, labels(b) AS tgt_labels
-        """, name=concept_name, workspace=workspace)
+        """
+        result = session.run(query, name=concept_name, workspace=workspace, run_id=run_id or "")
 
         nodes_map = {}
         edges = []
@@ -628,21 +673,24 @@ def get_neighbors(concept_name: str, workspace: str = "default", depth: int = 1)
     return {"nodes": list(nodes_map.values()), "edges": edges}
 
 
-def get_graph_stats(workspace: str = "default") -> dict:
-    """Get counts of concepts, sources, and relationships in a single query."""
+def get_graph_stats(workspace: str = "default", run_id: Optional[str] = None) -> dict:
+    """Get counts of concepts, sources, and relationships in a single query, optionally filtered by run_id."""
     with read_session() as session:
-        result = session.run("""
+        query = """
             MATCH (n {workspace: $ws})
+            WHERE ($run_id IS NULL OR $run_id = "" OR n.run_id = $run_id OR n.snapshot_id = $run_id)
             WITH
                 count(CASE WHEN n:Concept THEN 1 END) AS concepts,
                 count(CASE WHEN n:Source THEN 1 END) AS sources
             OPTIONAL MATCH (a {workspace: $ws})-[r]->(b {workspace: $ws})
+            WHERE ($run_id IS NULL OR $run_id = "" OR r.run_id = $run_id OR r.snapshot_id = $run_id)
             WITH concepts, sources,
                 count(r) AS relationships,
                 count(CASE WHEN type(r) = 'CONFLICTS_WITH' THEN 1 END) AS conflicts,
                 count(CASE WHEN type(r) = 'ANALOGOUS_TO' THEN 1 END) AS analogies
             RETURN concepts, sources, relationships, conflicts, analogies
-        """, ws=workspace)
+        """
+        result = session.run(query, ws=workspace, run_id=run_id or "")
 
         record = result.single()
         if record:

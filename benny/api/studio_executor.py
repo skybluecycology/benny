@@ -97,7 +97,8 @@ class StudioExecuteRequest(BaseModel):
     nodes: List[StudioNode]
     edges: List[StudioEdge]
     workspace: str = "default"
-    message: Optional[str] = None  # User message for trigger nodes
+    message: Optional[str] = None
+    active_nexus_id: Optional[str] = None # The selected Neural Nexus/Snapshot
 
 
 class NodeResult(BaseModel):
@@ -116,30 +117,67 @@ class StudioExecuteResponse(BaseModel):
 
 
 def topological_sort(nodes: List[StudioNode], edges: List[StudioEdge]) -> List[StudioNode]:
-    """Sort nodes in execution order based on edges"""
-    node_map = {n.id: n for n in nodes}
+    """
+    Sort nodes based on their dependencies.
+    Raises ValueError on circular dependency or invalid references.
+    """
+    if not nodes:
+        return []
+        
+    # Build adjacency list
+    adj = {n.id: [] for n in nodes}
     in_degree = {n.id: 0 for n in nodes}
-    adjacency = {n.id: [] for n in nodes}
-
-    for edge in edges:
-        if edge.target in in_degree:
-            in_degree[edge.target] += 1
-        if edge.source in adjacency:
-            adjacency[edge.source].append(edge.target)
-
-    # Kahn's algorithm
-    queue = [nid for nid, deg in in_degree.items() if deg == 0]
+    for e in edges:
+        if e.source in adj and e.target in adj:
+            adj[e.source].append(e.target)
+            in_degree[e.target] += 1
+        elif e.source not in adj or e.target not in adj:
+            # This should be caught by validate_workflow_graph, but we'll be safe
+            continue
+            
+    # Queue for nodes with in-degree 0
+    from collections import deque
+    queue = deque([n.id for n in nodes if in_degree[n.id] == 0])
     sorted_ids = []
-
+    
     while queue:
-        nid = queue.pop(0)
-        sorted_ids.append(nid)
-        for neighbor in adjacency.get(nid, []):
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
+        u = queue.popleft()
+        sorted_ids.append(u)
+        for v in adj[u]:
+            in_degree[v] -= 1
+            if in_degree[v] == 0:
+                queue.append(v)
+                
+    if len(sorted_ids) != len(nodes):
+        unsorted = set([n.id for n in nodes]) - set(sorted_ids)
+        raise ValueError(f"Circular dependency or invalid references detected in graph involving nodes: {unsorted}")
+        
+    # Return nodes in sorted order
+    node_map = {n.id: n for n in nodes}
+    return [node_map[nid] for nid in sorted_ids]
 
-    return [node_map[nid] for nid in sorted_ids if nid in node_map]
+
+def validate_workflow_graph(nodes: List[StudioNode], edges: List[StudioEdge]) -> Optional[str]:
+    """
+    Perform pre-flight sanity checks on the graph nodes and edges.
+    Returns error message if invalid, else None.
+    """
+    node_ids = {n.id for n in nodes}
+    
+    if not nodes:
+        return "Workflow has no nodes."
+        
+    for edge in edges:
+        if edge.source not in node_ids:
+            return f"Edge references missing source node: {edge.source}"
+        if edge.target not in node_ids:
+            return f"Edge references missing target node: {edge.target}"
+            
+    # Check for duplicate node IDs
+    if len(node_ids) != len(nodes):
+        return "Duplicate node IDs detected in workflow."
+            
+    return None
 
 
 async def execute_trigger_node(node: StudioNode, message: str, context: Dict) -> Dict:
@@ -269,64 +307,79 @@ async def execute_data_node(node: StudioNode, context: Dict, workspace: str) -> 
     return {"error": f"Unknown data operation: {operation}"}
 
 
-async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_id: Optional[str] = None, agent_id: str = "default") -> Dict:
-    """
-    Execute an LLM Agent node with tool-calling capabilities.
-    The agent receives attached skills and autonomously decides to call them.
-    """
+async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_id: str, agent_id: str = "default") -> Dict:
+    """Execute an LLM node — the core reasoning brain."""
     from ..core.skill_registry import registry
     from ..core.models import get_active_model
-    import json
-
-    config = node.data.get("config") or {}
     
-    # Model priority: node config → workspace default → auto-detect
+    config = node.data.get("config") or {}
+    system_prompt = config.get("systemPrompt", "You are a helpful assistant.")
     model_id = config.get("model")
+    attached_skills = config.get("skills", [])
+    
+    # Check if this node REQUIRES a nexus context but none is active
+    active_nexus_id = context.get("active_nexus_id")
+    needs_nexus = any(s in attached_skills for s in ["query_graph", "search_kb", "get_neighbors"])
+    
+    if needs_nexus and (not active_nexus_id or active_nexus_id == "neural_nexus"):
+        # EMIT HITL Event for Nexus Selection
+        _emit_execution_event(run_id, "hitl_required", {
+            "nodeId": node.id,
+            "nodeName": node.data.get("label", "LLM Node"),
+            "type": "nexus_selection",
+            "action_description": "Neural Nexus selection required for graph interaction.",
+            "reasoning": "The agent is configured to use graph tools but no specific context (Nexus) is active.",
+            "options_url": f"/api/graph/catalog?workspace={workspace}",
+            "message": "Please select a Neural Nexus (Snapshot or Code Scan) to ground the agent's reasoning."
+        })
+        
+        # Wait for HITL Response
+        if run_id not in _hitl_responses:
+            _hitl_responses[run_id] = asyncio.Queue()
+            
+        try:
+            response = await asyncio.wait_for(_hitl_responses[run_id].get(), timeout=3600.0)
+            active_nexus_id = response.get("selected_nexus_id") or response.get("value")
+            if not active_nexus_id:
+                 return {"error": "Nexus selection cancelled or missing", "status": "failed"}
+            
+            # Update context for future nodes
+            context["active_nexus_id"] = active_nexus_id
+            logging.info(f"HITL: Nexus '{active_nexus_id}' selected for run {run_id}")
+            
+        except asyncio.TimeoutError:
+            return {"error": "Nexus selection timed out", "status": "timeout"}
+    
+    # Prepare Tools
+    tools = registry.get_tool_schemas(attached_skills, workspace)
+
+    # Model resolution
     if not model_id or model_id == "Qwen3-8B-Hybrid":
         try:
             model_id = await get_active_model(workspace)
-            logging.info(f"LLM Node using auto-detected model: {model_id}")
-        except Exception:
+        except:
             model_id = "Qwen3-8B-Hybrid"
             
     model_cfg = get_model_config(model_id)
     model_name = model_cfg["model"]
-    system_prompt = config.get("systemPrompt", "You are a helpful AI assistant.")
-    attached_skills = config.get("skills", [])  # List of skill IDs
-
-    # Get tool schemas for the attached skills
-    tools = None
-    if attached_skills:
-        tool_schemas = registry.get_tool_schemas(attached_skills, workspace)
-        if tool_schemas:
-            tools = tool_schemas
-
-    # Build initial messages array
-    messages = [
-        {"role": "system", "content": system_prompt}
-    ]
-
+    
+    # Build messages
+    messages = [{"role": "system", "content": system_prompt}]
     user_message = context.get("message", "")
     rag_context = context.get("context_text", "")
     
+    # Truncate context to prevent 'Max length reached' errors
+    if len(rag_context) > 6000:
+        rag_context = rag_context[:6000] + "\n...[Context truncated due to length limits]..."
+    
     if rag_context:
-        messages.append({
-            "role": "user", 
-            "content": f"CONTEXT FROM PREVIOUS NODES:\n{rag_context}\n\nUSER QUESTION:\n{user_message}"
-        })
+        messages.append({"role": "user", "content": f"CONTEXT:\n{rag_context}\n\nQUESTION:\n{user_message}"})
     else:
         messages.append({"role": "user", "content": user_message})
 
-    # Determine provider config from registry
     api_base = model_cfg.get("base_url")
-    if not api_base:
-        # Fallback to lemonade/ollama if registry didn't have a base_url (unlikely for local)
-        provider_config = LOCAL_PROVIDERS.get("lemonade", LOCAL_PROVIDERS.get("ollama"))
-        api_base = provider_config["base_url"]
-        
     chat_url = f"{api_base}/chat/completions"
     
-    # Tool-calling loop (max 5 iterations to prevent infinite loops)
     max_steps = 5
     current_step = 0
     total_tokens = 0
@@ -335,157 +388,93 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_
     async with httpx.AsyncClient(timeout=300.0) as client:
         while current_step < max_steps:
             current_step += 1
-            
             payload = {
-                "model": model_name,
-                "messages": messages,
-                "temperature": config.get("temperature", 0.7)
+                "model": model_name, 
+                "messages": messages, 
+                "temperature": config.get("temperature", 0.7),
+                "max_tokens": 1024
             }
-            if tools:
-                payload["tools"] = tools
+            if tools: payload["tools"] = tools
 
             try:
-                response = await client.post(
-                    chat_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
-                )
+                response = await client.post(chat_url, json=payload, headers={"Content-Type": "application/json"})
             except Exception as e:
                 return {"error": f"LLM connection error: {str(e)}", "response": None}
 
             if response.status_code != 200:
-                # FastFlowLM models might not support tools properly.
-                # If tool-calling fails, try a fallback without tools.
-                if tools and ("tool" in response.text.lower() or "function" in response.text.lower()):
+                # Robustness fallback: If tool-calling isn't supported by the model/endpoint, try without tools
+                if "tools" in payload and (response.status_code == 400 or "tool" in response.text.lower()):
+                    logging.warning(f"Model {model_name} failed tool-calling payload. Retrying without tools.")
                     payload.pop("tools")
                     response = await client.post(chat_url, json=payload, headers={"Content-Type": "application/json"})
                     if response.status_code != 200:
-                        return {"error": f"LLM error: {response.status_code} {response.text}", "response": None}
+                        return {"error": f"LLM error (after tool fallback): {response.status_code}", "response": None}
                 else:
                     return {"error": f"LLM error: {response.status_code} {response.text}", "response": None}
 
             data = response.json()
+            
+            if "error" in data:
+                err_obj = data["error"]
+                if isinstance(err_obj, dict):
+                    err_msg = err_obj.get("message", "Unknown error")
+                    details = err_obj.get("details", {})
+                    if details and isinstance(details, dict) and "response" in details:
+                        resp_err = details["response"].get("error", {})
+                        if isinstance(resp_err, dict) and "message" in resp_err:
+                            err_msg += f" - {resp_err['message']}"
+                else:
+                    err_msg = str(err_obj)
+                return {"error": f"LLM provider error: {err_msg}", "response": None}
+
+            if "choices" not in data or not data["choices"]:
+                return {"error": f"LLM unexpected response format: {json.dumps(data)}", "response": None}
+                
             message = data["choices"][0]["message"]
-            usage = data.get("usage", {})
-            total_tokens += usage.get("total_tokens", 0)
-
-            # Record LLM call to Governance Log
-            if run_id:
-                track_llm_call(
-                    parent_run_id=run_id,
-                    model=model_name,
-                    provider="lemonade", 
-                    usage=usage,
-                    parent_job_name="studio_workflow"
-                )
-
-            # Record assistant message
             messages.append(message)
 
-            # Check if LLM wants to call tools
             if "tool_calls" in message and message["tool_calls"]:
-                tool_calls = message["tool_calls"]
-                
-                # Execute each tool call
-                for tc in tool_calls:
+                for tc in message["tool_calls"]:
                     func_name = tc["function"]["name"]
-                    call_id = tc["id"]
                     try:
-                        args = json.loads(tc["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
+                        tool_args = json.loads(tc["function"]["arguments"])
+                    except:
+                        tool_args = {}
 
-                    # Run the skill via registry
+                    # Execute the skill with Nexus scoping
                     result_str = registry.execute_skill(
-                        func_name, 
-                        workspace, 
+                        skill_id=func_name, 
+                        workspace=workspace,
                         agent_role="executor", 
-                        agent_id=agent_id, 
-                        **args
+                        agent_id=agent_id,
+                        active_nexus_id=active_nexus_id,
+                        **tool_args
                     )
                     
-                    # Enhanced Security/Failure Logging
-                    is_success = True
-                    error_msg = None
-                    if "Permission denied" in result_str or "SECURITY_PERMISSION_VIOLATION" in result_str:
-                        logging.error(f"❌ Tool REJECTED for agent '{agent_id}': {result_str}")
-                        is_success = False
-                        error_msg = result_str
-                    elif result_str.startswith("❌"):
-                        logging.warning(f"⚠️ Tool Error ({func_name}): {result_str}")
-                        is_success = False
-                        error_msg = result_str
-
-                    executed_tools.append({"name": func_name, "args": args})
-
-                    if run_id:
-                        track_tool_execution(
-                            parent_run_id=run_id,
-                            tool_name=func_name,
-                            tool_args=args,
-                            success=is_success,
-                            error_message=error_msg,
-                            parent_job_name="studio_workflow"
-                        )
-
-                    # Add tool response to messages
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "name": func_name,
-                        "content": result_str
-                    })
-                
-                # Loop continues to send tool results to LLM
+                    executed_tools.append({"name": func_name, "args": tool_args})
+                    messages.append({"role": "tool", "tool_call_id": tc["id"], "name": func_name, "content": result_str})
                 continue
 
-            # If no tool calls, this is the final answer
-            answer_raw = message.get("content", "")
-            
-            # Extract and format reasoning
+            answer_raw = message.get("content") or ""
             answer_body, reasoning = extract_reasoning(answer_raw)
-            formatted_answer = format_combined_output(answer_body, reasoning)
-            
-            # Log to AER if reasoning exists
-            if reasoning and run_id:
-                from ..core.task_manager import task_manager
-                task_manager.add_aer_entry(
-                    run_id,
-                    intent=f"Neural Graph Reasoning (Node: {node.id})",
-                    observation="Model generated internal monologue",
-                    inference=reasoning,
-                    nodeId=node.id
-                )
+            return {"response": format_combined_output(answer_body, reasoning), "reasoning_trace": reasoning}
 
-            return {
-                "response": formatted_answer,
-                "reasoning_trace": reasoning,
-                "model": model_name,
-                "tokens": total_tokens,
-                "tool_executions": executed_tools
-            }
-
-        # If loop maxes out
-        return {
-            "error": "Agent execution max steps reached",
-            "response": messages[-1].get("content", ""),
-            "tool_executions": executed_tools
-        }
+        return {"error": "Max steps reached", "response": messages[-1].get("content") or ""}
 
 
 
-async def _run_workflow_background(
-    run_id: str,
-    request: StudioExecuteRequest,
-    sorted_nodes: List[StudioNode]
-):
-    """Background task to execute workflow and emit SSE events."""
-    logging.info(f"[AUDIT] Background task started | run_id: {run_id} | workspace: {request.workspace} | nodes: {len(sorted_nodes)}")
+async def _run_workflow_background(run_id: str, request: StudioExecuteRequest, sorted_nodes: List[StudioNode]):
+    """Background loop to process each node in topological order."""
+    from .rag_routes import create_ephemeral_manifest, register_manifest
     
-    context: Dict[str, Any] = {
-        "message": request.message or "",
-        "workspace": request.workspace
-    }
+    # Register permissions for background workflow tools
+    # We allow a broad set of common tools for Studio canvas execution
+    manifest = create_ephemeral_manifest(run_id, ["query_graph", "search_kb", "read_file", "write_file", "list_files", "get_neighbors", "search_knowledge_workspace"])
+    register_manifest(manifest)
+    
+    context = {"message": request.message, "workspace": request.workspace, "active_nexus_id": request.active_nexus_id}
+    
+    logging.info(f"[AUDIT] Background task started | run_id: {run_id} | workspace: {request.workspace} | nodes: {len(sorted_nodes)}")
 
     node_results: List[NodeResult] = []
     artifact_path = None
@@ -493,261 +482,90 @@ async def _run_workflow_background(
     overall_status = "completed"
     
     try:
-        # Emit initialization checkpoint
-        logging.info(f"[AUDIT] Emitting initialization checkpoint for {run_id}")
-        emit_execution_checkpoint(
-            run_id,
-            request.workspace,
-            "initialization",
-            {"nodes_count": len(sorted_nodes), "message": request.message}
-        )
+        emit_execution_checkpoint(run_id, request.workspace, "initialization", {"nodes_count": len(sorted_nodes)})
         
-        logging.info(f"[AUDIT] Starting node execution loop for {run_id} | nodes: {[n.id for n in sorted_nodes]}")
-
         for node in sorted_nodes:
-            logging.info(f"[AUDIT] Executing node {node.id} (type: {node.type}) for run_id: {run_id}")
-            
-            # Emit Start Event
-            _emit_execution_event(run_id, "node_started", {
-                "nodeId": node.id,
-                "nodeName": node.data.get("label", node.type),
-            })
-            
-            emit_execution_checkpoint(
-                run_id,
-                request.workspace,
-                f"node_start_{node.id}",
-                {"node_type": node.type, "node_label": node.data.get("label", node.id)}
-            )
+            _emit_execution_event(run_id, "node_started", {"nodeId": node.id, "nodeName": node.data.get("label", node.type)})
             
             try:
                 if node.type == "trigger":
                     output = await execute_trigger_node(node, request.message or "", context)
                     context["message"] = output.get("message", context["message"])
-
                 elif node.type == "data":
                     output = await execute_data_node(node, context, request.workspace)
-                    if "context_text" in output:
-                        context["context_text"] = output["context_text"]
-                    if output.get("written"):
-                        artifact_path = output.get("path")
-
+                    if "context_text" in output: context["context_text"] = output["context_text"]
                 elif node.type == "llm":
                     output = await execute_llm_node(node, context, request.workspace, run_id=run_id)
                     if output.get("response"):
                         context["llm_output"] = output["response"]
                         final_output = output["response"]
-
                 elif node.type == "a2a":
                     output = await execute_a2a_node(node, context, request.workspace)
-                    if output.get("response"):
-                        context["llm_output"] = output["response"]
-                        final_output = output["response"]
-
                 elif node.type == "intervention":
                     output = await execute_intervention_node(node, context, request.workspace, run_id)
-
-                elif node.type == "tool":
-                    output = {"message": "Tool node executed (stub)"}
-
-                elif node.type == "logic":
-                    output = {"message": "Logic node passed"}
-
                 else:
-                    output = {"message": f"Unknown node type: {node.type}"}
+                    output = {"message": "Node passed"}
 
-                has_error = "error" in output and output["error"]
+                has_error = "error" in output
                 status = "error" if has_error else "success"
                 
-                # Emit node execution state to audit log
-                emit_node_execution_state(
-                    run_id,
-                    request.workspace,
-                    node.id,
-                    status,
-                    inputs={"node_config": node.data},
-                    outputs=output,
-                    error=output.get("error") if has_error else None
-                )
+                emit_node_execution_state(run_id, request.workspace, node.id, status, outputs=output)
+                _emit_execution_event(run_id, "node_completed" if not has_error else "node_error", {"nodeId": node.id})
                 
-                # Emit Completion Event
-                _emit_execution_event(run_id, "node_completed" if not has_error else "node_error", {
-                    "nodeId": node.id,
-                    "output": str(output.get("response", output.get("message", "")))[:1000], # Increased limit for combined output
-                    "error": output.get("error") if has_error else None,
-                    "reasoning": output.get("reasoning_trace") # Unified AER field
-                })
-
-                node_results.append(NodeResult(
-                    node_id=node.id,
-                    node_type=node.type,
-                    status=status,
-                    output=output,
-                    error=output.get("error") if has_error else None
-                ))
-                
+                node_results.append(NodeResult(node_id=node.id, node_type=node.type, status=status, output=output))
                 if has_error:
                     overall_status = "failed"
                     break
 
             except Exception as e:
-                logging.error(f"Node execution failed: {str(e)}", exc_info=True)
-                
-                # Emit detailed failure with full context and stack trace
-                emit_execution_failure(
-                    run_id,
-                    request.workspace,
-                    ExecutionPhase.EXECUTION,
-                    e,
-                    node_id=node.id,
-                    context={
-                        "node_type": node.type,
-                        "node_label": node.data.get("label", node.id),
-                        "node_config": node.data,
-                        "execution_context": {k: str(v)[:200] for k, v in context.items()},  # Truncate large values
-                        "previous_results": [{"node_id": r.node_id, "status": r.status} for r in node_results]
-                    }
-                )
-                
-                # Emit node failure state
-                emit_node_execution_state(
-                    run_id,
-                    request.workspace,
-                    node.id,
-                    "failed",
-                    error=str(e)
-                )
-                
-                _emit_execution_event(run_id, "node_error", {
-                    "nodeId": node.id,
-                    "error": str(e),
-                })
-                node_results.append(NodeResult(
-                    node_id=node.id,
-                    node_type=node.type,
-                    status="error",
-                    error=str(e)
-                ))
+                emit_execution_failure(run_id, request.workspace, ExecutionPhase.EXECUTION, e, node_id=node.id)
                 overall_status = "failed"
                 break
 
-        # Finalize Event
-        final_event_type = "workflow_completed" if overall_status == "completed" else "workflow_failed"
-        _emit_execution_event(run_id, final_event_type, {
-            "outputs": {"final_output": final_output} if overall_status == "completed" else {},
-            "error": "One or more nodes failed" if overall_status == "failed" else None
-        })
-        
-        # Emit finalization checkpoint
-        emit_execution_checkpoint(
-            run_id,
-            request.workspace,
-            "finalization",
-            {
-                "status": overall_status,
-                "nodes_executed": len(node_results),
-                "nodes_failed": len([r for r in node_results if r.status == "error"])
-            }
-        )
-
-    except Exception as e:
-        """Catch any unhandled exceptions outside the node execution loop"""
-        logging.error(f"Workflow execution error outside node loop: {str(e)}", exc_info=True)
-        overall_status = "failed"
-        
-        # Emit comprehensive failure event
-        emit_execution_failure(
-            run_id,
-            request.workspace,
-            ExecutionPhase.INITIALIZATION,
-            e,
-            context={
-                "nodes_count": len(sorted_nodes),
-                "node_results_so_far": len(node_results),
-                "workflow_phase": "pre-execution or post-execution"
-            }
-        )
+        _emit_execution_event(run_id, "workflow_completed" if overall_status == "completed" else "workflow_failed", {})
 
     finally:
-        # Cleanup HITL queue if any
-        if run_id in _hitl_responses:
-            del _hitl_responses[run_id]
-        
-        # Finalize Audit
+        if run_id in _hitl_responses: del _hitl_responses[run_id]
         task_manager.update_task(run_id, status=overall_status, progress=100)
-        track_workflow_complete(
-            run_id, 
-            "studio_workflow", 
-            request.workspace, 
-            [r.node_type for r in node_results], 
-            0,
-            status=overall_status
-        )
+        track_workflow_complete(run_id, "studio_workflow", request.workspace, [r.node_type for r in node_results], 0, status=overall_status)
 
 
 @router.post("/workflows/execute")
 async def execute_studio_workflow(request: StudioExecuteRequest):
     """Start Studio node graph execution in background."""
-    logging.info(f"[AUDIT] /api/workflows/execute called | workspace={request.workspace} | message={request.message[:50] if request.message else 'none'} | nodes={len(request.nodes)} | edges={len(request.edges)}")
+    logging.info(f"[AUDIT] /api/workflows/execute called | workspace={request.workspace} | nodes={len(request.nodes)}")
     
     if not request.nodes:
-        logging.error("[AUDIT] No nodes in workflow - rejecting request")
         raise HTTPException(400, "No nodes in workflow")
 
-    # Sort nodes in execution order
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+    _hitl_responses[run_id] = asyncio.Queue()
+    
+    # 1. Pre-flight Validation
+    validation_error = validate_workflow_graph(request.nodes, request.edges)
+    if validation_error:
+        logging.error(f"[AUDIT] Pre-flight validation failed | run_id: {run_id} | error: {validation_error}")
+        # Emit failure so it shows in governance despite not starting
+        emit_execution_failure(run_id, request.workspace, ExecutionPhase.INITIALIZATION, ValueError(validation_error))
+        raise HTTPException(400, f"Workflow validation failed: {validation_error}")
+
+    # 2. Initialization & Topological Sort
     try:
         sorted_nodes = topological_sort(request.nodes, request.edges)
-        logging.info(f"[AUDIT] Topologically sorted {len(sorted_nodes)} nodes: {[n.id for n in sorted_nodes]}")
     except Exception as e:
-        logging.error(f"[AUDIT] Failed to sort nodes topologically: {str(e)}", exc_info=True)
-        raise HTTPException(400, f"Invalid workflow graph: {str(e)}")
+        logging.error(f"[AUDIT] Initialization failed (sort) | run_id: {run_id} | error: {str(e)}")
+        # Start & immediately fail the task for audit persistence
+        task_manager.create_task(request.workspace, "studio_workflow", task_id=run_id)
+        task_manager.update_task(run_id, status="failed", message=f"Initialization error: {str(e)}")
+        emit_execution_failure(run_id, request.workspace, ExecutionPhase.INITIALIZATION, e)
+        raise HTTPException(400, f"Workflow initialization failed: {str(e)}")
 
-    run_id = f"run-{uuid.uuid4().hex[:8]}"
-    logging.info(f"[AUDIT] Created run_id: {run_id}")
-    
-    # Initialize buffers
-    _hitl_responses[run_id] = asyncio.Queue()
-    logging.info(f"[AUDIT] Initialized execution buffers for {run_id}")
-    
-    # Start task tracking and lineage
+    # 3. Task Creation & Backgrounding
     task_manager.create_task(request.workspace, "studio_workflow", task_id=run_id)
-    track_workflow_start(
-        run_id, 
-        "studio_workflow", 
-        request.workspace,
-        inputs=[f"node_{n.id}" for n in request.nodes],
-        outputs=[f"studio_run_{run_id}"]
-    )
-    logging.info(f"[AUDIT] Started task tracking and lineage for {run_id}")
+    track_workflow_start(run_id, "studio_workflow", request.workspace, inputs=[], outputs=[])
 
-    # Launch background task with proper error handling
-    task = asyncio.create_task(_run_workflow_background(run_id, request, sorted_nodes))
-    logging.info(f"[AUDIT] Launched background task for {run_id}")
-    
-    # Add callback to handle unhandled exceptions in background task
-    def handle_exception(future):
-        try:
-            future.result()
-        except Exception as e:
-            logging.error(f"[AUDIT] Unhandled exception in workflow {run_id}: {str(e)}", exc_info=True)
-            # Ensure failure is recorded
-            try:
-                emit_execution_failure(
-                    run_id,
-                    request.workspace,
-                    ExecutionPhase.EXECUTION,
-                    e,
-                    context={"error_location": "task callback"}
-                )
-                task_manager.update_task(run_id, status="failed", message=f"Background task failed: {str(e)[:200]}")
-            except Exception as callback_error:
-                logging.error(f"[AUDIT] Failed to emit failure for {run_id}: {str(callback_error)}")
-    
-    task.add_done_callback(handle_exception)
-
-    response_data = {"run_id": run_id, "status": "started"}
-    logging.info(f"[AUDIT] Returning response: {response_data}")
-    return response_data
+    asyncio.create_task(_run_workflow_background(run_id, request, sorted_nodes))
+    return {"run_id": run_id, "status": "started"}
 
 
 

@@ -246,9 +246,22 @@ def _execute_query_csv(workspace: str, **kwargs) -> str:
 
 
 def _execute_query_graph(workspace: str, **kwargs) -> str:
-    from ..core.graph_db import run_cypher
+    from ..core.graph_db import run_cypher, scope_cypher_query
+    
+    query = kwargs.get("query", "")
+    nexus_id = kwargs.get("active_nexus_id")
+    
+    # If a Neural Nexus is selected, deterministically scope the query
+    if nexus_id and nexus_id != "neural_nexus":
+        query = scope_cypher_query(query, nexus_id)
+        # We also pass nexus_id as a parameter to the query for the $nexus_id placeholders
+        params = {"nexus_id": nexus_id}
+    else:
+        params = {}
+        
     results = run_cypher(
-        query=kwargs.get("query", ""),
+        query=query,
+        params=params,
         workspace=workspace
     )
     return json.dumps(results, indent=2, default=str)
@@ -379,8 +392,8 @@ class SkillRegistry:
         skills = self.get_skills_by_ids(skill_ids, workspace)
         return [s.to_openai_tool_schema() for s in skills]
 
-    def execute_skill(self, skill_id: str, workspace: str, agent_role: str = "executor", agent_id: str = "default", **kwargs) -> str:
-        """Execute a skill by ID with RBAC enforcement."""
+    def execute_skill(self, skill_id: str, workspace: str, agent_role: str = "executor", agent_id: str = "default", active_nexus_id: Optional[str] = None, **kwargs) -> str:
+        """Execute a skill by ID with RBAC enforcement and optional Nexus scoping."""
         from ..gateway.rbac import check_permission, AgentRole, ToolOperation
         
         # RBAC check (non-blocking — logs violation but allows if no policy exists)
@@ -409,7 +422,14 @@ class SkillRegistry:
         if not handler:
             return f"❌ Unknown skill: {skill_id}"
         try:
-            return handler(workspace=workspace, **kwargs)
+            result = handler(workspace=workspace, active_nexus_id=active_nexus_id, **kwargs)
+            
+            # Context Guard: Protect against massive tool outputs
+            from .context_guard import guard_tool_output
+            # Note: In a real scenario, we'd pass the actual model name if available. 
+            # Defaulting to 'local' thresholds if unknown.
+            return guard_tool_output(result, model="fastflowlm", tool_name=skill_id)
+            
         except Exception as e:
             return f"❌ Skill execution error ({skill_id}): {str(e)}"
 

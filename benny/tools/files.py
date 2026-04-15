@@ -45,19 +45,23 @@ def write_file(
 def read_file(
     filename: str, 
     workspace: str = "default",
-    subdir: str = "data_in"
+    subdir: str = "data_in",
+    encoding: str = None
 ) -> str:
     """
-    Read a file from the workspace.
+    Read a file from the workspace. Handles multiple encodings (UTF-8, UTF-16LE, etc.).
     
     Args:
         filename: File to read
         workspace: Workspace ID
         subdir: Subdirectory to look in (default: data_in)
+        encoding: Optional explicit encoding (e.g. 'utf-16le')
         
     Returns:
         File content (pass-by-reference if >5KB)
     """
+    import charset_normalizer
+    
     try:
         path = get_workspace_path(workspace, subdir) / filename
         
@@ -69,7 +73,28 @@ def read_file(
             else:
                 return f"❌ File not found: {filename}"
         
-        content = path.read_text(encoding='utf-8')
+        # Robust reading
+        raw_bytes = path.read_bytes()
+        
+        if encoding:
+            try:
+                content = raw_bytes.decode(encoding)
+            except Exception as e:
+                return f"❌ Error decoding with explicit encoding {encoding}: {str(e)}"
+        else:
+            # Detect encoding
+            results = charset_normalizer.from_bytes(raw_bytes)
+            best_match = results.best()
+            
+            if best_match and best_match.encoding:
+                content = str(best_match)
+            else:
+                # Fallback to UTF-8 with replacement for corrupted chars
+                content = raw_bytes.decode('utf-8', errors='replace')
+        
+        # Normalize: Strip BOM and ensure clean UTF-8 for model consumption
+        content = content.lstrip('\ufeff')
+        
         return smart_output(content, f"{filename}_read.txt", workspace)
         
     except Exception as e:

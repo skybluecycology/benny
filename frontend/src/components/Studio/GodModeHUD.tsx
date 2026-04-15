@@ -1,4 +1,4 @@
-import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw, File } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
@@ -167,6 +167,9 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           </button>
           <button onClick={() => onViewChange('marketplace')} className={`btn-pill ${currentView === 'marketplace' ? 'active' : ''}`}>
             <Cpu size={14} /> FORGE
+          </button>
+          <button onClick={() => onViewChange('documents')} className={`btn-pill ${currentView === 'documents' ? 'active' : ''}`}>
+            <File size={14} /> DOCS
           </button>
           <div className="w-[1px] h-6 bg-[#00FFFF]/20 mx-1" />
           <button onClick={() => onViewChange('llm')} className={`btn-pill ${currentView === 'llm' ? 'active' : ''}`}>

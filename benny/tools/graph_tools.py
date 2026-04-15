@@ -18,7 +18,8 @@ from ..core.graph_db import (
 
 @tool
 def query_knowledge_graph(
-    workspace: str = "default"
+    workspace: str = "default",
+    active_nexus_id: Optional[str] = None
 ) -> str:
     """
     Get the full knowledge graph for a workspace.
@@ -32,8 +33,8 @@ def query_knowledge_graph(
         JSON summary of the knowledge graph (nodes and edges)
     """
     try:
-        stats = get_graph_stats(workspace)
-        graph = get_full_graph(workspace)
+        stats = get_graph_stats(workspace, run_id=active_nexus_id)
+        graph = get_full_graph(workspace, run_id=active_nexus_id)
         
         # Build human-readable summary
         lines = [f"📊 Knowledge Graph: {stats['concepts']} concepts, {stats['sources']} sources, {stats['relationships']} relationships"]
@@ -65,7 +66,8 @@ def query_knowledge_graph(
 def get_concept_neighbors(
     concept: str,
     workspace: str = "default",
-    depth: int = 2
+    depth: int = 2,
+    active_nexus_id: Optional[str] = None
 ) -> str:
     """
     Get the neighbourhood of a specific concept — all connected nodes
@@ -80,7 +82,7 @@ def get_concept_neighbors(
         List of connected concepts and their relationships
     """
     try:
-        neighbors = get_neighbors(concept, workspace, min(depth, 3))
+        neighbors = get_neighbors(concept, workspace, min(depth, 3), run_id=active_nexus_id)
         
         if not neighbors["nodes"]:
             return f"No neighbors found for '{concept}'"
@@ -181,7 +183,8 @@ def find_structural_analogies(
 def search_similar_concepts(
     query: str,
     workspace: str = "default",
-    top_k: int = 5
+    top_k: int = 5,
+    active_nexus_id: Optional[str] = None
 ) -> str:
     """
     Search for concepts semantically similar to the query text
@@ -209,7 +212,7 @@ def search_similar_concepts(
             pass
         
         emb = asyncio.run(get_embedding(query, provider="local"))
-        results = vector_search(emb, workspace, top_k)
+        results = vector_search(emb, workspace, top_k, run_id=active_nexus_id)
         
         if not results:
             return "No similar concepts found. Make sure concepts have embeddings."

@@ -54,13 +54,26 @@ class EventBus:
         last_index = 0
         logging.info(f"[EVENT_BUS] Subscription started for run_id: {run_id}")
 
+        def json_serial(obj):
+            """JSON serializer for objects not serializable by default json code"""
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            if hasattr(obj, "model_dump"): # Pydantic v2
+                return obj.model_dump()
+            if hasattr(obj, "dict"): # Pydantic v1 / other
+                return obj.dict()
+            try:
+                return dict(obj)
+            except:
+                return str(obj)
+
         try:
             while True:
                 events = self._events.get(run_id, [])
                 
                 while last_index < len(events):
                     event = events[last_index]
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(event, default=json_serial)}\n\n"
                     last_index += 1
                     
                     # Terminate stream on completion
@@ -76,7 +89,7 @@ class EventBus:
                         flag.clear()
                 except asyncio.TimeoutError:
                     # Send heartbeat to keep connection alive
-                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'heartbeat'}, default=json_serial)}\n\n"
 
         except asyncio.CancelledError:
             logging.info(f"[EVENT_BUS] Subscription cancelled for run_id: {run_id}")

@@ -267,7 +267,10 @@ def smart_output(
     Returns:
         Content if small, or download URL if large
     """
-    if len(content.encode('utf-8')) < PASS_BY_REFERENCE_THRESHOLD:
+    # Ensure we strip BOM to avoid confusion in MIME detection downstream
+    content = content.lstrip('\ufeff')
+    
+    if len(content.encode('utf-8', errors='replace')) < PASS_BY_REFERENCE_THRESHOLD:
         return content
     
     # Save to file and return reference
