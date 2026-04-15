@@ -1,8 +1,9 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars, Text, Sphere, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 // --- Synoptic Memory Node ---
 function SynopticNode({ position, label, color, importance }: { position: [number, number, number], label: string, color: string, importance: number }) {
@@ -38,49 +39,108 @@ function SynopticNode({ position, label, color, importance }: { position: [numbe
 }
 
 export function SynopticWeb() {
-  const { currentWorkspace } = useWorkspaceStore();
-  
-  // Mock data for the "God-Mode" Knowledge Web
-  const concepts = useMemo(() => [
-    { id: 1, label: 'Cognitive Mesh', pos: [0, 0, 0], color: '#00FFFF', importance: 1.0 },
-    { id: 2, label: 'Swarm Intelligence', pos: [-5, 3, -4], color: '#39FF14', importance: 0.8 },
-    { id: 3, label: 'Neural Provisioning', pos: [5, -2, -6], color: '#c084fc', importance: 0.7 },
-    { id: 4, label: 'Vector Context', pos: [-2, -4, 5], color: '#FF5F1F', importance: 0.6 },
-    { id: 5, label: 'Audit Lineage', pos: [6, 4, 2], color: '#00FFFF', importance: 0.5 },
-  ], []);
+  const { currentWorkspace, activeGraphId } = useWorkspaceStore();
+  const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
+  const [loading, setLoading] = useState(false);
+
+  const fetchGraph = async () => {
+    setLoading(true);
+    try {
+      const runParam = activeGraphId && activeGraphId !== 'neural_nexus' ? `&run_id=${activeGraphId}` : '';
+      const response = await fetch(`${API_BASE_URL}/api/graph/full?workspace=${currentWorkspace}${runParam}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setGraphData(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch synoptic graph:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchGraph();
+  }, [currentWorkspace, activeGraphId]);
+
+  // Layout concepts in a 3D sphere/cloud
+  const processedNodes = useMemo(() => {
+    return graphData.nodes.map((node, i) => {
+      const phi = Math.acos(-1 + (2 * i) / graphData.nodes.length);
+      const theta = Math.sqrt(graphData.nodes.length * Math.PI) * phi;
+      const radius = 15;
+      
+      return {
+        ...node,
+        pos: [
+          radius * Math.cos(theta) * Math.sin(phi),
+          radius * Math.sin(theta) * Math.sin(phi),
+          radius * Math.cos(phi)
+        ] as [number, number, number]
+      };
+    });
+  }, [graphData.nodes]);
+
+  const processedEdges = useMemo(() => {
+    return graphData.edges.map(edge => {
+      const startNode = processedNodes.find(n => n.id === edge.source);
+      const endNode = processedNodes.find(n => n.id === edge.target);
+      return {
+        ...edge,
+        start: startNode?.pos || [0,0,0],
+        end: endNode?.pos || [0,0,0]
+      };
+    });
+  }, [graphData.edges, processedNodes]);
 
   return (
     <div className="absolute inset-0 bg-[#020408]">
-      <Canvas camera={{ position: [0, 5, 20], fov: 60 }}>
+      <Canvas camera={{ position: [0, 20, 40], fov: 60 }}>
         <color attach="background" args={['#020408']} />
         <ambientLight intensity={0.4} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={1} fade speed={0.5} />
         
         <group>
-          {concepts.map(concept => (
+          {processedNodes.map(concept => (
             <SynopticNode 
               key={concept.id}
-              position={concept.pos as [number, number, number]}
-              label={concept.label}
-              color={concept.color}
-              importance={concept.importance}
+              position={concept.pos}
+              label={concept.name}
+              color={concept.node_type === 'Source' ? '#4dbbff' : '#a78bfa'}
+              importance={concept.centrality ? concept.centrality / 10 : 0.5}
             />
           ))}
 
-          {/* Connection Lines */}
-          <Line points={[[0, 0, 0], [-5, 3, -4]]} color="#00FFFF" transparent opacity={0.2} />
-          <Line points={[[0, 0, 0], [5, -2, -6]]} color="#00FFFF" transparent opacity={0.2} />
-          <Line points={[[-5, 3, -4], [-2, -4, 5]]} color="#39FF14" transparent opacity={0.1} />
-          <Line points={[[5, -2, -6], [6, 4, 2]]} color="#c084fc" transparent opacity={0.1} />
+          {processedEdges.map((edge, i) => (
+            <Line 
+              key={i}
+              points={[edge.start, edge.end]} 
+              color="#00FFFF" 
+              transparent 
+              opacity={0.1} 
+              lineWidth={0.5}
+            />
+          ))}
         </group>
 
-        <OrbitControls autoRotate autoRotateSpeed={0.5} />
+        <OrbitControls autoRotate autoRotateSpeed={0.2} />
       </Canvas>
 
       <div className="absolute top-10 left-10 pointer-events-none">
         <h1 className="glow-text-cyan text-[24px] font-bold tracking-widest uppercase">Synoptic_Web</h1>
-        <div className="text-[10px] text-white/40 font-mono tracking-widest mt-2">ACTIVE_WORKSPACE: {currentWorkspace?.toUpperCase() || 'DEFAULT'}</div>
+        <div className="text-[10px] text-white/40 font-mono tracking-widest mt-2">
+            ACTIVE_WORKSPACE: {currentWorkspace?.toUpperCase() || 'DEFAULT'}
+            {activeGraphId && activeGraphId !== 'neural_nexus' && ` | SNAPSHOT: ${activeGraphId.substring(0,8)}`}
+        </div>
       </div>
+      
+      {loading && (
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 text-[10px] text-[#00FFFF] font-black tracking-widest animate-pulse">
+          SYNCHRONIZING_NEURAL_MAP...
+        </div>
+      )}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { V2ChatOverlay } from './components/Studio/V2ChatOverlay';
 import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
+import V2GraphSelector from './components/Studio/V2GraphSelector';
 
 export default function AppV2Beta() {
   const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
@@ -48,6 +49,8 @@ export default function AppV2Beta() {
       </main>
 
       {/* Floating HUD Layer */}
+      <V2GraphSelector />
+      
       <GodModeHUD 
         onViewChange={setViewMode} 
         currentView={viewMode} 

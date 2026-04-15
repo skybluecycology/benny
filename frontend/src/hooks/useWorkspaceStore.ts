@@ -20,6 +20,12 @@ interface WorkspaceState {
   synthesisHistory: any[];
   fetchSynthesisHistory: () => Promise<void>;
   deleteRun: (runId: string) => Promise<boolean>;
+  
+  // Graph Catalog & Selection
+  graphCatalog: Array<{ id: string, name: string, type: 'code' | 'knowledge', timestamp: string, is_global?: boolean }>;
+  activeGraphId: string | null;
+  setActiveGraphId: (id: string | null) => void;
+  fetchGraphCatalog: () => Promise<void>;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -143,6 +149,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (error) {
       console.error('Failed to delete run:', error);
       return false;
+    }
+  },
+
+  graphCatalog: [],
+  activeGraphId: 'neural_nexus', // Default to global merged view
+
+  setActiveGraphId: (id) => {
+    set({ activeGraphId: id });
+  },
+
+  fetchGraphCatalog: async () => {
+    const { currentWorkspace } = get();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/graph/catalog?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        set({ graphCatalog: data.catalog || [] });
+      }
+    } catch (error) {
+      console.error('Failed to fetch graph catalog:', error);
     }
   }
 }));

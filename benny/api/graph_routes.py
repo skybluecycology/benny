@@ -65,29 +65,31 @@ class TripleRequest(BaseModel):
     timestamp: Optional[str] = None
 
 
-class IngestTextRequest(BaseModel):
-    text: str
-    source_name: str = "manual"
+class GraphIngestRequest(BaseModel):
+    text: str = ""
+    source_name: str = "manual_entry"
     workspace: str = "default"
-    provider: str = "lemonade"
+    provider: str = "ollama"
     model: Optional[str] = None
     embed: bool = True
     embedding_provider: str = "local"
-    embedding_model: Optional[str] = "nomic-embed-text-v1-GGUF"
-    direction: Optional[str] = ""
-    inference_delay: Optional[float] = 2.0
+    embedding_model: Optional[str] = None
+    direction: str = ""
+    inference_delay: float = 2.0
+    name: Optional[str] = None
 
 
 class IngestFilesRequest(BaseModel):
     files: List[str]
     workspace: str = "default"
-    provider: str = "lemonade"
+    provider: str = "ollama"
     model: Optional[str] = None
     embed: bool = True
     embedding_provider: str = "local"
-    embedding_model: Optional[str] = "nomic-embed-text-v1-GGUF"
-    direction: Optional[str] = ""
-    inference_delay: Optional[float] = 2.0
+    embedding_model: Optional[str] = None
+    direction: str = ""
+    inference_delay: float = 2.0
+    name: Optional[str] = None
 
 
 class SynthesizeRequest(BaseModel):
@@ -133,6 +135,7 @@ class RunIDRequest(BaseModel):
 class CodeGraphGenerateRequest(BaseModel):
     workspace: str = "default"
     root_dir: str = ""
+    name: Optional[str] = None
 
 
 # =============================================================================
@@ -177,7 +180,8 @@ async def full_graph(
     workspace: str = "default",
     page: Optional[int] = None,
     page_size: int = 200,
-    show_all: bool = False
+    show_all: bool = False,
+    run_id: Optional[str] = None
 ):
     """
     Get the knowledge graph for visualization (nodes + edges).
@@ -185,13 +189,14 @@ async def full_graph(
     Modes:
       - ?show_all=true: Complete graph (no pagination)
       - ?page=0&page_size=200: Paginated for large graphs
+      - ?run_id=XXX: Filter by specific synthesis run
       - Default: First 200 nodes + their edges
     """
     conn = verify_connectivity()
     if conn["status"] != "connected":
         raise HTTPException(status_code=503, detail=f"Neo4j not available: {conn.get('error')}")
     try:
-        return get_full_graph(workspace, page=page, page_size=page_size, show_all=show_all)
+        return get_full_graph(workspace, page=page, page_size=page_size, show_all=show_all, run_id=run_id)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch graph: {str(e)}")
 
@@ -265,6 +270,52 @@ async def delete_run(run_id: str, workspace: str = "default"):
         raise HTTPException(500, f"Failed to delete run: {str(e)}")
 
 
+@router.get("/graph/catalog")
+async def get_graph_catalog(workspace: str = "default"):
+    """
+    Get a unified list of all selectable graphs (snapshots and scans) 
+    in a workspace.
+    """
+    try:
+        from ..core.graph_db import get_code_scan_history, get_synthesis_history
+        
+        scans = get_code_scan_history(workspace)
+        runs = get_synthesis_history(workspace)
+        
+        catalog = []
+        
+        # 1. Neural Nexus (Global Merged View)
+        catalog.append({
+            "id": "neural_nexus",
+            "name": "Neural Nexus (Merged Global view)",
+            "type": "knowledge",
+            "timestamp": datetime.now().isoformat(),
+            "is_global": True
+        })
+        
+        # 2. Add Code Scans
+        for s in scans:
+            catalog.append({
+                "id": s["scan_id"],
+                "name": s["name"],
+                "type": "code",
+                "timestamp": str(s["created_at"])
+            })
+            
+        # 3. Add Synthesis Runs
+        for r in runs:
+            catalog.append({
+                "id": r["run_id"],
+                "name": r.get("name") or f"Synthesis_{r['run_id'][:8]}",
+                "type": "knowledge",
+                "timestamp": str(r["created_at"])
+            })
+            
+        return {"catalog": catalog}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch catalog: {str(e)}")
+
+
 @router.get("/graph/recent")
 async def get_recent_graph_updates(workspace: str = "default", seconds: int = 10):
     """
@@ -282,10 +333,10 @@ async def get_recent_graph_updates(workspace: str = "default", seconds: int = 10
 # =============================================================================
 
 @router.get("/graph/code")
-async def fetch_code_graph(workspace: str = "default"):
+async def fetch_code_graph(workspace: str = "default", snapshot_id: Optional[str] = None):
     """Fetch the analyzed code graph for 3D visualization."""
     try:
-        return get_workspace_graph(workspace)
+        return get_workspace_graph(workspace, snapshot_id=snapshot_id)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch code graph: {str(e)}")
 
@@ -301,8 +352,9 @@ async def generate_code_graph(request: CodeGraphGenerateRequest, background_task
             ws_path = get_workspace_path(request.workspace)
             analyzer = CodeGraphAnalyzer(str(ws_path))
             analyzer.analyze_workspace(request.root_dir)
-            analyzer.save_to_neo4j(request.workspace)
-            logger.info(f"Code graph generated for {request.workspace} (root: {request.root_dir})")
+            # Save as a distinct snapshot
+            analyzer.save_to_neo4j(request.workspace, run_id, name=request.name)
+            logger.info(f"Code graph snapshot generated for {request.workspace} (ID: {run_id})")
         except Exception as e:
             logger.error(f"Code graph generation failed: {e}", exc_info=True)
 
@@ -433,24 +485,31 @@ def _split_markdown_into_segments(text: str) -> List[Dict[str, str]]:
 # =============================================================================
 
 @router.post("/graph/ingest")
-async def ingest_text(request: IngestTextRequest):
+async def ingest_text(request: GraphIngestRequest, background_tasks: BackgroundTasks):
     """
     Ingest text: extract triples via LLM, store in Neo4j, optionally embed concepts.
     """
     try:
-        result = await _process_content_to_graph(
-            text=request.text,
-            source_name=request.source_name,
-            workspace=request.workspace,
-            provider=request.provider,
-            model=request.model,
-            embed=request.embed,
-            embedding_provider=request.embedding_provider,
-            embedding_model=request.embedding_model,
-            direction=request.direction,
-            inference_delay=request.inference_delay
+        run_id = str(uuid.uuid4())
+        _ingestion_events[run_id] = asyncio.Queue()
+        
+        background_tasks.add_task(
+            _process_content_to_graph,
+            request.text,
+            request.source_name,
+            request.workspace,
+            request.provider,
+            request.model,
+            request.embed,
+            request.embedding_provider,
+            request.embedding_model,
+            request.direction,
+            request.inference_delay,
+            run_id,
+            _emit_event,
+            name=request.name
         )
-        return result
+        return {"status": "accepted", "run_id": run_id}
     except Exception as e:
         raise HTTPException(500, f"Ingestion failed: {str(e)}")
 
@@ -478,7 +537,8 @@ async def ingest_files_to_graph(request: IngestFilesRequest, background_tasks: B
         embedding_provider=request.embedding_provider,
         embedding_model=request.embedding_model,
         direction=request.direction,
-        inference_delay=request.inference_delay
+        inference_delay=request.inference_delay,
+        name=request.name
     )
 
     return {
@@ -499,7 +559,8 @@ async def _background_ingest_files(
     embedding_provider: str,
     embedding_model: Optional[str],
     direction: str,
-    inference_delay: float
+    inference_delay: float,
+    name: Optional[str] = None
 ):
     """Background task for batch file ingestion with SSE event emission."""
     results = []
@@ -542,13 +603,15 @@ async def _background_ingest_files(
             # Step 1: Extract structured text via Docling
             text = extract_structured_text(file_path)
 
-            if not text.strip():
+            content = extract_structured_text(file_path)
+
+            if not content.strip():
                 logger.warning("No content extracted from %s", filename)
                 continue
 
             # Step 2: Process to graph
             file_result = await _process_content_to_graph(
-                text=text,
+                text=content,
                 source_name=filename,
                 workspace=workspace,
                 provider=provider,
@@ -559,7 +622,8 @@ async def _background_ingest_files(
                 direction=direction,
                 inference_delay=inference_delay,
                 run_id=run_id,
-                event_callback=event_callback
+                event_callback=_emit_event,
+                name=name
             )
             results.append({
                 "file": filename,
@@ -617,7 +681,8 @@ async def _process_content_to_graph(
     direction: str = "",
     inference_delay: float = 2.0,
     run_id: Optional[str] = None,
-    event_callback: Optional[Any] = None
+    event_callback: Optional[Any] = None,
+    name: Optional[str] = None
 ):
     """Core ingestion pipeline: extract -> validate -> store -> embed -> centrality."""
     # Step 0: Ensure Run ID and Partition Key
@@ -648,7 +713,8 @@ async def _process_content_to_graph(
         workspace=workspace,
         files=[source_name],
         version="1.0.0",
-        artifact_path=str(get_workspace_path(workspace, f"runs/{run_id}"))
+        artifact_path=str(get_workspace_path(workspace, f"runs/{run_id}")),
+        name=name
     )
     
     # Track metadata in TaskManager registry

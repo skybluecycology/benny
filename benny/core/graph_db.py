@@ -140,6 +140,11 @@ def init_schema():
             CREATE CONSTRAINT run_unique IF NOT EXISTS
             FOR (r:SynthesisRun) REQUIRE (r.run_id) IS UNIQUE
         """)
+        # Unique constraint on CodeScan id
+        session.run("""
+            CREATE CONSTRAINT code_scan_unique IF NOT EXISTS
+            FOR (s:CodeScan) REQUIRE (s.scan_id) IS UNIQUE
+        """)
         # Index on workspace for faster filtering
         try:
             session.run("""
@@ -443,77 +448,39 @@ def get_full_graph(
     workspace: str = "default",
     page: Optional[int] = None,
     page_size: int = 200,
-    show_all: bool = False
+    show_all: bool = False,
+    run_id: Optional[str] = None
 ) -> dict:
     """
     Return the knowledge graph for a workspace as nodes + edges
     suitable for 3d-force-graph rendering.
     
-    Modes:
-      - show_all=True: returns entire graph (no pagination)
-      - page/page_size: paginated by node SKIP/LIMIT for large graphs
-      - default: returns first 200 nodes + their edges  
+    If run_id is provided, only nodes and edges associated with that run 
+    (or concepts connected by those relationships) are returned.
     """
     with read_session() as session:
-        # Nodes — with optional pagination
-        if show_all or page is None:
-            node_query = """
-                MATCH (n {workspace: $workspace})
-                WHERE n:Concept OR n:Source
-                RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
-                       n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type,
-                       n.centrality AS centrality
-            """
-            if not show_all:
-                node_query += f" LIMIT {page_size}"
-            node_result = session.run(node_query, workspace=workspace)
-        else:
-            skip = page * page_size
-            node_result = session.run("""
-                MATCH (n {workspace: $workspace})
-                WHERE n:Concept OR n:Source
-                RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
-                       n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type,
-                       n.centrality AS centrality
-                SKIP $skip LIMIT $limit
-            """, workspace=workspace, skip=skip, limit=page_size)
-
-        nodes = []
-        node_ids = set()
-        for rec in node_result:
-            node = {
-                "id": str(rec["id"]),
-                "name": rec["name"],
-                "labels": rec["labels"],
-                "domain": rec["domain"] or "",
-                "created_at": str(rec["created_at"]) if rec["created_at"] else "",
-                "node_type": rec["node_type"] or "Concept",
-                "centrality": rec["centrality"] or 0
-            }
-            nodes.append(node)
-            node_ids.add(str(rec["id"]))
-
-        # Edges — only those connecting visible nodes
-        edge_result = session.run("""
-            MATCH (a {workspace: $workspace})-[r]->(b {workspace: $workspace})
-            RETURN elementId(a) AS source, elementId(b) AS target, type(r) AS type,
-                   r.predicate AS predicate, r.description AS description,
-                   r.pattern AS pattern, r.source AS source_doc,
-                   r.created_at AS created_at, r.timestamp AS timestamp,
-                   r.section AS section, r.citation AS citation, r.confidence AS confidence,
+        # 1. Fetch Edges based on workspace and optional run_id
+        edge_match = "MATCH (a {workspace: $workspace})-[r:RELATES_TO]->(b {workspace: $workspace})"
+        if run_id:
+            edge_match = "MATCH (a {workspace: $workspace})-[r:RELATES_TO {run_id: $run_id}]->(b {workspace: $workspace})"
+        
+        edge_result = session.run(edge_match + """
+            RETURN elementId(a) AS source, a.name AS source_name,
+                   elementId(b) AS target, b.name AS target_name,
+                   type(r) AS type, r.predicate AS predicate, 
+                   r.description AS description, r.pattern AS pattern, 
+                   r.source AS source_doc, r.created_at AS created_at, 
+                   r.timestamp AS timestamp, r.section AS section, 
+                   r.citation AS citation, r.confidence AS confidence,
                    r.run_id AS run_id
-        """, workspace=workspace)
+        """, workspace=workspace, run_id=run_id or "")
 
         edges = []
+        visible_node_ids = set()
         for rec in edge_result:
-            src = str(rec["source"])
-            tgt = str(rec["target"])
-            # In paginated mode, only include edges where both nodes are visible
-            if not show_all and page is not None and (src not in node_ids or tgt not in node_ids):
-                continue
-            edge = {
-                "source": src,
-                "target": tgt,
+            edges.append({
+                "source": str(rec["source"]),
+                "target": str(rec["target"]),
                 "type": rec["type"],
                 "predicate": rec["predicate"] or "",
                 "description": rec["description"] or "",
@@ -525,17 +492,54 @@ def get_full_graph(
                 "created_at": str(rec["created_at"]) if rec["created_at"] else "",
                 "timestamp": rec["timestamp"] or "",
                 "run_id": rec["run_id"] or ""
-            }
-            edges.append(edge)
+            })
+            visible_node_ids.add(str(rec["source"]))
+            visible_node_ids.add(str(rec["target"]))
 
-    total_nodes = get_node_count(workspace)
+        # 2. Fetch Nodes - filter to only those in the edges if run_id is active, 
+        # or all workspace nodes if showing global nexus.
+        if run_id:
+            node_query = """
+                MATCH (n {workspace: $workspace})
+                WHERE elementId(n) IN $node_ids
+                RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
+                       n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type,
+                       n.centrality AS centrality
+            """
+            node_result = session.run(node_query, workspace=workspace, node_ids=list(visible_node_ids))
+        else:
+            node_query = """
+                MATCH (n {workspace: $workspace})
+                WHERE n:Concept OR n:Source
+                RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
+                       n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type,
+                       n.centrality AS centrality
+            """
+            if not show_all and page is None:
+                 node_query += f" LIMIT {page_size}"
+            elif page is not None:
+                 node_query += f" SKIP {page * page_size} LIMIT {page_size}"
+            
+            node_result = session.run(node_query, workspace=workspace)
+
+        nodes = []
+        for rec in node_result:
+            nodes.append({
+                "id": str(rec["id"]),
+                "name": rec["name"],
+                "labels": rec["labels"],
+                "domain": rec["domain"] or "",
+                "created_at": str(rec["created_at"]) if rec["created_at"] else "",
+                "node_type": rec["node_type"] or "Concept",
+                "centrality": rec["centrality"] or 0
+            })
+
     return {
         "nodes": nodes,
         "edges": edges,
-        "total_nodes": total_nodes,
+        "total_nodes": len(nodes),
         "page": page,
-        "page_size": page_size,
-        "has_more": (page is not None and len(nodes) == page_size)
+        "page_size": page_size
     }
 
 
@@ -688,7 +692,8 @@ def create_synthesis_run(
     workspace: str,
     files: List[str],
     version: str = "1.0.0",
-    artifact_path: str = ""
+    artifact_path: str = "",
+    name: Optional[str] = None
 ) -> dict:
     """Create a new SynthesisRun node with metadata."""
     with write_session() as session:
@@ -701,11 +706,44 @@ def create_synthesis_run(
                 r.files = $files,
                 r.version = $version,
                 r.artifact_path = $artifact_path,
+                r.name = $name,
                 r.created_at = datetime()
         """, run_id=run_id, pk=partition_key, model=model,
              workspace=workspace, files=files, version=version,
-             artifact_path=artifact_path)
+             artifact_path=artifact_path, name=name or f"Synthesis_{run_id[:8]}")
     return {"status": "run_created", "run_id": run_id}
+
+
+def create_code_scan(
+    scan_id: str,
+    workspace: str,
+    root_dir: str,
+    name: Optional[str] = None
+) -> dict:
+    """Create a new CodeScan node with metadata."""
+    with write_session() as session:
+        session.run("""
+            MERGE (s:CodeScan {scan_id: $scan_id})
+            ON CREATE SET 
+                s.workspace = $workspace,
+                s.root_dir = $root_dir,
+                s.name = $name,
+                s.created_at = datetime()
+        """, scan_id=scan_id, workspace=workspace, root_dir=root_dir, 
+             name=name or f"CodeScan_{scan_id[:8]}")
+    return {"status": "scan_created", "scan_id": scan_id}
+
+
+def get_code_scan_history(workspace: str = "default") -> List[dict]:
+    """List all code scans in a workspace."""
+    with read_session() as session:
+        result = session.run("""
+            MATCH (s:CodeScan {workspace: $workspace})
+            RETURN s.scan_id AS scan_id, s.name AS name, s.root_dir AS root_dir, 
+                   s.created_at AS created_at
+            ORDER BY s.created_at DESC
+        """, workspace=workspace)
+        return [dict(rec) for rec in result]
 
 
 def get_synthesis_history(workspace: str = "default") -> List[dict]:
@@ -714,8 +752,8 @@ def get_synthesis_history(workspace: str = "default") -> List[dict]:
         result = session.run("""
             MATCH (r:SynthesisRun {workspace: $workspace})
             RETURN r.run_id AS run_id, r.model AS model, r.timestamp AS timestamp, 
-                   r.files AS files, r.version AS version, r.created_at AS created_at,
-                   r.partition_key AS partition_key
+                   r.name AS name, r.files AS files, r.version AS version, 
+                   r.created_at AS created_at, r.partition_key AS partition_key
             ORDER BY r.created_at DESC
         """, workspace=workspace)
         return [dict(rec) for rec in result]

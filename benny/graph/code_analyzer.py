@@ -195,45 +195,58 @@ class CodeGraphAnalyzer:
                     # A more thorough implementation would resolve these paths
                     self.edges.append(CodeEdge(file_node_id, "external_dependency", "DEPENDS_ON", {"raw": content[node.start_byte:node.end_byte].decode("utf-8")}))
 
-    def save_to_neo4j(self, workspace: str):
-        """Sync the analyzed graph to Neo4j"""
-        from ..core.graph_db import write_session
+    def save_to_neo4j(self, workspace: str, snapshot_id: str, name: Optional[str] = None):
+        """Sync the analyzed graph to Neo4j as a unique snapshot"""
+        from ..core.graph_db import write_session, create_code_scan
         
+        # 1. Register the scan snapshot
+        create_code_scan(snapshot_id, workspace, str(self.workspace_root), name)
+
         with write_session() as session:
-            # 1. Clear existing code nodes for this workspace
-            # We ONLY delete nodes labeled CodeEntity to avoid deleting semantic Concepts
-            # that might have been manually enriched or came from docs.
-            session.run("MATCH (n:CodeEntity {workspace: $ws}) DETACH DELETE n", ws=workspace)
-            
             # 2. Add CodeEntity Nodes and link to Concepts
             for node in self.nodes.values():
                 session.run("""
-                    MERGE (n:CodeEntity {id: $id, workspace: $ws})
+                    MERGE (n:CodeEntity {id: $id, workspace: $ws, snapshot_id: $snap})
                     SET n.name = $name, n.type = $type, n.file_path = $path
                     WITH n
                     MERGE (c:Concept {name: $name, workspace: $ws})
                     ON CREATE SET c.node_type = 'Concept', c.created_at = datetime()
                     MERGE (n)-[:REPRESENTS]->(c)
-                """, id=node.id, ws=workspace, name=node.name, type=node.type, path=node.file_path)
+                """, id=node.id, ws=workspace, name=node.name, type=node.type, path=node.file_path, snap=snapshot_id)
 
             # 3. Add internal code relationships (DEFINES, CALLS, etc)
             for edge in self.edges:
                 session.run("""
-                    MATCH (s:CodeEntity {id: $src, workspace: $ws})
-                    MATCH (t:CodeEntity {id: $tgt, workspace: $ws})
+                    MATCH (s:CodeEntity {id: $src, workspace: $ws, snapshot_id: $snap})
+                    MATCH (t:CodeEntity {id: $tgt, workspace: $ws, snapshot_id: $snap})
                     MERGE (s)-[r:CODE_REL {type: $rel_type}]->(t)
-                """, src=edge.source, tgt=edge.target, ws=workspace, rel_type=edge.type)
+                    SET r.snapshot_id = $snap
+                """, src=edge.source, tgt=edge.target, ws=workspace, rel_type=edge.type, snap=snapshot_id)
 
-def get_workspace_graph(workspace_id: str):
+def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None):
     """Fetch the code graph from Neo4j in a format suited for Three.js"""
     from ..core.graph_db import read_session
     
     with read_session() as session:
+        # If no snapshot_id provided, find the most recent one for this workspace
+        if not snapshot_id:
+            latest_res = session.run("""
+                MATCH (s:CodeScan {workspace: $ws})
+                RETURN s.scan_id AS scan_id
+                ORDER BY s.created_at DESC
+                LIMIT 1
+            """, ws=workspace_id)
+            record = latest_res.single()
+            if record:
+                snapshot_id = record["scan_id"]
+            else:
+                return {"nodes": [], "edges": []}
+
         result = session.run("""
-            MATCH (n:CodeEntity {workspace: $ws})
-            OPTIONAL MATCH (n)-[r:CODE_REL]->(m:CodeEntity {workspace: $ws})
+            MATCH (n:CodeEntity {workspace: $ws, snapshot_id: $snap})
+            OPTIONAL MATCH (n)-[r:CODE_REL {snapshot_id: $snap}]->(m:CodeEntity {workspace: $ws, snapshot_id: $snap})
             RETURN n, r, m
-        """, ws=workspace_id)
+        """, ws=workspace_id, snap=snapshot_id)
         
         nodes = {}
         edges = []

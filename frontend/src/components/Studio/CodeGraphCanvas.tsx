@@ -155,10 +155,11 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
 // --- Main Canvas Component ---
 
 export function CodeGraphCanvas() {
-  const { currentWorkspace } = useWorkspaceStore();
-  const { codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen } = useWorkflowStore();
+  const { currentWorkspace, activeGraphId } = useWorkspaceStore();
+  const { codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode } = useWorkflowStore();
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedDir, setSelectedDir] = useState("/");
+  const [scanName, setScanName] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -179,12 +180,15 @@ export function CodeGraphCanvas() {
 
   const fetchGraph = async () => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}`, {
+      // Only fetch if a code snapshot is selected OR we are in default mode
+      // This prevents trying to fetch Knowledge Runs through the Code API
+      const snapshotParam = activeGraphId && activeGraphId !== 'neural_nexus' ? `&snapshot_id=${activeGraphId}` : '';
+      const resp = await fetch(`${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}`, {
          headers: { ...GOVERNANCE_HEADERS }
       });
       if (resp.ok) {
         const data = await resp.json();
-        if (data.nodes && data.nodes.length > 0) {
+        if (data.nodes) {
           setCodeGraph(data);
           setIsCodeGraphScanOpen(false);
         }
@@ -200,13 +204,18 @@ export function CodeGraphCanvas() {
       const resp = await fetch(`${API_BASE_URL}/api/graph/code/generate`, {
         method: "POST",
         headers: { ...GOVERNANCE_HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({ workspace: currentWorkspace, root_dir: selectedDir === "/" ? "" : selectedDir })
+        body: JSON.stringify({ 
+          workspace: currentWorkspace, 
+          root_dir: selectedDir === "/" ? "" : selectedDir,
+          name: scanName || undefined
+        })
       });
       if (resp.ok) {
         setTimeout(() => {
           fetchGraph();
           setIsGenerating(false);
           setIsCodeGraphScanOpen(false);
+          setScanName("");
         }, 3000);
       }
     } catch (e) {
@@ -260,11 +269,8 @@ export function CodeGraphCanvas() {
 
   useEffect(() => {
     fetchDirs();
-    if (!codeGraph) {
-      setIsCodeGraphScanOpen(true);
-      fetchGraph();
-    }
-  }, [currentWorkspace]);
+    fetchGraph();
+  }, [currentWorkspace, activeGraphId]);
 
 
   return (
@@ -326,17 +332,34 @@ export function CodeGraphCanvas() {
               </div>
 
               <div className="space-y-4">
-                 <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-sm">
-                    <Folder className="w-4 h-4 text-[#00FFFF]/60" />
-                    <select 
-                      value={selectedDir}
-                      onChange={(e) => setSelectedDir(e.target.value)}
-                      className="bg-transparent border-none outline-none text-[11px] font-mono text-white flex-1 cursor-pointer"
-                    >
-                      {directories.map(d => (
-                        <option key={d} value={d} className="bg-[#020408]">{d}</option>
-                      ))}
-                    </select>
+                 <div className="space-y-1">
+                    <div className="text-[8px] text-[#00FFFF]/40 uppercase tracking-widest pl-1">Target_Directory</div>
+                    <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-sm">
+                        <Folder className="w-4 h-4 text-[#00FFFF]/60" />
+                        <select 
+                        value={selectedDir}
+                        onChange={(e) => setSelectedDir(e.target.value)}
+                        className="bg-transparent border-none outline-none text-[11px] font-mono text-white flex-1 cursor-pointer"
+                        >
+                        {directories.map(d => (
+                            <option key={d} value={d} className="bg-[#020408]">{d}</option>
+                        ))}
+                        </select>
+                    </div>
+                 </div>
+
+                 <div className="space-y-1">
+                    <div className="text-[8px] text-[#00FFFF]/40 uppercase tracking-widest pl-1">Snapshot_Identity</div>
+                    <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-sm">
+                        <Terminal className="w-4 h-4 text-[#00FFFF]/60" />
+                        <input 
+                          type="text"
+                          placeholder="SCAN_NAME (SNAPSHOT_0x1F)"
+                          value={scanName}
+                          onChange={(e) => setScanName(e.target.value)}
+                          className="bg-transparent border-none outline-none text-[11px] font-mono text-white flex-1"
+                        />
+                    </div>
                  </div>
 
                  <button 
