@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import type { ExecutionEvent } from '../../hooks/useWorkflowStore';
+import { DynamicOverlay } from './DynamicOverlay';
 
 export default function ExecutionAuditHub() {
   // God-Mode synchronized audit stream
@@ -38,32 +39,18 @@ export default function ExecutionAuditHub() {
   );
 
   return (
-    <div className="execution-audit-hub" style={{
-      position: 'fixed',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      height: '30vh',
-      background: 'rgba(10, 10, 18, 0.95)',
-      backdropFilter: 'blur(16px)',
-      borderTop: '1px solid var(--border-active)',
-      zIndex: 1000,
-      display: 'flex',
-      flexDirection: 'column',
-      fontFamily: '"Fira Code", monospace',
-      boxShadow: '0 -10px 40px rgba(0,0,0,0.5)',
-      animation: 'slideUp 0.3s ease-out',
-    }}>
-      {/* Header / Toolbar */}
-      <div style={{
-        padding: '8px 16px',
-        background: 'rgba(255,255,255,0.03)',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        fontSize: '11px',
-      }}>
+    <DynamicOverlay 
+      title="EXECUTION_AUDIT"
+      defaultPosition={{ x: 100, y: 500 }}
+      defaultSize={{ width: 800, height: 300 }}
+      onClose={toggleAuditHub}
+      dockable={true}
+      defaultDocked={true}
+      className="!bg-transparent !shadow-none !border-none"
+    >
+      <div className="execution-audit-hub flex flex-col h-full bg-[#0a0a12]/95 backdrop-blur-xl border-t border-[#00FFFF] font-mono shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+        {/* Header / Toolbar */}
+        <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex items-center justify-between text-[11px]">
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ color: 'var(--primary)', fontWeight: 600 }}>TERMINAL :: EXECUTION_AUDIT</span>
           
@@ -92,10 +79,6 @@ export default function ExecutionAuditHub() {
             ))}
           </div>
         </div>
-
-        <button onClick={toggleAuditHub} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', opacity: 0.5 }}>
-          ✕
-        </button>
       </div>
 
       {/* Log Stream */}
@@ -127,19 +110,20 @@ export default function ExecutionAuditHub() {
             <EventItem event={event} />
           </div>
         ))}
-      </div>
+        </div>
 
-      <style>{`
-        @keyframes slideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-      `}</style>
-    </div>
+        <style>{`
+          @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+          }
+          @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+        `}</style>
+      </div>
+    </DynamicOverlay>
   );
 }
 

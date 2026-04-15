@@ -11,6 +11,8 @@ interface DynamicOverlayProps {
   onClose?: () => void;
   className?: string;
   id?: string;
+  dockable?: boolean;
+  defaultDocked?: boolean;
 }
 
 export function DynamicOverlay({ 
@@ -21,10 +23,13 @@ export function DynamicOverlay({
   minSize = { width: 250, height: 150 },
   onClose,
   className = "",
-  id
+  id,
+  dockable = false,
+  defaultDocked = true
 }: DynamicOverlayProps) {
   const [size, setSize] = useState(defaultSize);
   const [isResizing, setIsResizing] = useState(false);
+  const [isDocked, setIsDocked] = useState(defaultDocked);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Custom Resize Logic
@@ -54,6 +59,38 @@ export function DynamicOverlay({
     window.addEventListener('mouseup', onMouseUp);
   };
 
+  if (dockable && isDocked) {
+    return (
+      <div className={`h-full w-full flex flex-col overflow-hidden pointer-events-auto border-[#00FFFF]/20 bg-[#020408]/80 ${className}`} id={id}>
+         {/* Drag & Header Handle */}
+        <div className="h-10 px-4 flex justify-between items-center bg-white/5 border-b border-[#00FFFF]/10 group">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-black tracking-[0.2em] text-[#00FFFF] uppercase">
+              {title}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsDocked(false)}
+              className="text-[#00FFFF]/60 hover:text-[#00FFFF] transition-colors text-[10px] uppercase font-bold tracking-widest px-2"
+              title="Pop out"
+            >
+              Pop Out
+            </button>
+            {onClose && (
+              <button onClick={onClose} className="text-white/20 hover:text-[#FF5F1F] transition-colors p-1">
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-hidden relative">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       ref={containerRef}
@@ -81,12 +118,23 @@ export function DynamicOverlay({
           </span>
         </div>
         {onClose && (
-          <button 
-            onClick={onClose}
-            className="text-white/20 hover:text-[#FF5F1F] transition-colors p-1"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            {dockable && (
+              <button 
+                onClick={() => setIsDocked(true)}
+                className="text-[#00FFFF]/60 hover:text-[#00FFFF] transition-colors text-[10px] uppercase font-bold tracking-widest px-2"
+                title="Dock to side"
+              >
+                Dock
+              </button>
+            )}
+            <button 
+              onClick={onClose}
+              className="text-white/20 hover:text-[#FF5F1F] transition-colors p-1"
+            >
+              <X size={16} />
+            </button>
+          </div>
         )}
       </div>
 

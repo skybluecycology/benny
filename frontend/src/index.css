@@ -1,19 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
 
 /* ----------------------------------------------------------------------------- 
    CSS Variables - Color Palette & Tokens
    ----------------------------------------------------------------------------- */
+@theme {
+  --color-obsidian: #020408;
+  --color-panel-v2: rgba(2, 4, 8, 0.4);
+  
+  --color-electric-cyan: #00FFFF;
+  --color-phosphor-orange: #FF5F1F;
+  --color-bios-green: #39FF14;
+  --color-synaptic-purple: #c084fc;
+}
+
 :root {
   /* Obsidian Theme Core */
-  --bg-obsidian: #020408;
-  --bg-panel-v2: rgba(2, 4, 8, 0.4);
+  --bg-obsidian: var(--color-obsidian);
+  --bg-panel-v2: var(--color-panel-v2);
   
   /* Neon Palette */
-  --electric-cyan: #00FFFF;
-  --phosphor-orange: #FF5F1F;
-  --bios-green: #39FF14;
-  --synaptic-purple: #c084fc;
+  --electric-cyan: var(--color-electric-cyan);
+  --phosphor-orange: var(--color-phosphor-orange);
+  --bios-green: var(--color-bios-green);
+  --synaptic-purple: var(--color-synaptic-purple);
   
   /* Legacy/Support Tokens */
   --bg-canvas: var(--bg-obsidian);

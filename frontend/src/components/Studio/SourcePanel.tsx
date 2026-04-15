@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Upload, File, FileText, Trash2, Loader, Download, Terminal, Link, Book } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
@@ -28,35 +29,31 @@ export default function DataManagementPanel() {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Poll for tasks when ingesting or when showLogs is true
+  const { data: logsData } = useQuery({
+    queryKey: ['ragLogs', currentWorkspace],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/rag/logs?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      return res.json();
+    },
+    refetchInterval: (query) => (ingesting || showLogs) ? 1000 : false,
+    enabled: ingesting || showLogs
+  });
+
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (ingesting || showLogs) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/rag/logs?workspace=${currentWorkspace}`, {
-            headers: { ...GOVERNANCE_HEADERS }
-          });
-          const data = await res.json();
-          const tasks = data.tasks || [];
-          setActiveTasks(tasks);
-          
-          // If all tasks are completed, eventually stop ingesting state
-          const isAnyRunning = tasks.some((t: any) => t.status === 'running');
-          if (!isAnyRunning && ingesting) {
-            setIngesting(false);
-            fetchIndexedStatus();
-          }
-          
-          logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        } catch (e) {
-          console.error('Failed to fetch logs', e);
-        }
-      }, 1000);
-    } else {
+    if (logsData?.tasks) {
+      setActiveTasks(logsData.tasks);
+      const isAnyRunning = logsData.tasks.some((t: any) => t.status === 'running');
+      if (!isAnyRunning && ingesting) {
+        setIngesting(false);
+        fetchIndexedStatus();
+      }
+      logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (!ingesting && !showLogs) {
       setActiveTasks([]);
     }
-    return () => clearInterval(interval);
-  }, [ingesting, showLogs, currentWorkspace]);
+  }, [logsData, ingesting, showLogs]);
 
   // Refresh files when workspace changes
   useEffect(() => {

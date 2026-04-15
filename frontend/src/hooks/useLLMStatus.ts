@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../constants';
 
 interface ProviderStatus {
@@ -12,62 +12,50 @@ interface ProviderStatus {
 }
 
 export function useLLMStatus(pollInterval: number = 10000) {
-  const [providers, setProviders] = useState<Record<string, ProviderStatus>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const fetchStatus = useCallback(async () => {
-    try {
+  const { data: providers = {}, isLoading: loading, error, refetch: refresh } = useQuery({
+    queryKey: ['llmStatus'],
+    queryFn: async (): Promise<Record<string, ProviderStatus>> => {
       const resp = await fetch(`${API_BASE_URL}/api/llm/status`, {
         headers: { ...GOVERNANCE_HEADERS }
       });
-      if (!resp.ok) throw new Error('Failed to fetch status');
-      const data = await resp.json();
-      setProviders(data);
-      setError(null);
-    } catch (e) {
-      setError('API not available');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      if (!resp.ok) throw new Error('API not available');
+      return resp.json();
+    },
+    refetchInterval: pollInterval,
+  });
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval]);
-
-  const startProvider = async (provider: string) => {
-    try {
+  const startMutation = useMutation({
+    mutationFn: async (provider: string) => {
       await fetch(`${API_BASE_URL}/api/llm/${provider}/start`, { 
         method: 'POST',
         headers: { ...GOVERNANCE_HEADERS }
       });
-      setTimeout(fetchStatus, 2000);
-    } catch (e) {
-      console.error('Failed to start provider:', e);
+    },
+    onSuccess: () => {
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['llmStatus'] }), 2000);
     }
-  };
+  });
 
-  const stopProvider = async (provider: string) => {
-    try {
+  const stopMutation = useMutation({
+    mutationFn: async (provider: string) => {
       await fetch(`${API_BASE_URL}/api/llm/${provider}/stop`, { 
         method: 'POST',
         headers: { ...GOVERNANCE_HEADERS }
       });
-      setTimeout(fetchStatus, 1000);
-    } catch (e) {
-      console.error('Failed to stop provider:', e);
+    },
+    onSuccess: () => {
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['llmStatus'] }), 1000);
     }
-  };
+  });
 
   return {
     providers,
     loading,
-    error,
-    refresh: fetchStatus,
-    startProvider,
-    stopProvider,
+    error: error ? error.message : null,
+    refresh,
+    startProvider: (provider: string) => startMutation.mutate(provider),
+    stopProvider: (provider: string) => stopMutation.mutate(provider),
   };
 }

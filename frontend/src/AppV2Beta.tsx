@@ -13,6 +13,7 @@ import { V2ChatOverlay } from './components/Studio/V2ChatOverlay';
 import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
 import V2GraphSelector from './components/Studio/V2GraphSelector';
+import { HybridLayout } from './components/Studio/HybridLayout';
 
 export default function AppV2Beta() {
   const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
@@ -24,51 +25,53 @@ export default function AppV2Beta() {
     <div className="v2-root obsidian-theme absolute inset-0 overflow-hidden" data-ui-version="v2">
       <div className="scanline z-50 pointer-events-none" />
       
-      {/* Background Canvas Layer */}
-      <main className="v2-main-content absolute inset-0 z-0">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={viewMode}
-            initial={{ scale: 1.1, opacity: 0, filter: 'blur(10px)' }}
-            animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
-            exit={{ scale: 0.9, opacity: 0, filter: 'blur(20px)' }}
-            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-            className="w-full h-full"
-          >
-            {viewMode === 'swarm' && <SwarmCanvas3D />}
-            {viewMode === 'knowledge' && <SynopticWeb />}
-            {viewMode === 'marketplace' && <MarketplaceV2 />}
-            {viewMode === 'llm' && <V2LLMOverlay onClose={() => setViewMode('swarm')} />}
-            {viewMode === 'graph' && <CodeGraphCanvas />}
-          </motion.div>
-        </AnimatePresence>
-        
-        <div className="z-30 pointer-events-none absolute inset-0">
-           <OmniDialog />
-        </div>
-      </main>
-
-      {/* Floating HUD Layer */}
-      <V2GraphSelector />
-      
-      <GodModeHUD 
-        onViewChange={setViewMode} 
-        currentView={viewMode} 
-        onToggleChat={() => setIsChatOpen(!isChatOpen)}
-        isChatOpen={isChatOpen}
+      <HybridLayout
+        canvas={
+          <main className="v2-main-content absolute inset-0 z-0">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={viewMode}
+                initial={{ scale: 1.1, opacity: 0, filter: 'blur(10px)' }}
+                animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
+                exit={{ scale: 0.9, opacity: 0, filter: 'blur(20px)' }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full h-full"
+              >
+                {viewMode === 'swarm' && <SwarmCanvas3D />}
+                {viewMode === 'knowledge' && <SynopticWeb />}
+                {viewMode === 'marketplace' && <MarketplaceV2 />}
+                {viewMode === 'llm' && <V2LLMOverlay onClose={() => setViewMode('swarm')} />}
+                {viewMode === 'graph' && <CodeGraphCanvas />}
+              </motion.div>
+            </AnimatePresence>
+            
+            <div className="z-30 pointer-events-none absolute inset-0">
+               <OmniDialog />
+            </div>
+            
+            {/* Floating HUD controls */}
+            <V2GraphSelector />
+            <GodModeHUD 
+              onViewChange={setViewMode} 
+              currentView={viewMode} 
+              onToggleChat={() => setIsChatOpen(!isChatOpen)}
+              isChatOpen={isChatOpen}
+            />
+          </main>
+        }
+        rightPanel={
+          <AnimatePresence>
+            {isChatOpen && (
+              <V2ChatOverlay onClose={() => setIsChatOpen(false)} />
+            )}
+          </AnimatePresence>
+        }
+        bottomPanel={
+          <ErrorBoundary name="AuditHub">
+            <ExecutionAuditHub />
+          </ErrorBoundary>
+        }
       />
-
-      {/* Overlays */}
-      <AnimatePresence>
-        {isChatOpen && (
-          <V2ChatOverlay onClose={() => setIsChatOpen(false)} />
-        )}
-      </AnimatePresence>
-
-      {/* Global Observability Overlay */}
-      <ErrorBoundary name="AuditHub">
-        <ExecutionAuditHub />
-      </ErrorBoundary>
     </div>
   );
 }
