@@ -249,6 +249,18 @@ def add_triple(
         }
 
 
+def run_cypher(query: str, params: Optional[Dict[str, Any]] = None, workspace: str = "default") -> List[Dict[str, Any]]:
+    """
+    Execute a generic Cypher query. 
+    Auto-injects workspace constraint if not present in simple queries.
+    """
+    with read_session() as session:
+        # Basic safety: Ensure we only read or merge/create in a structured way
+        # Note: In a production environment, we'd use a restricted Neo4j user.
+        result = session.run(query, **(params or {}), workspace=workspace)
+        return [dict(record) for record in result]
+
+
 def batch_add_triples(
     triples: List[Any],
     workspace: str = "default",

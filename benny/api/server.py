@@ -51,6 +51,15 @@ async def lifespan(app):
         print("Neo4j schema initialized")
     except Exception as e:
         print(f"Neo4j not available: {e}")
+    
+    # Initialize Security Manifests
+    try:
+        from benny.governance.permission_manifest import register_builtin_manifests
+        register_builtin_manifests()
+        print("✓ Security manifests initialized")
+    except Exception as e:
+        print(f"Failed to initialize security manifests: {e}")
+        
     yield
     # Shutdown
     try:

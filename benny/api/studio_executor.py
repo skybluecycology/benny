@@ -32,6 +32,7 @@ from ..core.task_manager import task_manager
 from ..core.workspace import get_workspace_path
 from ..tools.knowledge import get_chromadb_client
 from ..core.event_bus import event_bus
+from ..core.reasoning import extract_reasoning, format_combined_output
 
 router = APIRouter()
 
@@ -268,7 +269,7 @@ async def execute_data_node(node: StudioNode, context: Dict, workspace: str) -> 
     return {"error": f"Unknown data operation: {operation}"}
 
 
-async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_id: Optional[str] = None) -> Dict:
+async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_id: Optional[str] = None, agent_id: str = "default") -> Dict:
     """
     Execute an LLM Agent node with tool-calling capabilities.
     The agent receives attached skills and autonomously decides to call them.
@@ -395,16 +396,35 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_
                         args = {}
 
                     # Run the skill via registry
-                    result_str = registry.execute_skill(func_name, workspace, **args)
+                    result_str = registry.execute_skill(
+                        func_name, 
+                        workspace, 
+                        agent_role="executor", 
+                        agent_id=agent_id, 
+                        **args
+                    )
+                    
+                    # Enhanced Security/Failure Logging
+                    is_success = True
+                    error_msg = None
+                    if "Permission denied" in result_str or "SECURITY_PERMISSION_VIOLATION" in result_str:
+                        logging.error(f"❌ Tool REJECTED for agent '{agent_id}': {result_str}")
+                        is_success = False
+                        error_msg = result_str
+                    elif result_str.startswith("❌"):
+                        logging.warning(f"⚠️ Tool Error ({func_name}): {result_str}")
+                        is_success = False
+                        error_msg = result_str
+
                     executed_tools.append({"name": func_name, "args": args})
 
-                    # Track tool execution in audit log
                     if run_id:
                         track_tool_execution(
                             parent_run_id=run_id,
                             tool_name=func_name,
-                            tool_args=args, # Refactored to tool_args
-                            success=True,
+                            tool_args=args,
+                            success=is_success,
+                            error_message=error_msg,
                             parent_job_name="studio_workflow"
                         )
 
@@ -420,9 +440,26 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_
                 continue
 
             # If no tool calls, this is the final answer
-            answer = message.get("content", "")
+            answer_raw = message.get("content", "")
+            
+            # Extract and format reasoning
+            answer_body, reasoning = extract_reasoning(answer_raw)
+            formatted_answer = format_combined_output(answer_body, reasoning)
+            
+            # Log to AER if reasoning exists
+            if reasoning and run_id:
+                from ..core.task_manager import task_manager
+                task_manager.add_aer_entry(
+                    run_id,
+                    intent=f"Neural Graph Reasoning (Node: {node.id})",
+                    observation="Model generated internal monologue",
+                    inference=reasoning,
+                    nodeId=node.id
+                )
+
             return {
-                "response": answer,
+                "response": formatted_answer,
+                "reasoning_trace": reasoning,
                 "model": model_name,
                 "tokens": total_tokens,
                 "tool_executions": executed_tools
@@ -536,9 +573,9 @@ async def _run_workflow_background(
                 # Emit Completion Event
                 _emit_execution_event(run_id, "node_completed" if not has_error else "node_error", {
                     "nodeId": node.id,
-                    "output": str(output.get("response", output.get("message", "")))[:500],
+                    "output": str(output.get("response", output.get("message", "")))[:1000], # Increased limit for combined output
                     "error": output.get("error") if has_error else None,
-                    "reasoning": output.get("reasoning_trace") # Placeholder for AER
+                    "reasoning": output.get("reasoning_trace") # Unified AER field
                 })
 
                 node_results.append(NodeResult(

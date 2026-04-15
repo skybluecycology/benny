@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader, User, Bot, FileText, AlertCircle } from 'lucide-react';
+import { Send, Loader, User, Bot, FileText, AlertCircle, Share2, Zap } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -15,6 +15,7 @@ export const NotebookChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [chatMode, setChatMode] = useState<'semantic' | 'graph_agent'>('semantic');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -48,7 +49,8 @@ export const NotebookChat: React.FC = () => {
           workspace: currentWorkspace,
           selected_sources: selectedDocuments,
           provider: activeLLMProvider,
-          model: activeLLMModels[activeLLMProvider]
+          model: activeLLMModels[activeLLMProvider],
+          mode: chatMode
         })
       });
 
@@ -128,7 +130,7 @@ export const NotebookChat: React.FC = () => {
               {msg.isLoading ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Loader size={14} className="animate-spin" />
-                  <span>Synthesizing...</span>
+                  <span>{chatMode === 'graph_agent' ? 'Neural Reasoning...' : 'Synthesizing...'}</span>
                 </div>
               ) : (
                 msg.content
@@ -152,8 +154,64 @@ export const NotebookChat: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Mode Toggle Area */}
+      <div style={{ 
+        padding: '0 16px', 
+        marginTop: 'auto',
+        borderTop: '1px solid var(--border-color)', 
+        background: 'var(--bg-panel)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px'
+      }}>
+        <button 
+          onClick={() => setChatMode('semantic')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            fontSize: '11px',
+            fontWeight: 600,
+            background: chatMode === 'semantic' ? 'rgba(0, 163, 255, 0.1)' : 'transparent',
+            color: chatMode === 'semantic' ? 'var(--info-blue)' : 'var(--text-secondary)',
+            border: 'none',
+            borderBottom: chatMode === 'semantic' ? '2px solid var(--info-blue)' : '2px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Share2 size={12} />
+          SEMANTIC RAG
+        </button>
+        <button 
+          onClick={() => setChatMode('graph_agent')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            fontSize: '11px',
+            fontWeight: 600,
+            background: chatMode === 'graph_agent' ? 'rgba(165, 110, 255, 0.1)' : 'transparent',
+            color: chatMode === 'graph_agent' ? 'var(--branch-purple)' : 'var(--text-secondary)',
+            border: 'none',
+            borderBottom: chatMode === 'graph_agent' ? '2px solid var(--branch-purple)' : '2px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Zap size={12} />
+          NEURAL GRAPH AGENT
+        </button>
+      </div>
+
       {/* Input Area */}
-      <div className="chat-input-area" style={{ padding: '16px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-panel)' }}>
+      <div className="chat-input-area" style={{ padding: '16px', background: 'var(--bg-panel)' }}>
         <div style={{ display: 'flex', gap: '12px' }}>
           <input
             type="text"

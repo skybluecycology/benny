@@ -195,6 +195,11 @@ def build_system_prompt_augmentation(workspace: str) -> str:
             parts.append(f"FORBIDDEN: {'; '.join(rules.forbidden_actions)}")
         if rules.tool_usage_policies:
             parts.append(f"Tool Policies: {'; '.join(rules.tool_usage_policies)}")
+        
+    # Standardized Reasoning Instruction
+    parts.append("\n=== REASONING PROTOCOL ===")
+    parts.append("If you need to think, process, or plan before answering, wrap your internal monologue in <think> tags.")
+    parts.append("Output your final response outside these tags. Do not mention your thinking process in the final response unless requested.")
     
     if not parts:
         return ""

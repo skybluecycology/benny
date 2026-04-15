@@ -15,6 +15,7 @@ from ..tools.knowledge import get_chromadb_client
 from ..core.models import LOCAL_PROVIDERS
 from ..core.task_manager import task_manager
 from ..governance.lineage import track_workflow_start, track_workflow_complete, track_aer
+from ..governance.permission_manifest import register_manifest, create_ephemeral_manifest
 import uuid
 import json
 import logging
@@ -39,6 +40,7 @@ class QueryRequest(BaseModel):
     selected_sources: Optional[List[str]] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    mode: str = "semantic" # "semantic" or "graph_agent"
 
 class AdaptiveRAGRequest(BaseModel):
     query: str
@@ -272,9 +274,118 @@ async def query_rag(request: QueryRequest):
 
 @router.post("/rag/chat")
 async def chat_rag(request: QueryRequest):
-    """RAG-augmented chat for workspace documents"""
+    """RAG-augmented chat for workspace documents or Neural Graph Agent"""
     try:
-        # 1. Retrieve context
+        # Handle Graph Agent Mode
+        if request.mode == "graph_agent":
+            # 1. Load the System Workflow Definition
+            from .workflow_routes import workflow_storage
+            from .studio_executor import topological_sort, _run_workflow_background, StudioExecuteRequest
+            
+            wf_def = workflow_storage.get_workflow("System_GraphChatAgent")
+            if not wf_def:
+                 # Fallback/Safety: In case file is not found, we could return error 
+                 # but let's try to be robust. 
+                 raise HTTPException(404, "System_GraphChatAgent workflow definition not found.")
+
+            # 2. Trigger Workflow Execution
+            run_id = f"chat-agent-{uuid.uuid4().hex[:8]}"
+            
+            # Map workflow definition to request nodes/edges
+            nodes = wf_def.get("nodes", [])
+            edges = wf_def.get("edges", [])
+            
+            # Update the LLM node with the user's specific request and provider/model choice
+            for node in nodes:
+                if node.get("type") == "llm":
+                    if "config" not in node["data"]: node["data"]["config"] = {}
+                    if request.model:
+                        node["data"]["config"]["model"] = request.model
+            
+            from pydantic import TypeAdapter
+            from .studio_executor import StudioNode, StudioEdge
+            
+            pydantic_nodes = [StudioNode(**n) for n in nodes]
+            pydantic_edges = [StudioEdge(**e) for e in edges]
+            
+            execute_req = StudioExecuteRequest(
+                nodes=pydantic_nodes,
+                edges=pydantic_edges,
+                workspace=request.workspace,
+                message=request.query
+            )
+            
+            # Sort and Run
+            sorted_nodes = topological_sort(pydantic_nodes, pydantic_edges)
+            
+            # We run this synchronously for the chat endpoint to get the final answer
+            # but we still want the standard audit trail.
+            # However, _run_workflow_background is designed for fire-and-forget.
+            # Let's use a simpler execution for synchronous chat return while maintaining audit.
+            
+            # For simplicity in this implementation, we will manually run the nodes 
+            # or use the background task with an Event wait.
+            # Actually, let's just use the execution logic directly to wait for final_output.
+            
+            context = {"message": request.query, "workspace": request.workspace}
+            final_answer = ""
+            
+            # Security: Register ephemeral manifest for this specific chat agent run
+            # This allows the agent to use its assigned tools in a Least-Privilege scope
+            chat_manifest = create_ephemeral_manifest(run_id, ["query_graph", "search_kb", "read_file"])
+            register_manifest(chat_manifest)
+            logger.info(f"Registered ephemeral security manifest for Agent Run '{run_id}'")
+
+            # Initial track
+            track_workflow_start(run_id, "chat_graph_agent", request.workspace, inputs=[request.query])
+            task_manager.create_task(request.workspace, "chat_graph_agent", task_id=run_id)
+
+            from .studio_executor import execute_trigger_node, execute_llm_node, execute_data_node
+            
+            for node in sorted_nodes:
+                try:
+                    logger.info(f"Executing Agent Node: {node.id} ({node.type})")
+                    if node.type == "trigger":
+                        output = await execute_trigger_node(node, request.query, context)
+                    elif node.type == "llm":
+                        # Attach the run_id for auditing AND as agent_id for manifest lookup
+                        output = await execute_llm_node(node, context, request.workspace, run_id=run_id, agent_id=run_id)
+                        if output.get("response"):
+                            context["llm_output"] = output["response"]
+                            final_answer = output["response"]
+                    elif node.type == "data":
+                        # Support checking graph context optionally
+                        output = await execute_data_node(node, context, request.workspace)
+                    else:
+                        output = {"message": f"Skipping node type: {node.type}"}
+                        
+                    # Check for explicit errors returned by node handlers
+                    if output.get("error"):
+                        logger.error(f"Node {node.id} returned error: {output['error']}")
+                        final_answer = f"Agent execution stopped at node '{node.id}': {output['error']}"
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Agent Node {node.id} crashed: {e}", exc_info=True)
+                    final_answer = f"Error in agent reasoning at node '{node.id}': {str(e)}"
+                    break
+
+            track_workflow_complete(run_id, "chat_graph_agent", request.workspace, ["reasoning"], 0)
+            task_manager.update_task(run_id, status="completed" if final_answer else "failed", progress=100)
+
+            # Detail the failure if final_answer still empty
+            if not final_answer:
+                 final_answer = "The Neural Graph Agent failed to generate a response. This could be due to model connectivity issues or an empty graph. Please check your Forge workspace or diagnostics."
+
+            return {
+                "answer": final_answer,
+                "sources": ["Neural Graph", "Workspace Files"],
+                "query": request.query,
+                "mode": "graph_agent",
+                "run_id": run_id
+            }
+
+        # 1. Retrieve context (LEGACY MODE)
         client = get_chromadb_client(request.workspace)
         collection = client.get_or_create_collection("knowledge")
         

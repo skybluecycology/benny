@@ -134,6 +134,12 @@ def _create_default_policy() -> RBACPolicy:
                 allowed_roles=[AgentRole.VIEWER, AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.REVIEWER, AgentRole.ADMIN],
                 allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
             ),
+            # Neural Graph — executor and above (Planner and Admin have elevated access)
+            ToolPermission(
+                tool_id="query_graph",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
+            ),
         ],
         rate_limits={
             AgentRole.VIEWER: 30,

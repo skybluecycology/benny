@@ -49,6 +49,7 @@ from ..governance.permission_manifest import create_ephemeral_manifest, register
 from ..core.skill_registry import registry
 from ..core.task_manager import task_manager
 from ..core.event_bus import event_bus
+from ..core.reasoning import extract_reasoning
 
 
 
@@ -65,14 +66,8 @@ def parse_json_safe(text: str) -> Tuple[Dict[str, Any], str]:
     - Simple truncation
     - Trailing commas
     """
-    thinking = ""
-    # Extract think blocks (common in DeepSeek-R1 and similar reasoning models)
-    think_match = re.search(r'<think>(.*?)(?:</think>|$)', text, re.DOTALL)
-    if think_match:
-        thinking = think_match.group(1).strip()
-    
-    # Strip think blocks for JSON cleaning
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    # Extract and strip reasoning/think blocks
+    cleaned, thinking = extract_reasoning(text)
     
     # Remove markdown code fences
     if "```json" in cleaned:
@@ -646,12 +641,8 @@ Do this sparingly and only for significant knowledge gaps."""
             # Actually, call_model for executor usually returns the completion text.
             
             # Let's handle thinking block extraction directly if it's text
-            thinking = ""
-            think_match = re.search(r'<think>(.*?)(?:</think>|$)', response_text, re.DOTALL)
-            if think_match:
-                thinking = think_match.group(1).strip()
-            
-            final_content = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
+            # Extract and strip reasoning/think blocks
+            final_content, thinking = extract_reasoning(response_text)
             
             if thinking:
                 task_manager.add_aer_entry(

@@ -163,6 +163,15 @@ BUILTIN_SKILLS: List[Skill] = [
             SkillParameter("query", "string", "Pandas query string (e.g., 'amount > 100' or 'df.head(10)')"),
         ],
     ),
+    Skill(
+        id="query_graph",
+        name="Query Neural Graph",
+        description="Query the Neo4j knowledge and code graph using Cypher. Allows exploring code structure, dependencies, and semantic relations.",
+        category="knowledge",
+        parameters=[
+            SkillParameter("query", "string", "The Cypher query to execute"),
+        ],
+    ),
 ]
 
 
@@ -236,6 +245,15 @@ def _execute_query_csv(workspace: str, **kwargs) -> str:
     })
 
 
+def _execute_query_graph(workspace: str, **kwargs) -> str:
+    from ..core.graph_db import run_cypher
+    results = run_cypher(
+        query=kwargs.get("query", ""),
+        workspace=workspace
+    )
+    return json.dumps(results, indent=2, default=str)
+
+
 # Map skill IDs to their handler functions
 SKILL_HANDLERS: Dict[str, Callable] = {
     "search_kb": _execute_search_kb,
@@ -246,6 +264,7 @@ SKILL_HANDLERS: Dict[str, Callable] = {
     "list_files": _execute_list_files,
     "extract_pdf": _execute_extract_pdf,
     "query_csv": _execute_query_csv,
+    "query_graph": _execute_query_graph,
 }
 
 

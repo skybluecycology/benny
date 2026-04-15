@@ -3,6 +3,7 @@ Multi-Model Orchestration - LiteLLM integration with local/cloud providers
 """
 
 import os
+import httpx
 from typing import Optional, Dict, Any, List
 from litellm import completion
 import logging
@@ -235,22 +236,23 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         
         # Aggressive prefixing for LiteLLM compatibility
         # LiteLLM needs 'openai/' to trigger the OpenAI-compatible client for custom base_urls
-        if not config["model"].startswith("openai/") and provider in ["lemonade", "ollama", "fastflowlm", "lmstudio"]:
+        # BUT Lemonade is strict and doesn't want the prefix in the JSON body 'model' field.
+        if not config["model"].startswith("openai/") and provider in ["ollama", "fastflowlm", "lmstudio"]:
             model_core = config["model"]
-            # If the model name contains a specific localized path, extract the base name
-            # common for Lemonade/FastFlowLM model IDs
-            if "/" in model_core:
+            if "/" in model_core and not model_core.startswith("openai/"):
                  model_core = model_core.split("/")[-1]
             config["model"] = f"openai/{model_core}"
-            
+        elif provider == "lemonade":
+            # Lemonade prefers raw IDs
+            pass
+    
     # Fallback: if we defaulted to openai but have lemonade running, it might be that.
-    elif provider == "openai" and any(hint in model_id.lower() for hint in ["gguf", "flm"]):
+    elif provider == "openai" and any(hint in model_id.lower() for hint in ["gguf", "flm", "hybrid"]):
          config["provider"] = "lemonade"
          local_config = LOCAL_PROVIDERS["lemonade"]
          config["base_url"] = local_config["base_url"]
          config["api_key"] = local_config["api_key"]
-         if not config["model"].startswith("openai/"):
-            config["model"] = f"openai/{config['model']}"
+         # No prefix for lemonade
     
     return config
 
@@ -306,15 +308,32 @@ async def get_active_model(workspace_id: str = "default") -> str:
                         data = response.json()
                         models = data.get("data", [])
                         if models:
-                            # Return first available model with provider prefix
-                            model_id = models[0].get("id", models[0])
+                            # Selection Logic:
+                            # 1. Prioritize models with 'tool-calling' label AND size < 10GB
+                            # 2. Fallback to any 'tool-calling' model
+                            # 3. Fallback to first model
+                            suitable_models = [m for m in models if "tool-calling" in m.get("labels", [])]
+                            
+                            if suitable_models:
+                                # Try to find a small one first (< 10GB)
+                                small_suitable = [m for m in suitable_models if m.get("size", 0) < 10.0]
+                                if small_suitable:
+                                    best_model = small_suitable[0]
+                                else:
+                                    best_model = suitable_models[0]
+                            else:
+                                best_model = models[0]
+                            
+                            model_id = best_model.get("id", best_model)
                             result = f"{provider_name}/{model_id}"
                             print(f"✓ Auto-detected active provider {provider_name}: {result}")
                             return result
                 except Exception as e:
+                    print(f"DEBUG: Provider {provider_name} probe failed: {e}")
                     logging.debug(f"Provider {provider_name} not available: {e}")
                     continue
     except Exception as e:
+        print(f"DEBUG: Critical error in get_active_model: {e}")
         logger.error(f"Error probing providers: {e}")
     
     # Priority 3: Fallback to the first provider that we might have a preset for

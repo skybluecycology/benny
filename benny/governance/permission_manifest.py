@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import logging
+import sys
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from fnmatch import fnmatch
@@ -51,7 +52,7 @@ class PermissionManifest(BaseModel):
 def create_ephemeral_manifest(task_id: str, allowed_tools: List[str]) -> PermissionManifest:
     """Creates a temporary manifest for a specific task."""
     return PermissionManifest(
-        skill_id=f"task_{task_id}",
+        skill_id=task_id,
         declared_capabilities=[f"tool:{t}" for t in allowed_tools],
         # Restrict to workspace only
         allowed_path_patterns=["workspace/**"],
@@ -71,13 +72,15 @@ class ManifestViolation:
         return f"ManifestViolation({self.skill_id}: {self.violation_type} - {self.message})"
 
 
-# Global manifest registry
-_manifests: Dict[str, PermissionManifest] = {}
-
+# Global manifest registry — Shared across all module instances for security consistency
+if not hasattr(sys, '_benny_manifests'):
+    sys._benny_manifests = {}
+_manifests = sys._benny_manifests
 
 def register_manifest(manifest: PermissionManifest) -> None:
     """Register a permission manifest for a skill."""
     _manifests[manifest.skill_id] = manifest
+    logging.debug(f"[SEC] Registered manifest for key: {manifest.skill_id}")
 
 
 def get_manifest(skill_id: str) -> Optional[PermissionManifest]:
@@ -282,6 +285,12 @@ def register_builtin_manifests() -> None:
             skill_id="read_file",
             declared_capabilities=["file:read"],
             allowed_path_patterns=["workspace/**"],
+            network_access=False,
+            subprocess_access=False,
+        ),
+        PermissionManifest(
+            skill_id="query_graph",
+            declared_capabilities=["database:read"],
             network_access=False,
             subprocess_access=False,
         ),
