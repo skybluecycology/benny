@@ -113,6 +113,8 @@ class WorkspaceManifest(BaseModel):
     default_model: Optional[str] = Field(None, description="Primary model for this workspace")
     embedding_provider: str = Field(default="local", description="Provider for vector embeddings")
     governance_tags: List[str] = Field(default_factory=list, description="Audit and compliance tags")
+    exclude_patterns: List[str] = Field(default_factory=lambda: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.venv/**"], description="Glob patterns for graph exclusion")
+    deep_scan: bool = Field(default=True, description="Whether to perform deep symbol analysis")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary extension fields")
 
     # Synthesis engine overrides

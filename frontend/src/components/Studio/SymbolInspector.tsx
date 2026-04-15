@@ -12,8 +12,14 @@ import {
   Search,
   ChevronRight,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Target,
+  Code as CodeIcon,
+  X
 } from 'lucide-react';
+import Editor from '@monaco-editor/react';
+import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface InspectorProps {
   selection: {
@@ -24,16 +30,53 @@ interface InspectorProps {
 }
 
 export function SymbolInspector({ selection, onClose }: InspectorProps) {
+  const { currentWorkspace, setFocusPath, setActiveDocument } = useWorkspaceStore();
+  const [showCode, setShowCode] = React.useState(false);
+  const [codeContent, setCodeContent] = React.useState<string | null>(null);
+  const [loadingCode, setLoadingCode] = React.useState(false);
+
+  React.useEffect(() => {
+    setShowCode(false);
+    setCodeContent(null);
+  }, [selection]);
+
   if (!selection) return null;
 
   const { type, data } = selection;
+
+  const fetchCode = async () => {
+    if (!data.path || showCode) {
+      setShowCode(!showCode);
+      return;
+    }
+    
+    setLoadingCode(true);
+    setShowCode(true);
+    try {
+      // Logic to resolvesubdir based on path or default to data_in
+      const subdir = data.path.startsWith('data_out/') ? 'data_out' : 'data_in';
+      const cleanPath = data.path.replace('data_in/', '').replace('data_out/', '');
+      
+      const resp = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${subdir}/${cleanPath}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      if (resp.ok) {
+        const text = await resp.text();
+        setCodeContent(text);
+      }
+    } catch (e) {
+      console.error("Failed to fetch code", e);
+    } finally {
+      setLoadingCode(false);
+    }
+  };
 
   return (
     <motion.div
       initial={{ x: '100%' }}
       animate={{ x: 0 }}
       exit={{ x: '100%' }}
-      className="absolute top-24 bottom-24 right-0 w-[320px] bg-[#020408]/60 backdrop-blur-2xl border-l border-white/10 z-40 flex flex-col shadow-[-20px_0_40px_rgba(0,0,0,0.5)]"
+      className={`absolute top-24 bottom-24 right-0 ${showCode ? 'w-[800px]' : 'w-[320px]'} bg-[#020408]/60 backdrop-blur-2xl border-l border-white/10 z-40 flex flex-col shadow-[-20px_0_40px_rgba(0,0,0,0.5)] transition-all duration-500 ease-in-out`}
     >
       {/* Header */}
       <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/2">
@@ -124,13 +167,62 @@ export function SymbolInspector({ selection, onClose }: InspectorProps) {
            </div>
         </section>
 
+        {/* Code Preview Integration */}
+        {showCode && (
+           <section className="flex-1 min-h-[400px] flex flex-col space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-[9px] font-black text-[#00FFFF] tracking-[0.3em] uppercase">
+                    <CodeIcon size={10} /> Source_Bridge
+                </div>
+                <button onClick={() => setShowCode(false)} className="text-white/20 hover:text-white transition-all">
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="flex-1 rounded border border-white/5 overflow-hidden bg-black/40">
+                {loadingCode ? (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="w-4 h-4 border-2 border-[#00FFFF] border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <Editor
+                    height="100%"
+                    defaultLanguage="python"
+                    theme="vs-dark"
+                    value={codeContent || "// No source content available"}
+                    options={{
+                      readOnly: true,
+                      minimap: { enabled: false },
+                      fontSize: 12,
+                      fontFamily: 'JetBrains Mono, monospace',
+                      padding: { top: 20 },
+                      contextmenu: false
+                    }}
+                  />
+                )}
+              </div>
+           </section>
+        )}
+
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-white/5">
-         <button className="w-full h-10 btn-pill border-white/10 text-white/40 hover:text-white hover:border-white/40 text-[9px] font-black tracking-[0.2em] flex items-center justify-center gap-2 transition-all">
-            <ExternalLink size={12} /> OPEN_SOURCE_FILE
-         </button>
+      <div className="p-4 border-t border-white/5 space-y-2">
+         {type === 'node' && data.path && (
+           <button 
+             onClick={fetchCode}
+             className={`w-full h-10 btn-pill ${showCode ? 'bg-[#00FFFF] text-black' : 'bg-[#00FFFF]/10 border-[#00FFFF]/40 text-[#00FFFF]'} hover:bg-[#00FFFF]/20 text-[9px] font-black tracking-[0.2em] flex items-center justify-center gap-2 transition-all`}
+           >
+              <CodeIcon size={12} /> {showCode ? 'HIDE_SOURCE' : 'VIEW_SOURCE_BRIDGE'}
+           </button>
+         )}
+         {type === 'node' && (data.type === 'File' || (data.path && data.path.includes('/'))) && (
+           <button 
+             onClick={() => setFocusPath(data.path)}
+             className="w-full h-10 btn-pill bg-white/5 border border-white/10 text-white/60 hover:text-white text-[9px] font-black tracking-[0.2em] flex items-center justify-center gap-2 transition-all"
+           >
+              <Target size={12} /> SEMANTIC_FOCUS
+           </button>
+         )}
       </div>
 
     </motion.div>

@@ -21,11 +21,11 @@ interface WorkspaceState {
   fetchSynthesisHistory: () => Promise<void>;
   deleteRun: (runId: string) => Promise<boolean>;
   
-  // Graph Catalog & Selection
-  graphCatalog: Array<{ id: string, name: string, type: 'code' | 'knowledge', timestamp: string, is_global?: boolean }>;
-  activeGraphId: string | null;
-  setActiveGraphId: (id: string | null) => void;
   fetchGraphCatalog: () => Promise<void>;
+  
+  // Spatial Navigation
+  focusPath: string | null;
+  setFocusPath: (path: string | null) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -172,5 +172,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (error) {
       console.error('Failed to fetch graph catalog:', error);
     }
-  }
+  },
+
+  focusPath: null,
+  setFocusPath: (path) => set({ focusPath: path }),
 }));

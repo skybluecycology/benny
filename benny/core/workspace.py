@@ -177,7 +177,19 @@ def save_manifest(workspace_id: str, manifest: WorkspaceManifest) -> None:
     """Save the workspace manifest to YAML."""
     path = get_workspace_path(workspace_id) / "manifest.yaml"
     with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(manifest.dict(), f, sort_keys=False)
+        # Use model_dump for Pydantic v2 if manifest is a model
+        data = manifest.model_dump() if hasattr(manifest, "model_dump") else manifest.dict()
+        yaml.dump(data, f, sort_keys=False)
+
+
+def update_manifest(workspace_id: str, updates: Dict[str, Any]) -> WorkspaceManifest:
+    """Update specific fields in the manifest and save it."""
+    manifest = load_manifest(workspace_id)
+    for key, value in updates.items():
+        if hasattr(manifest, key):
+            setattr(manifest, key, value)
+    save_manifest(workspace_id, manifest)
+    return manifest
 
 
 def list_workspaces() -> List[dict]:

@@ -138,6 +138,12 @@ class CodeGraphGenerateRequest(BaseModel):
     name: Optional[str] = None
 
 
+class WorkspaceSettingsUpdateRequest(BaseModel):
+    workspace: str = "default"
+    exclude_patterns: Optional[List[str]] = None
+    deep_scan: Optional[bool] = None
+
+
 # =============================================================================
 # STATUS & SCHEMA
 # =============================================================================
@@ -333,10 +339,10 @@ async def get_recent_graph_updates(workspace: str = "default", seconds: int = 10
 # =============================================================================
 
 @router.get("/graph/code")
-async def fetch_code_graph(workspace: str = "default", snapshot_id: Optional[str] = None):
+async def fetch_code_graph(workspace: str = "default", snapshot_id: Optional[str] = None, path: Optional[str] = None):
     """Fetch the analyzed code graph for 3D visualization."""
     try:
-        return get_workspace_graph(workspace, snapshot_id=snapshot_id)
+        return get_workspace_graph(workspace, snapshot_id=snapshot_id, path_filter=path)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch code graph: {str(e)}")
 
@@ -346,12 +352,17 @@ async def generate_code_graph(request: CodeGraphGenerateRequest, background_task
     """Trigger a recursive tree-sitter scan of the workspace."""
     run_id = str(uuid.uuid4())
     
+    # Load manifest to check deep_scan setting
+    from ..core.workspace import load_manifest
+    manifest = load_manifest(request.workspace)
+    deep_scan = getattr(manifest, "deep_scan", True)
+
     def _run_analyzer():
         try:
             # We use the actual workspace path
             ws_path = get_workspace_path(request.workspace)
             analyzer = CodeGraphAnalyzer(str(ws_path))
-            analyzer.analyze_workspace(request.root_dir)
+            analyzer.analyze_workspace(request.root_dir, deep_scan=deep_scan)
             # Save as a distinct snapshot
             analyzer.save_to_neo4j(request.workspace, run_id, name=request.name)
             logger.info(f"Code graph snapshot generated for {request.workspace} (ID: {run_id})")
@@ -365,6 +376,26 @@ async def generate_code_graph(request: CodeGraphGenerateRequest, background_task
         "run_id": run_id,
         "message": "Neural code analysis started in background"
     }
+
+
+@router.post("/graph/workspace/settings")
+async def update_workspace_settings(request: WorkspaceSettingsUpdateRequest):
+    """Update workspace-specific analysis settings in manifest.yaml."""
+    try:
+        from ..core.workspace import update_manifest
+        updates = {}
+        if request.exclude_patterns is not None:
+            updates["exclude_patterns"] = request.exclude_patterns
+        if request.deep_scan is not None:
+            updates["deep_scan"] = request.deep_scan
+        
+        if not updates:
+            return {"status": "no_changes"}
+            
+        update_manifest(request.workspace, updates)
+        return {"status": "success", "updated": list(updates.keys())}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update settings: {str(e)}")
 
 
 @router.get("/graph/dirs")

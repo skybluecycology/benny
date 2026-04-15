@@ -1,12 +1,12 @@
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Text, Sphere, Box, Octahedron, Line, Float, MeshDistortMaterial, Html } from '@react-three/drei';
+import { OrbitControls, Stars, Text, Sphere, Box, Octahedron, Line, Float, MeshDistortMaterial, Html, CameraControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
-import { Folder, Play, RefreshCw, Layers, Filter, Terminal } from 'lucide-react';
+import { Folder, Play, RefreshCw, Layers, Filter, Terminal, ChevronRight, Home, ExternalLink } from 'lucide-react';
 import { SymbolInspector } from './SymbolInspector';
 
 // --- Visual Components ---
@@ -40,6 +40,7 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
 
   const getGeometry = () => {
     switch (type) {
+      case 'Folder': return <boxGeometry args={[0.7, 0.7, 0.7]} />; // Folder is slightly larger box
       case 'File': return <octahedronGeometry args={[0.5, 0]} />;
       case 'Class': return <boxGeometry args={[0.6, 0.6, 0.6]} />;
       case 'Interface': return <boxGeometry args={[0.5, 0.5, 0.5]} />;
@@ -52,6 +53,7 @@ function CodeSymbolNode({ position, name, type, isSelected, onClick }: CodeNodeP
     if (isSelected) return "#FFFFFF";
     if (hovered) return "#00FFFF";
     switch (type) {
+      case 'Folder': return "#FFD700"; // Gold for Folders
       case 'File': return "#00FFFF";
       case 'Class': return "#007ACC";
       case 'Interface': return "#39FF14";
@@ -203,7 +205,7 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
 // --- Main Canvas Component ---
 
 export function CodeGraphCanvas() {
-  const { currentWorkspace, activeGraphId } = useWorkspaceStore();
+  const { currentWorkspace, activeGraphId, focusPath, setFocusPath, setActiveDocument } = useWorkspaceStore();
   const { codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode } = useWorkflowStore();
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedDir, setSelectedDir] = useState("/");
@@ -211,6 +213,17 @@ export function CodeGraphCanvas() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const cameraControlsRef = useRef<CameraControls>(null);
+
+  const flyToNode = (pos: [number, number, number]) => {
+    if (cameraControlsRef.current) {
+      cameraControlsRef.current.setLookAt(
+        pos[0], pos[1] + 10, pos[2] + 20, // Camera pos
+        pos[0], pos[1], pos[2],           // Target pos
+        true                              // Transition
+      );
+    }
+  };
 
   const fetchDirs = async () => {
     try {
@@ -229,9 +242,10 @@ export function CodeGraphCanvas() {
   const fetchGraph = async () => {
     try {
       // Only fetch if a code snapshot is selected OR we are in default mode
-      // This prevents trying to fetch Knowledge Runs through the Code API
       const snapshotParam = activeGraphId && activeGraphId !== 'neural_nexus' ? `&snapshot_id=${activeGraphId}` : '';
-      const resp = await fetch(`${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}`, {
+      const pathParam = focusPath ? `&path=${focusPath}` : '';
+      
+      const resp = await fetch(`${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}${pathParam}`, {
          headers: { ...GOVERNANCE_HEADERS }
       });
       if (resp.ok) {
@@ -318,11 +332,36 @@ export function CodeGraphCanvas() {
   useEffect(() => {
     fetchDirs();
     fetchGraph();
-  }, [currentWorkspace, activeGraphId]);
+    // Reset camera on root
+    if (!focusPath && cameraControlsRef.current) {
+        cameraControlsRef.current.setLookAt(0, 20, 40, 0, 0, 0, true);
+    }
+  }, [currentWorkspace, activeGraphId, focusPath]);
 
 
   return (
     <div className="absolute inset-0 bg-[#020408]" onClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}>
+      
+      {/* Breadcrumbs */}
+      <div className="absolute top-24 left-12 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full">
+        <button 
+          onClick={() => setFocusPath(null)}
+          className={`p-1.5 rounded-full hover:bg-white/10 transition-all ${!focusPath ? 'text-[#00FFFF]' : 'text-white/40'}`}
+        >
+          <Home size={14} />
+        </button>
+        {focusPath && focusPath.split('/').filter(Boolean).map((part, i, arr) => (
+          <React.Fragment key={i}>
+            <ChevronRight size={12} className="text-white/20" />
+            <button 
+              onClick={() => setFocusPath(arr.slice(0, i + 1).join('/'))}
+              className={`text-[10px] font-mono uppercase tracking-widest px-2 py-1 rounded hover:bg-white/5 transition-all ${i === arr.length - 1 ? 'text-[#00FFFF] font-black' : 'text-white/60'}`}
+            >
+              {part}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
       
       {/* 3D Canvas */}
       <Canvas 
@@ -341,7 +380,15 @@ export function CodeGraphCanvas() {
             name={node.name}
             type={node.type}
             isSelected={selectedNodeId === node.id}
-            onClick={() => setSelectedNodeId(node.id)}
+            onClick={() => {
+              setSelectedNodeId(node.id);
+              if (node.type === 'Folder') {
+                 setFocusPath(node.id);
+                 flyToNode(node.pos);
+              } else {
+                 flyToNode(node.pos);
+              }
+            }}
           />
         ))}
 
@@ -358,7 +405,7 @@ export function CodeGraphCanvas() {
           />
         ))}
 
-        <OrbitControls enablePan enableZoom enableRotate />
+        <CameraControls ref={cameraControlsRef} makeDefault />
       </Canvas>
 
       {/* Overlays */}

@@ -6,6 +6,8 @@ import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as ts_ts
 import logging
+import pathspec
+from benny.core.workspace import load_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +96,48 @@ class CodeGraphAnalyzer:
         self.edges: List[CodeEdge] = []
         self.parsers: Dict[str, Parser] = {}
         
-        # Init parsers
         for ext, lang in LANGUAGES.items():
             parser = Parser(lang)
             self.parsers[ext] = parser
+            
+        self.ignore_patterns = self._load_ignore_patterns()
+
+    def _load_ignore_patterns(self) -> pathspec.PathSpec:
+        """Load patterns from manifest and .gitignore into a PathSpec object"""
+        patterns = [
+            ".git", "node_modules", "__pycache__",
+            "dist", "build", ".venv", "venv"
+        ]
+        
+        # 1. Try to load from manifest
+        try:
+            # convention: workspace/ID/...
+            parts = self.workspace_root.parts
+            if "workspace" in parts:
+                ws_idx = parts.index("workspace")
+                if len(parts) > ws_idx + 1:
+                    ws_id = parts[ws_idx + 1]
+                    manifest = load_manifest(ws_id)
+                    if hasattr(manifest, 'exclude_patterns'):
+                        patterns.extend(manifest.exclude_patterns)
+        except Exception:
+            pass
+
+        # 2. Try to load from .gitignore
+        gitignore_path = self.workspace_root / ".gitignore"
+        if gitignore_path.exists():
+            try:
+                with open(gitignore_path, "r") as f:
+                    patterns.extend(f.readlines())
+            except Exception:
+                pass
+                
+        return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
+
+    def _should_ignore(self, file_path: str) -> bool:
+        """Check if a path matches the pathspec ignore patterns"""
+        rel_path = os.path.relpath(file_path, self.workspace_root).replace("\\", "/")
+        return self.ignore_patterns.match_file(rel_path)
 
     def _get_node_id(self, file_path: str, name: str = None) -> str:
         rel_path = os.path.relpath(file_path, self.workspace_root)
@@ -105,28 +145,52 @@ class CodeGraphAnalyzer:
             return f"{rel_path}::{name}".replace("\\", "/")
         return rel_path.replace("\\", "/")
 
-    def analyze_workspace(self, sub_dir: str = "") -> Dict[str, Any]:
+    def analyze_workspace(self, sub_dir: str = "", deep_scan: bool = True) -> Dict[str, Any]:
         """Recursively analyze the workspace starting from sub_dir"""
         start_path = self.workspace_root / sub_dir
         if not start_path.exists():
             raise ValueError(f"Path does not exist: {start_path}")
 
-        for root, _, files in os.walk(start_path):
-            # Ignore hidden dirs and node_modules
-            if any(part.startswith('.') or part == 'node_modules' or part == '__pycache__' for part in Path(root).parts):
-                continue
+        for root, dirs, files in os.walk(start_path):
+            # Dynamic Ignore Check for Directories
+            dirs[:] = [d for d in dirs if not self._should_ignore(os.path.join(root, d))]
+
+            # Create Folder Node for 'root'
+            rel_root = os.path.relpath(root, self.workspace_root).replace("\\", "/")
+            if rel_root != ".":
+                if rel_root not in self.nodes:
+                    self.nodes[rel_root] = CodeNode(rel_root, os.path.basename(root), "Folder", rel_root)
+                
+                # Link Parent Folder -> Current Folder
+                parent_dir = os.path.dirname(rel_root)
+                if parent_dir and parent_dir != ".":
+                    if parent_dir not in self.nodes:
+                        self.nodes[parent_dir] = CodeNode(parent_dir, os.path.basename(parent_dir), "Folder", parent_dir)
+                    self.edges.append(CodeEdge(parent_dir, rel_root, "DEFINES"))
 
             for file in files:
+                full_path = os.path.join(root, file)
+                if self._should_ignore(full_path):
+                    continue
+                    
                 ext = os.path.splitext(file)[1].lower()
                 if ext in self.parsers:
-                    self._analyze_file(os.path.join(root, file), ext)
+                    file_node_id = self._analyze_file(full_path, ext, deep_scan=deep_scan)
+                    # Link Folder -> File
+                    if rel_root != "." and file_node_id:
+                        self.edges.append(CodeEdge(rel_root, file_node_id, "DEFINES"))
 
         return {
             "nodes": [vars(n) for n in self.nodes.values()],
             "edges": [vars(e) for e in self.edges]
         }
 
-    def _analyze_file(self, file_path: str, ext: str):
+        return {
+            "nodes": [vars(n) for n in self.nodes.values()],
+            "edges": [vars(e) for e in self.edges]
+        }
+
+    def _analyze_file(self, file_path: str, ext: str, deep_scan: bool = True) -> str:
         parser = self.parsers[ext]
         rel_path = os.path.relpath(file_path, self.workspace_root).replace("\\", "/")
         
@@ -134,6 +198,9 @@ class CodeGraphAnalyzer:
         file_node_id = self._get_node_id(file_path)
         if file_node_id not in self.nodes:
             self.nodes[file_node_id] = CodeNode(file_node_id, os.path.basename(file_path), "File", rel_path)
+
+        if not deep_scan:
+            return file_node_id
 
         with open(file_path, "rb") as f:
             content = f.read()
@@ -223,7 +290,7 @@ class CodeGraphAnalyzer:
                     SET r.snapshot_id = $snap
                 """, src=edge.source, tgt=edge.target, ws=workspace, rel_type=edge.type, snap=snapshot_id)
 
-def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None):
+def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None, path_filter: Optional[str] = None):
     """Fetch the code graph from Neo4j in a format suited for Three.js"""
     from ..core.graph_db import read_session
     
@@ -242,11 +309,16 @@ def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None):
             else:
                 return {"nodes": [], "edges": []}
 
-        result = session.run("""
+        # Base query with workspace and snapshot constraints
+        query = """
             MATCH (n:CodeEntity {workspace: $ws, snapshot_id: $snap})
+            WHERE ($path IS NULL OR n.file_path STARTS WITH $path)
             OPTIONAL MATCH (n)-[r:CODE_REL {snapshot_id: $snap}]->(m:CodeEntity {workspace: $ws, snapshot_id: $snap})
+            WHERE ($path IS NULL OR m.file_path STARTS WITH $path)
             RETURN n, r, m
-        """, ws=workspace_id, snap=snapshot_id)
+        """
+        
+        result = session.run(query, ws=workspace_id, snap=snapshot_id, path=path_filter)
         
         nodes = {}
         edges = []
