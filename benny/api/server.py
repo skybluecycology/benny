@@ -38,6 +38,7 @@ from .graph_routes import router as graph_router
 from .workspace_routes import router as workspace_router
 from .task_routes import router as task_router
 from .governance_routes import router as governance_router
+from .system_routes import router as system_router
 from ..a2a.server import router as a2a_router
 
 
@@ -59,6 +60,19 @@ async def lifespan(app):
         print("✓ Security manifests initialized")
     except Exception as e:
         print(f"Failed to initialize security manifests: {e}")
+
+    # Attach System Logging
+    try:
+        import logging
+        from benny.core.logging_service import system_logs
+        logging.getLogger().addHandler(system_logs)
+        logging.getLogger().setLevel(logging.INFO)
+        logging.info("Neural Nexus Kernel Initialized")
+        logging.info(f"Workspace context: {os.getenv('BENNY_WORKSPACE', 'default')}")
+        logging.info("System log collector active and streaming")
+        print("✓ System log collector active")
+    except Exception as e:
+        print(f"Failed to start log collector: {e}")
         
     yield
     # Shutdown
@@ -148,6 +162,7 @@ app.include_router(skill_router, prefix="/api", tags=["Skills"])
 app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
 app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace Settings"])
 app.include_router(governance_router, prefix="/api/governance", tags=["Security & Compliance"])
+app.include_router(system_router, prefix="/api/system", tags=["System Diagnostics"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
 
 

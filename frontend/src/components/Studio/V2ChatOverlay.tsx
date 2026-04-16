@@ -15,7 +15,7 @@ export function V2ChatOverlay({ onClose }: Props) {
       defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 500, y: 120 }}
       defaultSize={{ width: 450, height: 600 }}
       onClose={onClose}
-      dockable={true}
+      dockable={false}
     >
       <div className="h-full flex flex-col bg-[#020408]/40 h-full">
         <div className="flex-1 overflow-hidden">

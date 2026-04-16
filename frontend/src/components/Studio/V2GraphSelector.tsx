@@ -20,7 +20,7 @@ export default function V2GraphSelector() {
   const globalNexus = graphCatalog.find(g => g.is_global);
 
   return (
-    <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] pointer-events-auto">
+    <div className="fixed top-12 right-64 z-[100] pointer-events-auto">
       <motion.div 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

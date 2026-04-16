@@ -41,11 +41,11 @@ export default function ExecutionAuditHub() {
   return (
     <DynamicOverlay 
       title="EXECUTION_AUDIT"
-      defaultPosition={{ x: 100, y: 500 }}
-      defaultSize={{ width: 800, height: 300 }}
+      defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) / 2 - 450, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 400 }}
+      defaultSize={{ width: 900, height: 350 }}
       onClose={toggleAuditHub}
       dockable={true}
-      defaultDocked={true}
+      defaultDocked={false}
       className="!bg-transparent !shadow-none !border-none"
     >
       <div className="execution-audit-hub flex flex-col h-full bg-[#0a0a12]/95 backdrop-blur-xl border-t border-[#00FFFF] font-mono shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">

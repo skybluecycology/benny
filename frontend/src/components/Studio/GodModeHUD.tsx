@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 import V2WorkspaceSelector from './V2WorkspaceSelector';
 import { DynamicOverlay } from './DynamicOverlay';
 import { GraphManager } from './GraphManager';
@@ -37,9 +38,31 @@ function SonicWave({ active }: { active: boolean }) {
 function SynapticStream() {
   const executionEvents = useWorkflowStore((state) => state.executionEvents);
   const currentWorkspace = useWorkspaceStore((state) => state.currentWorkspace);
+  const [backendLogs, setBackendLogs] = useState<any[]>([]);
   
+  // Real-time backend log polling
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        const resp = await fetch(`${API_BASE_URL}/api/system/logs?limit=20`, {
+          headers: { ...GOVERNANCE_HEADERS }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setBackendLogs(data.logs || []);
+        }
+      } catch (e) {
+        // Fail silently to avoid HUD disruption
+      }
+    };
+    const interval = setInterval(fetchLogs, 2000);
+    fetchLogs();
+    return () => clearInterval(interval);
+  }, []);
+
   const stream = useMemo(() => {
-    const baseStream = executionEvents.slice(-15).map((event, i) => {
+    // 1. Process Swarm Events
+    const baseStream = executionEvents.slice(-10).map((event, i) => {
       let timestamp = '00:00:00';
       try {
         timestamp = typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString().split('T')[1].slice(0, -5);
@@ -54,13 +77,25 @@ function SynapticStream() {
 
       return {
         id: `evt-${i}`,
+        timestamp: event.timestamp,
         text: `[${timestamp}] >> 0x${addr} >> ${text}`,
         type: event.type.includes('error') ? 'warn' : event.type.includes('completed') ? 'success' : 'info'
       };
     });
+    // 2. Process Backend System Logs
+    const systemStream = backendLogs.map((log, i) => ({
+      id: `sys-${log.id || i}`,
+      timestamp: log.timestamp,
+      text: `[${log.timestamp.split('T')[1].split('.')[0]}] :: SYSTEM :: ${log.level} :: ${log.message}`,
+      type: log.level === 'ERROR' || log.level === 'CRITICAL' ? 'warn' : 'info',
+      source: 'backend'
+    }));
 
-    return baseStream;
-  }, [executionEvents, currentWorkspace]);
+    // Merge and sort by timestamp
+    return [...baseStream, ...systemStream]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .slice(-20);
+  }, [executionEvents, backendLogs, currentWorkspace]);
 
   return (
     <div className="flex flex-col justify-end h-full font-mono text-[9px] leading-relaxed tracking-wider overflow-y-auto custom-scrollbar p-4">
@@ -102,11 +137,11 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
   return (
     <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
       
-      {/* 1. Top-Left: System Diagnostics */}
+      {/* 1. Top-Left: System Diagnostics - Tiled Top-Left */}
       <DynamicOverlay 
         title="SYS_DIAGNOSTICS_C3" 
-        defaultPosition={{ x: 48, y: 48 }}
-        defaultSize={{ width: 384, height: 350 }}
+        defaultPosition={{ x: 32, y: 32 }}
+        defaultSize={{ width: 380, height: 320 }}
       >
         <div className="p-6 space-y-6">
           <div className="flex justify-between items-center mb-4">
@@ -218,11 +253,11 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
         </button>
       </div>
 
-      {/* 4. Bottom-Left: Security Protocol */}
+      {/* 4. Bottom-Left: Security Protocol - Tiled Bottom-Left */}
       <DynamicOverlay 
         title="SEC_AUDIT_LOG" 
-        defaultPosition={{ x: 48, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 500 }}
-        defaultSize={{ width: 384, height: 400 }}
+        defaultPosition={{ x: 32, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 360 }}
+        defaultSize={{ width: 380, height: 320 }}
       >
         <div className="p-6 h-full flex flex-col">
           <h2 className="glow-text-orange text-[11px] font-black mb-4 flex items-center gap-2 tracking-[0.3em] uppercase">
@@ -242,11 +277,11 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
         </div>
       </DynamicOverlay>
 
-      {/* 5. Bottom-Right: Synaptic Stream */}
+      {/* 5. Bottom-Right: Synaptic Stream - Tiled Bottom-Right */}
       <DynamicOverlay 
         title="SYNAPTIC_PULSE_STREAM" 
-        defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 600, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 650 }}
-        defaultSize={{ width: 550, height: 500 }}
+        defaultPosition={{ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 580, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 480 }}
+        defaultSize={{ width: 550, height: 440 }}
       >
         <div className="h-full flex flex-col">
           <div className="px-6 py-4 border-b border-[#00FFFF]/10 flex justify-between items-center bg-white/2">
