@@ -47,7 +47,8 @@ Given the following text, extract ALL meaningful knowledge triples in the form:
 Rules:
 - Subject and Object should be concise noun phrases (concepts, entities, processes).
 - Predicate should be a verb phrase describing the relationship.
-- Extract as many triples as you can find.  Be thorough.
+- Extract as many triples as you can find. Be thorough.
+- CROSS-LINKING: If the text describes a design decision, architecture, or pattern, try to link it to potential code symbols or files (e.g., "AuthenticationService", "schema.py").
 - If the text mentions a source document name, include triples that reference it.
 
 Return ONLY a JSON array of objects, like:
@@ -178,6 +179,27 @@ Be specific and insightful. Format as JSON:
 JSON:"""
 
 
+COMMUNITY_NAMING_PROMPT = """You are a topological expert.
+Given the following list of concepts and relationships discovered in a specific "Semantic Neighborhood" (community) of a knowledge graph, provide a concise, descriptive name for this community.
+
+COMMUNITY CONCEPTS:
+{concepts}
+
+GUIDELINES:
+1. The name should be exactly 2-4 words.
+2. It should capture the "essence" of the cluster (e.g., "Neural Execution Layer", "User Data Governance", "Asynchronous Messaging Patterns").
+3. Avoid generic names like "Group 1" or "System Cluster".
+
+Return ONLY a JSON object:
+{{
+  "community_name": "...",
+  "justification": "..."
+}}
+
+JSON:"""
+
+
+
 # =============================================================================
 # ADAPTIVE CHUNKING
 # =============================================================================
@@ -217,13 +239,24 @@ async def call_llm(
     model: Optional[str] = None,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
+    workspace: Optional[str] = None
 ) -> str:
     """
     Consolidated LLM call with retry and exponential backoff.
     Utilizes the core dispatcher for OpenAI, LiteLLM, and LiteRT.
     """
     cfg = config or SynthesisConfig()
+
+    # Priority 1: Use explicitly provided model
+    # Priority 2: Auto-resolve via active workspace manifest
+    # Priority 3: Fallback defaults
+    if not model and workspace:
+        try:
+            from ..core.models import get_active_model
+            model = await get_active_model(workspace)
+        except Exception:
+            pass
 
     # Resolve model string (e.g., "ollama/llama3")
     if model and "/" in model:
@@ -370,7 +403,9 @@ def filter_by_confidence(triples: List[KnowledgeTriple], min_confidence: float =
 def _validate_and_convert_triples(
     raw_triples: Any,
     section_title: str = "",
-    config: Optional[SynthesisConfig] = None
+    config: Optional[SynthesisConfig] = None,
+    model_id: str = "unknown",
+    strategy: str = "safe"
 ) -> List[KnowledgeTriple]:
     """Convert raw LLM JSON output into validated KnowledgeTriple models."""
     cfg = config or SynthesisConfig()
@@ -390,7 +425,9 @@ def _validate_and_convert_triples(
                     object_type=t.get("object_type", "Concept"),
                     citation=t.get("citation", ""),
                     confidence=float(t.get("confidence", 1.0)),
-                    section_title=section_title or t.get("section_title", "")
+                    section_title=section_title or t.get("section_title", ""),
+                    model_id=model_id,
+                    strategy=strategy
                 )
                 valid.append(triple)
             except Exception as e:
@@ -408,37 +445,78 @@ def _validate_and_convert_triples(
 
 async def extract_triples(
     text: str,
-    source_name: str = "",
-    provider: str = "lemonade",
-    model: str = None,
-    timeout: Optional[float] = None,
+    source_name: str = "unknown",
+    run_id: Optional[str] = None,
+    workspace: Optional[str] = "default",
     config: Optional[SynthesisConfig] = None,
-    run_id: Optional[str] = None
+    strategy: str = "safe"
 ) -> List[KnowledgeTriple]:
     """
     Extract knowledge triples from text using the configured LLM.
     Uses adaptive chunking instead of hardcoded truncation.
     """
     cfg = config or SynthesisConfig()
-    safe_text = adaptive_truncate(text, cfg.max_context_tokens)
-    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=safe_text)
-
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
-    raw_triples, thinking = _parse_json_from_llm(raw)
     
-    if thinking and run_id:
-        from ..core.task_manager import task_manager
-        task_manager.add_aer_entry(run_id, intent="Extracting knowledge triples", observation="Reasoning block detected", inference=thinking)
+    # Choose prompt
+    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=text[:10000]) # Adaptive limit for safety
+
+    try:
+        # Resolve model_id to track provenance
+        from ..core.models import get_active_model
+        resolved_model = await get_active_model(workspace)
+
+        # Pass workspace to ensure manifest-level model selection
+        raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg)
         
-    return _validate_and_convert_triples(raw_triples, config=cfg)
+        # Simple extraction of JSON block from LLM output
+        json_match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if not json_match:
+            logger.warning(f"No JSON array found in LLM response for {source_name}")
+            return []
+            
+        triples_data = json.loads(json_match.group(0))
+        return _validate_and_convert_triples(
+            triples_data, 
+            section_title=source_name, 
+            config=cfg,
+            model_id=resolved_model,
+            strategy=strategy
+        )
+        
+    except Exception as e:
+        logger.error(f"Extraction failed for {source_name}: {e}")
+        return []
+
+
+async def name_community(
+    concepts: List[str],
+    workspace: str = "default",
+    run_id: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Generate a concise name and justification for a semantic community.
+    """
+    prompt = COMMUNITY_NAMING_PROMPT.format(concepts=", ".join(concepts[:50]))
+    try:
+        raw = await call_llm(prompt, run_id=run_id, workspace=workspace)
+        data, thinking = _parse_json_from_llm(raw)
+        if isinstance(data, dict) and "community_name" in data:
+            return data
+        return {"community_name": f"Community {concepts[0][:10]}", "justification": "Fallback name"}
+    except Exception as e:
+        logger.error(f"Community naming failed: {e}")
+        return {"community_name": "Unknown Cluster", "justification": str(e)}
 
 
 async def extract_directed_triples_from_section(
     text: str,
     section_title: str,
     direction: str = "",
+    workspace: str = "default",
+    run_id: Optional[str] = None,
     provider: str = "lemonade",
     model: str = None,
+    strategy: str = "safe",
     inference_delay: float = 0.5,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None
@@ -465,18 +543,33 @@ async def extract_directed_triples_from_section(
         text=safe_text
     )
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id if 'run_id' in locals() else None)
-    # Wait, run_id is not always in locals here. Let's check config or pass it.
+    # Resolve model_id to track provenance
+    from ..core.models import get_active_model
+    resolved_model = await get_active_model(workspace)
+    
+    raw = await call_llm(
+        prompt, 
+        provider=provider, 
+        model=model or resolved_model, 
+        timeout=timeout, 
+        config=cfg, 
+        run_id=run_id
+    )
     
     raw_triples, thinking = _parse_json_from_llm(raw)
     
-    # Try to find a run_id for logging
-    actual_run_id = run_id if 'run_id' in locals() else None
-    if thinking and actual_run_id:
+    if thinking and run_id:
          from ..core.task_manager import task_manager
-         task_manager.add_aer_entry(actual_run_id, intent=f"Extracting section: {section_title}", observation="Reasoning detected", inference=thinking)
+         task_manager.add_aer_entry(run_id, intent=f"Extracting section: {section_title}", observation="Reasoning detected", inference=thinking)
 
-    return _validate_and_convert_triples(raw_triples, section_title=section_title, config=cfg)
+    return _validate_and_convert_triples(
+        raw_triples, 
+        section_title=section_title, 
+        config=cfg,
+        model_id=resolved_model,
+        strategy=strategy
+    )
+ 
 
 
 async def parallel_extract_triples(
@@ -815,3 +908,51 @@ async def compute_cluster_similarities(
 
     clusters.sort(key=lambda x: x["similarity"], reverse=True)
     return clusters
+
+
+# =============================================================================
+# C. LIBRARIAN - Synthesis Wiki Persistence (Karpathy-style)
+# =============================================================================
+
+async def save_concept_article(
+    workspace: str,
+    concept_name: str,
+    summary: str,
+    relationships: List[Dict[str, str]],
+    source_files: List[str]
+) -> str:
+    """
+    Generate and save a 'Rationale Hub' article as a Markdown file in .benny/wiki/.
+    This creates the permanent 'Compounding Artifact' record.
+    """
+    from ..core.workspace import get_workspace_path
+    
+    wiki_path = get_workspace_path(workspace) / ".benny" / "wiki"
+    wiki_path.mkdir(parents=True, exist_ok=True)
+    
+    filename = re.sub(r'[^a-zA-Z0-9]', '_', concept_name) + ".md"
+    file_path = wiki_path / filename
+    
+    # Format relationships for the wiki
+    rel_md = "\n".join([f"- **{r['predicate'].title()}**: {r['object']} ({r['object_type']})" for r in relationships])
+    sources_md = "\n".join([f"- {s}" for s in source_files])
+    
+    content = f"""# {concept_name}
+
+## 💡 Rationale Summary
+{summary}
+
+## 🔗 Semantic Connections (Knowledge Graph)
+{rel_md}
+
+## 📂 Source Context (Lineage)
+{sources_md}
+
+---
+*Generated by Benny Synthesis Engine. This is a Compounding Rationale Hub.*
+"""
+    
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content.strip())
+        
+    return str(file_path)

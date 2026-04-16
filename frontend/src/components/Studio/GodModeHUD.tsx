@@ -1,4 +1,7 @@
-import { AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw, File } from 'lucide-react';
+import { 
+  AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, 
+  Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw, File, BookOpen 
+} from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
@@ -6,6 +9,7 @@ import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import V2WorkspaceSelector from './V2WorkspaceSelector';
 import { DynamicOverlay } from './DynamicOverlay';
 import { GraphManager } from './GraphManager';
+import { WikiHub } from './WikiHub';
 
 function SonicWave({ active }: { active: boolean }) {
   return (
@@ -178,6 +182,15 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           <button onClick={() => onViewChange('graph')} className={`btn-pill ${currentView === 'graph' ? 'active' : ''}`}>
             <Share2 size={14} /> GRAPH
           </button>
+          <button 
+            onClick={() => {
+              const { setWikiHubOpen } = (useWorkflowStore.getState() as any);
+              setWikiHubOpen(true);
+            }} 
+            className="btn-pill hover:text-[#FF00FF] transition-all"
+          >
+            <BookOpen size={14} /> WIKI
+          </button>
           <button onClick={onToggleChat} className={`btn-pill-orange btn-pill ${isChatOpen ? 'active' : ''}`}>
             <MessageSquare size={14} /> COMMS
           </button>
@@ -274,6 +287,10 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
         {isGraphManagerOpen && (
           <GraphManager onClose={() => setIsGraphManagerOpen(false)} />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        <WikiHub />
       </AnimatePresence>
      </div>
   );

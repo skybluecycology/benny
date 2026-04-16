@@ -43,3 +43,6 @@ storage/
 
 # Logs
 *.log
+
+# Large Data Artifacts
+architecture/RAW_AST_BENNY.json

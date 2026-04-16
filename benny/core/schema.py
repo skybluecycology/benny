@@ -25,6 +25,8 @@ class KnowledgeTriple(BaseModel):
     citation: str = ""
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     section_title: str = ""
+    model_id: str = "unknown"
+    strategy: str = "safe" # safe, aggressive
 
     @field_validator("subject", "predicate", "object")
     @classmethod

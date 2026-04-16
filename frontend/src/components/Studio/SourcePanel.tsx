@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Upload, File, FileText, Trash2, Loader, Download, Terminal, Link, Book } from 'lucide-react';
+import { 
+  Upload, File, FileText, Trash2, Loader, Download, Terminal, Link, Book, 
+  ShieldCheck, Zap, Info, RefreshCw
+} from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -24,6 +27,9 @@ export default function DataManagementPanel() {
   const [activeTasks, setActiveTasks] = useState<any[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
+  const [ingestionStrategy, setIngestionStrategy] = useState<'safe' | 'aggressive'>('safe');
+  const [deepSynthesis, setDeepSynthesis] = useState(true);
+  const [correlationThreshold, setCorrelationThreshold] = useState(0.70);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -149,9 +155,11 @@ export default function DataManagementPanel() {
           body: JSON.stringify({ 
             workspace: currentWorkspace,
             files: uploadedCurrent,
-            batch_size: batchSize
+            batch_size: batchSize,
+            strategy: ingestionStrategy,
+            deep_synthesis: deepSynthesis,
+            correlation_threshold: correlationThreshold
           })
-
         });
         alert('Files uploaded and indexed successfully!');
       } catch (error) {
@@ -270,7 +278,8 @@ export default function DataManagementPanel() {
             body: JSON.stringify({ 
               workspace: currentWorkspace,
               files: [uploadedFile],
-              batch_size: batchSize
+              batch_size: batchSize,
+              strategy: ingestionStrategy
             })
           });
           alert('Gutenberg Book imported and indexed successfully!');
@@ -329,7 +338,10 @@ export default function DataManagementPanel() {
         body: JSON.stringify({ 
           workspace: currentWorkspace,
           files: Array.from(activeSources),
-          batch_size: batchSize
+          batch_size: batchSize,
+          strategy: ingestionStrategy,
+          deep_synthesis: deepSynthesis,
+          correlation_threshold: correlationThreshold
         })
       });
       alert(`Successfully indexed ${activeSources.size} file(s)!`);
@@ -338,6 +350,23 @@ export default function DataManagementPanel() {
     } catch (error) {
       console.error('Ingestion failed:', error);
       alert('Ingestion failed');
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const handleForceCorrelate = async () => {
+    setIngesting(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/rag/correlate?workspace=${currentWorkspace}&threshold=${correlationThreshold}`, {
+        method: 'POST',
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      const data = await resp.json();
+      alert(`Manual Correlation Suite finished!\nSafe Links: ${data.results?.safe_links}\nAggressive: ${data.results?.aggressive_links}`);
+    } catch (e) {
+      console.error(e);
+      alert('Correlation Suite failed');
     } finally {
       setIngesting(false);
     }
@@ -724,6 +753,72 @@ export default function DataManagementPanel() {
 
       {/* Ingest Button and Logs */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {/* Strategy Control */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+           <button 
+             onClick={() => setIngestionStrategy('safe')}
+             className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${ingestionStrategy === 'safe' ? 'bg-[#39FF14]/10 border-[#39FF14]/40 text-[#39FF14]' : 'bg-black/20 border-white/5 text-white/40'}`}
+             title="Safe Mode: Exact mapping and validated relationships only."
+           >
+              <ShieldCheck size={14} />
+              <div className="flex flex-col items-start leading-tight">
+                 <span className="text-[10px] font-bold">SAFE_MODE</span>
+                 <span className="text-[8px] opacity-60">Exact Correlations</span>
+              </div>
+           </button>
+           <button 
+             onClick={() => setIngestionStrategy('aggressive')}
+             className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${ingestionStrategy === 'aggressive' ? 'bg-[#FF00FF]/10 border-[#FF00FF]/40 text-[#FF00FF]' : 'bg-black/20 border-white/5 text-white/40'}`}
+             title="Aggressive: Uses semantic embedding and graph traversal for wider synthesis."
+           >
+              <Zap size={14} />
+              <div className="flex flex-col items-start leading-tight">
+                 <span className="text-[10px] font-bold">AGGRESSIVE</span>
+                 <span className="text-[8px] opacity-60">Semantic Inference</span>
+              </div>
+           </button>
+        </div>
+
+        {/* Deep Synthesis & Sensitivity Slider */}
+        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+               <div className="flex items-center gap-2">
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: deepSynthesis ? 'var(--primary)' : 'var(--text-muted)' }} />
+                  <span className="text-[10px] font-bold text-white/80 uppercase">Deep Synthesis Triple Extraction</span>
+               </div>
+               <button 
+                 onClick={() => setDeepSynthesis(!deepSynthesis)}
+                 className={`w-10 h-5 rounded-full transition-all relative ${deepSynthesis ? 'bg-var(--primary)' : 'bg-white/10'}`}
+                 style={{ backgroundColor: deepSynthesis ? '#8b5cf6' : 'rgba(255,255,255,0.1)' }}
+               >
+                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${deepSynthesis ? 'right-1' : 'left-1'}`} />
+               </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                   <span className="text-[10px] font-bold text-white/40 uppercase">Correlation Sensitivity</span>
+                   <span className="text-[10px] font-mono text-[#FF00FF]">{correlationThreshold.toFixed(2)}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.4" max="1.0" step="0.05"
+                  value={correlationThreshold}
+                  onChange={(e) => setCorrelationThreshold(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: '#FF00FF', height: '4px' }}
+                />
+            </div>
+
+            <button 
+              onClick={handleForceCorrelate}
+              className="btn btn-outline"
+              style={{ padding: '6px 12px', fontSize: '9px', fontWeight: 'bold', width: '100%', border: '1px solid rgba(255,0,255,0.2)', color: '#FF00FF' }}
+            >
+               <RefreshCw size={10} style={{ marginRight: '6px' }} />
+               REFINE MAPPING (Neural Spark)
+            </button>
+        </div>
+
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             className="btn btn-gradient"

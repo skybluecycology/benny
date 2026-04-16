@@ -3,6 +3,8 @@ export type ViewMode = 'swarm' | 'knowledge' | 'marketplace' | 'llm' | 'graph' |
 
 export interface UISlice {
   isAuditHubOpen: boolean;
+  isWikiHubOpen: boolean;
+  activeWikiConcept: string | null;
   uiVersion: UIVersion;
   playbackIndex: number | null;
   viewMode: ViewMode;
@@ -12,6 +14,8 @@ export interface UISlice {
 
   setAuditHubOpen: (isOpen: boolean) => void;
   toggleAuditHub: () => void;
+  setWikiHubOpen: (isOpen: boolean) => void;
+  setActiveWikiConcept: (concept: string | null) => void;
   setUIVersion: (version: UIVersion) => void;
   toggleUIVersion: () => void;
   setPlaybackIndex: (index: number | null) => void;
@@ -23,6 +27,8 @@ export interface UISlice {
 
 export const createUISlice = (set: any, get: any): UISlice => ({
   isAuditHubOpen: false,
+  isWikiHubOpen: false,
+  activeWikiConcept: null,
   uiVersion: 'v2',
   playbackIndex: null,
   viewMode: 'swarm',
@@ -32,6 +38,8 @@ export const createUISlice = (set: any, get: any): UISlice => ({
 
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
   toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
+  setWikiHubOpen: (isOpen) => set({ isWikiHubOpen: isOpen }),
+  setActiveWikiConcept: (concept) => set({ activeWikiConcept: concept }),
   setUIVersion: (version) => set({ uiVersion: version }),
   toggleUIVersion: () => set({ uiVersion: get().uiVersion === 'v1' ? 'v2' : 'v1' }),
   setPlaybackIndex: (index) => set({ playbackIndex: index }),

@@ -68,6 +68,42 @@ def write_session():
         session.close()
 
 
+def introspect_schema(workspace: str = "default") -> dict:
+    """
+    Inspect the live Neo4j schema to determine available labels, relationship types,
+    and the distribution of entity types within a workspace.
+    Used by SchemaAdapter to generate correct Cypher queries.
+    """
+    with read_session() as session:
+        # 1. All labels in the database
+        labels_result = session.run("CALL db.labels() YIELD label RETURN collect(label) as labels")
+        labels = labels_result.single()["labels"]
+
+        # 2. All relationship types
+        rel_result = session.run("CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) as types")
+        rel_types = rel_result.single()["types"]
+
+        # 3. Entity type distribution within this workspace
+        dist_result = session.run("""
+            MATCH (n {workspace: $workspace})
+            WITH labels(n) as label_set, n.type as type_prop
+            RETURN label_set, type_prop, count(*) as cnt
+            ORDER BY cnt DESC
+        """, workspace=workspace)
+
+        distribution = {}
+        for record in dist_result:
+            key = f"{record['label_set']}:{record['type_prop']}"
+            distribution[key] = record["cnt"]
+
+        return {
+            "labels": labels,
+            "relationship_types": rel_types,
+            "entity_type_distribution": distribution,
+            "workspace": workspace
+        }
+
+
 def verify_connectivity() -> dict:
     """Verify Neo4j is reachable and return server info."""
     from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -580,8 +616,9 @@ def get_full_graph(
                 "labels": rec["labels"],
                 "domain": rec["domain"] or "",
                 "created_at": str(rec["created_at"]) if rec["created_at"] else "",
-                "node_type": rec["node_type"] or "Concept",
-                "centrality": rec["centrality"] or 0
+                "node_type": rec["node_type"] or (rec["labels"][0] if rec["labels"] else "Concept"),
+                "centrality": rec["centrality"] or 0,
+                "community_id": rec.get("community_id")
             })
 
     return {

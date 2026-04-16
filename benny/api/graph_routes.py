@@ -365,6 +365,15 @@ async def generate_code_graph(request: CodeGraphGenerateRequest, background_task
             analyzer.analyze_workspace(request.root_dir, deep_scan=deep_scan)
             # Save as a distinct snapshot
             analyzer.save_to_neo4j(request.workspace, run_id, name=request.name)
+            
+            # --- PHASE 3: TOPOLOGICAL LOGIC (LPA Clustering) ---
+            try:
+                from ..graph.clustering_service import ClusteringService
+                ClusteringService.run_lpa_on_workspace(request.workspace)
+                logger.info(f"Clustering complete for {request.workspace}")
+            except Exception as ce:
+                logger.error(f"Clustering failed: {ce}")
+
             logger.info(f"Code graph snapshot generated for {request.workspace} (ID: {run_id})")
         except Exception as e:
             logger.error(f"Code graph generation failed: {e}", exc_info=True)

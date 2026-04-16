@@ -54,8 +54,8 @@ export function SymbolInspector({ selection, onClose }: InspectorProps) {
     setShowCode(true);
     try {
       // Logic to resolvesubdir based on path or default to data_in
-      const subdir = data.path.startsWith('data_out/') ? 'data_out' : 'data_in';
-      const cleanPath = data.path.replace('data_in/', '').replace('data_out/', '');
+      const subdir = data.path?.startsWith('data_out/') ? 'data_out' : 'data_in';
+      const cleanPath = data.path?.replace('data_in/', '').replace('data_out/', '') || '';
       
       const resp = await fetch(`${API_BASE_URL}/api/files/${currentWorkspace}/${subdir}/${cleanPath}`, {
         headers: { ...GOVERNANCE_HEADERS }
@@ -207,6 +207,18 @@ export function SymbolInspector({ selection, onClose }: InspectorProps) {
 
       {/* Footer */}
       <div className="p-4 border-t border-white/5 space-y-2">
+         {type === 'node' && data.type === 'Concept' && (
+           <button 
+             onClick={() => {
+                const { setWikiHubOpen, setActiveWikiConcept } = (useWorkflowStore.getState() as any);
+                setActiveWikiConcept(data.name);
+                setWikiHubOpen(true);
+             }}
+             className="w-full h-10 btn-pill bg-[#FF00FF]/10 border border-[#FF00FF]/40 text-[#FF00FF] hover:bg-[#FF00FF]/20 text-[9px] font-black tracking-[0.2em] flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(255,0,255,0.1)]"
+           >
+              <Zap size={12} /> VIEW_RATIONALE_HUB
+           </button>
+         )}
          {type === 'node' && data.path && (
            <button 
              onClick={fetchCode}

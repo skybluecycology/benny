@@ -34,6 +34,9 @@ class IngestRequest(BaseModel):
     notebook_id: Optional[str] = None
     batch_size: Optional[int] = 500
     run_id: Optional[str] = None # Optional existing run/nexus ID
+    deep_synthesis: bool = False # Whether to extract triples and run clustering
+    strategy: str = "safe" # Heuristic layer: 'safe' or 'aggressive'
+    correlation_threshold: float = 0.70 # Similarity threshold for aggressive mode
 
 
 
@@ -165,13 +168,81 @@ async def ingest_files(request: IngestRequest):
                         except Exception:
                             pass
                 
+                # 3. DEEP SYNTHESIS (Optional)
+                if request.deep_synthesis:
+                    try:
+                        from ..synthesis.engine import extract_triples
+                        from ..graph.triples import save_knowledge_triples
+                        
+                        track_aer(run_id, "rag_ingest", f"Deep Synthesis for {file_path.name}", "Extracting triples via LLM Engine")
+                        task_manager.update_task(run_id, metadata={"stage": "SYNTHESIZING", "current_file": file_path.name})
+                        
+                        # Process text in batches if very large, but for now we'll take top 10k chars
+                        sample_text = text[:10000] 
+                        triples = await extract_triples(
+                            sample_text, 
+                            source_name=file_path.name, 
+                            run_id=run_id, 
+                            workspace=request.workspace,
+                            strategy=request.strategy
+                        )
+                        
+                        if triples:
+                            await save_knowledge_triples(request.workspace, triples, file_path.name)
+                            track_aer(run_id, "rag_ingest", f"Synthesis complete for {file_path.name}", f"Extracted {len(triples)} triples")
+                            
+                            # 3b. Generate Librarian Wiki Article (Karpathy-style)
+                            try:
+                                from ..synthesis.engine import save_concept_article
+                                # Use the first few triples to identify the primary concept or use the filename
+                                primary_concept = file_path.stem
+                                summary_prompt = f"Summarize the core concepts of this document section in 3-4 sentences for a technical wiki:\n\n{sample_text[:2000]}"
+                                from ..synthesis.engine import call_llm
+                                summary = await call_llm(summary_prompt, run_id=run_id)
+                                
+                                wiki_file = await save_concept_article(
+                                    workspace=request.workspace,
+                                    concept_name=primary_concept,
+                                    summary=summary,
+                                    relationships=[t.model_dump() for t in triples[:10]],
+                                    source_files=[file_path.name]
+                                )
+                                track_aer(run_id, "rag_ingest", f"Wiki Generated", f"Saved Rationale Hub to {primary_concept}.md")
+                            except Exception as wiki_e:
+                                logger.error(f"Wiki generation error: {wiki_e}")
+                    except Exception as synth_e:
+                        logger.error(f"Deep Synthesis error: {synth_e}")
+                        track_aer(run_id, "rag_ingest", f"Synthesis failed for {file_path.name}", str(synth_e))
+
                 ingested.append({"file": file_path.name, "chunks": len(chunks)})
-                task_manager.update_task(run_id, progress=10 + int(90 * (idx+1) / len(file_paths)))
+                task_manager.update_task(run_id, progress=10 + int(80 * (idx+1) / len(file_paths)))
                 
             except Exception as e:
                 task_manager.add_aer_entry(run_id, "Error", f"Failed {file_path.name}: {str(e)}")
                 ingested.append({"file": file_path.name, "error": str(e)})
         
+        # 4. FINAL CLUSTERING & CORRELATION (if deep synthesis enabled)
+        if request.deep_synthesis:
+            try:
+                from ..graph.clustering_service import ClusteringService
+                from ..synthesis.correlation import run_full_correlation_suite
+                
+                track_aer(run_id, "rag_ingest", "Running Topological Clustering", "Community detection started (LPA)")
+                task_manager.update_task(run_id, metadata={"stage": "CLUSTERING"})
+                cluster_results = ClusteringService.run_lpa_on_workspace(request.workspace)
+                
+                track_aer(run_id, "rag_ingest", "Running Knowledge-to-Code Correlation", "Cross-linking Concepts and Symbols")
+                task_manager.update_task(run_id, metadata={"stage": "CORRELATING"})
+                correlation_results = await run_full_correlation_suite(request.workspace, threshold=request.correlation_threshold)
+                
+                track_aer(run_id, "rag_ingest", "Deep Processing complete", 
+                          f"Clusters: {cluster_results.get('communities_found', 0)}, " 
+                          f"Safe Links: {correlation_results.get('safe_links', 0)}, "
+                          f"Aggressive Links: {correlation_results.get('aggressive_links', 0)}")
+            except Exception as post_e:
+                logger.error(f"Post-processing error: {post_e}")
+ 
+
         task_manager.update_task(run_id, status="completed", progress=100, message="Ingestion finished successfully")
         try:
             track_workflow_complete(
@@ -250,12 +321,14 @@ async def get_indexing_manifest(workspace: str = "default"):
         all_data = collection.get(include=['metadatas'])
         
         indexed_sources = {} # source_name -> {chunk_count, last_indexed}
-        for meta in all_data['metadatas']:
-            src = meta.get('source')
-            if not src: continue
-            if src not in indexed_sources:
-                indexed_sources[src] = {"chunks": 0, "last_indexed": meta.get('timestamp')}
-            indexed_sources[src]["chunks"] += 1
+        if all_data.get('metadatas'):
+            for meta in all_data['metadatas']:
+                if meta is None: continue
+                src = meta.get('source')
+                if not src: continue
+                if src not in indexed_sources:
+                    indexed_sources[src] = {"chunks": 0, "last_indexed": meta.get('timestamp')}
+                indexed_sources[src]["chunks"] += 1
 
         # 2. Get disk files (Recursive scan focus on data_in and root)
         data_in_path = get_workspace_path(workspace, "data_in")
@@ -265,10 +338,12 @@ async def get_indexing_manifest(workspace: str = "default"):
         import os
         from ..core.workspace import get_workspace_path
         
-        # We scan data_in primarily, but also the workspace root for manuals
-        scan_paths = [get_workspace_path(workspace)]
-        
-        for base_path in scan_paths:
+        import os
+        for base_path_obj in scan_paths:
+            base_path = str(base_path_obj)
+            if not os.path.exists(base_path):
+                continue
+                
             for root, dirs, files in os.walk(base_path):
                 # Skip some folders
                 if "chromadb" in root or "__pycache__" in root or ".git" in root:
@@ -280,7 +355,8 @@ async def get_indexing_manifest(workspace: str = "default"):
                     if ext not in supported:
                         continue
                         
-                    rel_path = file_path.relative_to(base_path)
+                    # Use os.path.relpath for Windows resilience (handles c: vs C: issues)
+                    rel_path_str = os.path.relpath(str(file_path), base_path)
                     source_key = name # We often use just the filename as the source key
                     
                     status = "MISSING"
@@ -291,7 +367,7 @@ async def get_indexing_manifest(workspace: str = "default"):
                     
                     manifest.append({
                         "name": name,
-                        "path": str(rel_path),
+                        "path": rel_path_str.replace("\\", "/"),
                         "status": status,
                         "chunks": chunks,
                         "size": file_path.stat().st_size,
@@ -663,6 +739,51 @@ async def stream_chat_events(run_id: str):
 
 from fastapi import Response
 
+@router.get("/rag/wiki/articles")
+async def list_wiki_articles(workspace: str = "default"):
+    """List all Rationale Hub articles generated by synthesis."""
+    try:
+        from ..core.workspace import get_workspace_path
+        wiki_path = get_workspace_path(workspace) / ".benny" / "wiki"
+        
+        if not wiki_path.exists():
+            return {"articles": []}
+            
+        articles = []
+        for file in wiki_path.glob("*.md"):
+            articles.append({
+                "name": file.stem.replace("_", " "),
+                "filename": file.name,
+                "path": str(file),
+                "modified": file.stat().st_mtime
+            })
+            
+        return {"articles": sorted(articles, key=lambda x: x["modified"], reverse=True)}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list wiki: {str(e)}")
+
+@router.get("/rag/wiki/article/{filename}")
+async def get_wiki_article(filename: str, workspace: str = "default"):
+    """Get content of a specific Rationale Hub article."""
+    try:
+        from ..core.workspace import get_workspace_path
+        wiki_path = get_workspace_path(workspace) / ".benny" / "wiki"
+        file_path = wiki_path / filename
+        
+        if not file_path.exists():
+            raise HTTPException(404, "Article not found")
+            
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            
+        return {"content": content, "filename": filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read article: {str(e)}")
+
+from fastapi import Response
+
 @router.post("/rag/adaptive-query", response_model=AdaptiveRAGResponse)
 async def adaptive_rag_query(request: AdaptiveRAGRequest, response: Response):
     """
@@ -696,6 +817,21 @@ async def adaptive_rag_query(request: AdaptiveRAGRequest, response: Response):
         )
     except Exception as e:
         raise HTTPException(500, f"Adaptive RAG failed: {str(e)}")
+
+@router.post("/rag/correlate")
+async def manual_correlate(workspace: str = "default", threshold: float = 0.70):
+    """Manually trigger the correlation suite (Neural Spark) for a workspace."""
+    try:
+        from ..synthesis.correlation import run_full_correlation_suite
+        results = await run_full_correlation_suite(workspace, threshold=threshold)
+        return {
+            "status": "completed",
+            "workspace": workspace,
+            "threshold": threshold,
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Correlation failed: {str(e)}")
 
 @router.get("/rag/config/context")
 async def get_context_config(model: str = "fastflowlm"):

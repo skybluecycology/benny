@@ -20,6 +20,8 @@ LANGUAGES = {
     ".tsx": Language(ts_ts.language_tsx()),
 }
 
+DOC_EXTENSIONS = {".md", ".pdf", ".txt"}
+
 # --- UML Pattern Queries ---
 # These extract Classes, Functions, Inheritance, and Imports
 QUERIES = {
@@ -179,11 +181,13 @@ class CodeGraphAnalyzer:
                     # Link Folder -> File
                     if rel_root != "." and file_node_id:
                         self.edges.append(CodeEdge(rel_root, file_node_id, "DEFINES"))
-
-        return {
-            "nodes": [vars(n) for n in self.nodes.values()],
-            "edges": [vars(e) for e in self.edges]
-        }
+                elif ext in DOC_EXTENSIONS:
+                    file_node_id = self._get_node_id(full_path)
+                    rel_path = os.path.relpath(full_path, self.workspace_root).replace("\\", "/")
+                    if file_node_id not in self.nodes:
+                        self.nodes[file_node_id] = CodeNode(file_node_id, os.path.basename(full_path), "Documentation", rel_path)
+                    if rel_root != "." and file_node_id:
+                        self.edges.append(CodeEdge(rel_root, file_node_id, "CONTAINS"))
 
         return {
             "nodes": [vars(n) for n in self.nodes.values()],
@@ -210,10 +214,13 @@ class CodeGraphAnalyzer:
         query_str = QUERIES.get(lang_key)
         
         if not query_str:
-            return
+            return file_node_id
 
-        query = LANGUAGES[ext].query(query_str)
+        # Tree-sitter 0.25.2 requires Query constructor
+        from tree_sitter import Query
+        query = Query(LANGUAGES[ext], query_str)
         cursor = QueryCursor(query)
+        # captures() returns a dictionary of lists in 0.25.2
         captures = cursor.captures(tree.root_node)
         
         # Process classes and functions
@@ -276,6 +283,9 @@ class CodeGraphAnalyzer:
                     MERGE (n:CodeEntity {id: $id, workspace: $ws, snapshot_id: $snap})
                     SET n.name = $name, n.type = $type, n.file_path = $path
                     WITH n
+                    // Auto-align Documentation nodes to Document label for Knowledge Graph unify
+                    FOREACH (ignoreMe IN CASE WHEN $type = 'Documentation' THEN [1] ELSE [] END | SET n:Document)
+                    
                     MERGE (c:Concept {name: $name, workspace: $ws})
                     ON CREATE SET c.node_type = 'Concept', c.created_at = datetime()
                     MERGE (n)-[:REPRESENTS]->(c)
@@ -309,12 +319,11 @@ def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None, pa
             else:
                 return {"nodes": [], "edges": []}
 
-        # Base query with workspace and snapshot constraints
+        # Scoped query: n must match path, but m can be anything if linked from n
         query = """
             MATCH (n:CodeEntity {workspace: $ws, snapshot_id: $snap})
             WHERE ($path IS NULL OR n.file_path STARTS WITH $path)
             OPTIONAL MATCH (n)-[r:CODE_REL {snapshot_id: $snap}]->(m:CodeEntity {workspace: $ws, snapshot_id: $snap})
-            WHERE ($path IS NULL OR m.file_path STARTS WITH $path)
             RETURN n, r, m
         """
         
