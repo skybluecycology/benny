@@ -3,7 +3,7 @@ import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { 
   Database, Share2, Layers, RefreshCw, Clock, Cpu, Activity, 
-  Filter, ChevronDown, ChevronRight, Zap, Target, Info
+  Filter, ChevronDown, ChevronRight, Zap, Target, Info, Wind
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DynamicOverlay } from './DynamicOverlay';
@@ -166,6 +166,30 @@ export function GraphNexusController() {
                         <span className="text-[10px] font-bold tracking-widest uppercase">{mode.label}</span>
                      </div>
                      {synthesisMode === mode.id && <div className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_10px_white]" />}
+                  </button>
+                ))}
+             </div>
+          </div>
+
+          {/* Synchronization Level */}
+          <div className="space-y-3">
+             <div className="text-[9px] font-black text-[#FF5F1F]/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Wind size={10} />
+                Temporal_Latency
+             </div>
+             <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'real_time', label: 'REAL_TIME', icon: <Zap size={10}/> },
+                  { id: 'streaming', label: 'FLUID', icon: <Activity size={10}/> },
+                  { id: 'stabilized', label: 'STABLE', icon: <Clock size={10}/> }
+                ].map(mode => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setSyncMode(mode.id as any)}
+                    className={`flex flex-col items-center justify-center gap-2 py-3 rounded-xl border transition-all ${syncMode === mode.id ? 'bg-[#FF5F1F]/20 border-[#FF5F1F]/60 text-[#FF5F1F] shadow-[0_0_15px_rgba(255,95,31,0.1)]' : 'bg-black/20 border-white/5 text-white/20 hover:text-white/40'}`}
+                  >
+                     {mode.icon}
+                     <span className="text-[8px] font-bold tracking-widest">{mode.label}</span>
                   </button>
                 ))}
              </div>

@@ -121,15 +121,16 @@ export function DynamicOverlay({
   return (
     <motion.div
       ref={containerRef}
-      layoutId={`window-${id || title}`}
       drag={!isCollapsed}
       dragMomentum={false}
       dragListener={!isResizing && !isCollapsed}
-      initial={{ ...defaultPosition, opacity: 0 }}
-      animate={{ opacity: 1, height: isCollapsed ? 40 : size.height }}
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1, height: isCollapsed ? 40 : size.height }}
       style={{
         width: size.width,
         position: 'absolute',
+        top: defaultPosition.y,
+        left: defaultPosition.x,
         zIndex: 100,
       }}
       className={`glass-panel p-0 flex flex-col overflow-hidden pointer-events-auto border-[#00FFFF]/20 shadow-[0_0_40px_rgba(0,0,0,0.5)] ${className} ${isCollapsed ? 'border-b-0' : ''}`}
