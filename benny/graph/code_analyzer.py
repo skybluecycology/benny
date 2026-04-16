@@ -374,7 +374,8 @@ def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None, pa
                  edges.append({
                      "source": n["id"],
                      "target": m["id"],
-                     "type": r["type"]
+                     "type": r["type"],
+                     "metadata": dict(r)
                  })
                  
         return {"nodes": list(nodes.values()), "edges": edges}

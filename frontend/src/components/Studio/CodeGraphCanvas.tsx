@@ -367,7 +367,7 @@ function CodeGraphEdge({ edge, livePositions, isSelected, isNodeSelected, onClic
       {/* UML Arrowhead */}
       {(isInherits || isCalls) && (
         <mesh ref={arrowRef}>
-          {isInherits ? <coneGeometry args={[0.25, 0.5, 3]} /> : <coneGeometry args={[0.15, 0.4, 8]} />}
+          {isInherits ? <coneGeometry args={[0.22, 0.45, 3]} /> : <coneGeometry args={[0.12, 0.35, 8]} />}
           <meshBasicMaterial 
             color={isInherits ? "#ffffff" : getColor()} 
             transparent 
@@ -375,6 +375,28 @@ function CodeGraphEdge({ edge, livePositions, isSelected, isNodeSelected, onClic
             wireframe={isInherits}
           />
         </mesh>
+      )}
+
+      {/* Semantic Predicate Label (UML Annotation) */}
+      {(edge.type === 'REL' || edge.metadata?.predicate) && (hovered || isNodeSelected) && (
+        <Html 
+           position={new THREE.Vector3().addVectors(
+             new THREE.Vector3().fromArray(edge.sourcePos),
+             new THREE.Vector3().fromArray(edge.targetPos)
+           ).multiplyScalar(0.5)}
+           center
+           distanceFactor={10}
+        >
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="px-2 py-0.5 rounded bg-[#00FFFF]/80 border border-white/40 shadow-lg"
+          >
+             <span className="text-[7px] font-black text-black uppercase tracking-widest whitespace-nowrap italic">
+                {edge.metadata?.predicate || edge.type}
+             </span>
+          </motion.div>
+        </Html>
       )}
 
       {/* Invisible Hit-Tube */}
@@ -540,6 +562,7 @@ export function CodeGraphCanvas() {
     synthesisMode, setSynthesisMode,
     syncMode, setSyncMode,
     visibleTypes, setVisibleTypes,
+    visibleEdgeTypes, setVisibleEdgeTypes,
     showClusters, toggleShowClusters
   } = useWorkflowStore();
   
@@ -687,7 +710,8 @@ export function CodeGraphCanvas() {
     const edges = codeGraph.edges.filter((e: any) => {
        const sid = String(e.source);
        const tid = String(e.target);
-       return nodes.find(n => n.id === sid) && nodes.find(n => n.id === tid);
+       const matchesFilter = visibleEdgeTypes.includes(String(e.type));
+       return matchesFilter && nodes.find(n => n.id === sid) && nodes.find(n => n.id === tid);
     }).map((edge: any) => {
        const sid = String(edge.source);
        const tid = String(edge.target);
@@ -703,7 +727,7 @@ export function CodeGraphCanvas() {
     });
 
     return { nodes, edges };
-  }, [codeGraph, visibleTypes]);
+  }, [codeGraph, visibleTypes, visibleEdgeTypes]);
 
   const selectedNode = useMemo(() => 
     processedGraph.nodes.find((n: any) => n.id === selectedNodeId), 

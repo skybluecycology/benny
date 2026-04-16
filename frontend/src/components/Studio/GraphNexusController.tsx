@@ -3,7 +3,8 @@ import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { 
   Database, Share2, Layers, RefreshCw, Clock, Cpu, Activity, 
-  Filter, ChevronDown, ChevronRight, Zap, Target, Info, Wind
+  Filter, ChevronDown, ChevronRight, Zap, Target, Info, Wind,
+  GitFork, Link
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DynamicOverlay } from './DynamicOverlay';
@@ -15,6 +16,7 @@ export function GraphNexusController() {
     synthesisMode, setSynthesisMode,
     syncMode, setSyncMode,
     visibleTypes, setVisibleTypes,
+    visibleEdgeTypes, setVisibleEdgeTypes,
     showClusters, toggleShowClusters,
     viewMode
   } = useWorkflowStore();
@@ -220,6 +222,44 @@ export function GraphNexusController() {
                  );
                })}
             </div>
+          </div>
+
+          {/* Relationship Audit (UML Smart Filters) */}
+          <div className="space-y-3 pt-2 border-t border-white/5">
+             <div className="text-[9px] font-black text-[#00FFFF]/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Share2 size={10} />
+                Relationship_Audit
+             </div>
+             <div className="flex flex-col gap-1.5">
+                {[
+                  { label: 'Structural', types: ['DEFINES', 'CONTAINS'], icon: <GitFork size={10}/> },
+                  { label: 'Lineage', types: ['INHERITS'], icon: <Share2 size={10}/> },
+                  { label: 'Dependency', types: ['DEPENDS_ON'], icon: <Link size={10}/> },
+                  { label: 'Flow', types: ['CALLS'], icon: <Zap size={10}/> },
+                  { label: 'Semantic', types: ['REL'], icon: <Database size={10}/> }
+                ].map(cat => {
+                  const isActive = cat.types.every(t => visibleEdgeTypes.includes(t));
+                  return (
+                    <button
+                      key={cat.label}
+                      onClick={() => {
+                        if (isActive) {
+                           setVisibleEdgeTypes(visibleEdgeTypes.filter(t => !cat.types.includes(t)));
+                        } else {
+                           setVisibleEdgeTypes([...new Set([...visibleEdgeTypes, ...cat.types])]);
+                        }
+                      }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-xl border transition-all ${isActive ? 'bg-white/10 border-white/20 text-white' : 'bg-black/20 border-white/5 text-white/10'}`}
+                    >
+                       <div className="flex items-center gap-2">
+                          <div className={isActive ? 'text-[#00FFFF]' : 'text-white/20'}>{cat.icon}</div>
+                          <span className="text-[9px] font-black tracking-widest uppercase">{cat.label}</span>
+                       </div>
+                       <div className={`w-1 h-1 rounded-full ${isActive ? 'bg-[#00FFFF] shadow-[0_0_8px_#00FFFF]' : 'bg-white/10'}`} />
+                    </button>
+                  );
+                })}
+             </div>
           </div>
         </div>
 

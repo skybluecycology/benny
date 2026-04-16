@@ -17,6 +17,7 @@ export interface UISlice {
   synthesisMode: 'structural' | 'architectural' | 'neural';
   syncMode: 'real_time' | 'streaming' | 'stabilized';
   visibleTypes: string[];
+  visibleEdgeTypes: string[];
   showClusters: boolean;
 
   setAuditHubOpen: (isOpen: boolean) => void;
@@ -36,6 +37,7 @@ export interface UISlice {
   setSynthesisMode: (mode: 'structural' | 'architectural' | 'neural') => void;
   setSyncMode: (mode: 'real_time' | 'streaming' | 'stabilized') => void;
   setVisibleTypes: (types: string[]) => void;
+  setVisibleEdgeTypes: (types: string[]) => void;
   toggleShowClusters: () => void;
 }
 
@@ -55,6 +57,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   synthesisMode: 'neural',
   syncMode: 'streaming',
   visibleTypes: ['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept'],
+  visibleEdgeTypes: ['DEFINES', 'INHERITS', 'DEPENDS_ON', 'CALLS', 'CONTAINS', 'REL'],
   showClusters: false,
 
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
@@ -73,5 +76,6 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   setSynthesisMode: (mode) => set({ synthesisMode: mode }),
   setSyncMode: (mode) => set({ syncMode: mode }),
   setVisibleTypes: (types) => set({ visibleTypes: types }),
+  setVisibleEdgeTypes: (types) => set({ visibleEdgeTypes: types }),
   toggleShowClusters: () => set({ showClusters: !get().showClusters }),
 });
