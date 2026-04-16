@@ -11,13 +11,14 @@ import { DynamicOverlay } from './DynamicOverlay';
 import { TemporalAudit } from './TemporalAudit';
 
 export function GraphNexusController() {
-  const { 
+  const {
     selectionTier, setSelectionTier,
     synthesisMode, setSynthesisMode,
     syncMode, setSyncMode,
     visibleTypes, setVisibleTypes,
     visibleEdgeTypes, setVisibleEdgeTypes,
     showClusters, toggleShowClusters,
+    graphRenderSettings, setStarCount, setEnableNodeRotation, setFpsCap, setEnableFreeRotation,
     viewMode
   } = useWorkflowStore();
 
@@ -195,6 +196,92 @@ export function GraphNexusController() {
                   </button>
                 ))}
              </div>
+          </div>
+
+          {/* Performance Settings */}
+          <div className="space-y-3 pt-2 border-t border-white/5">
+            <div className="flex justify-between items-center text-[9px] font-black text-[#FF5F1F]/40 uppercase tracking-[0.2em]">
+              <div className="flex items-center gap-2">
+                <Zap size={10} />
+                Performance_Tuning
+              </div>
+            </div>
+
+            {/* Star Count Slider */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-[8px] text-white/60">
+                <span className="font-mono">Star Density</span>
+                <span className="text-[#FF5F1F] font-bold">{graphRenderSettings.starCount}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="5000"
+                step="100"
+                value={graphRenderSettings.starCount}
+                onChange={(e) => setStarCount(Number(e.target.value))}
+                className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-[#FF5F1F]"
+              />
+              <div className="text-[7px] text-white/30 flex justify-between">
+                <span>none</span>
+                <span>normal</span>
+                <span>max</span>
+              </div>
+            </div>
+
+            {/* Node Rotation Toggle */}
+            <button
+              onClick={() => setEnableNodeRotation(!graphRenderSettings.enableNodeRotation)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl border transition-all ${
+                graphRenderSettings.enableNodeRotation
+                  ? 'bg-[#FF5F1F]/20 border-[#FF5F1F]/60 text-[#FF5F1F]'
+                  : 'bg-black/20 border-white/5 text-white/40 hover:text-white/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Activity size={12} />
+                <span className="text-[9px] font-bold tracking-widest uppercase">Node_Rotation</span>
+              </div>
+              <span className="text-[8px] font-mono">{graphRenderSettings.enableNodeRotation ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* Free Rotation Toggle */}
+            <button
+              onClick={() => setEnableFreeRotation(!graphRenderSettings.enableFreeRotation)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl border transition-all ${
+                graphRenderSettings.enableFreeRotation
+                  ? 'bg-[#FF5F1F]/20 border-[#FF5F1F]/60 text-[#FF5F1F]'
+                  : 'bg-black/20 border-white/5 text-white/40 hover:text-white/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Wind size={12} />
+                <span className="text-[9px] font-bold tracking-widest uppercase">Free_Rotation</span>
+              </div>
+              <span className="text-[8px] font-mono">{graphRenderSettings.enableFreeRotation ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* FPS Cap Slider */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-[8px] text-white/60">
+                <span className="font-mono">Frame Rate Cap</span>
+                <span className="text-[#FF5F1F] font-bold">{graphRenderSettings.fpsCap} FPS</span>
+              </div>
+              <input
+                type="range"
+                min="15"
+                max="120"
+                step="15"
+                value={graphRenderSettings.fpsCap}
+                onChange={(e) => setFpsCap(Number(e.target.value))}
+                className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-[#FF5F1F]"
+              />
+              <div className="text-[7px] text-white/30 flex justify-between">
+                <span>low</span>
+                <span>normal</span>
+                <span>max</span>
+              </div>
+            </div>
           </div>
 
           {/* Type Filters */}

@@ -19,6 +19,12 @@ export interface UISlice {
   visibleTypes: string[];
   visibleEdgeTypes: string[];
   showClusters: boolean;
+  graphRenderSettings: {
+    starCount: number;
+    enableNodeRotation: boolean;
+    fpsCap: number;
+    enableFreeRotation: boolean;
+  };
 
   setAuditHubOpen: (isOpen: boolean) => void;
   toggleAuditHub: () => void;
@@ -39,6 +45,10 @@ export interface UISlice {
   setVisibleTypes: (types: string[]) => void;
   setVisibleEdgeTypes: (types: string[]) => void;
   toggleShowClusters: () => void;
+  setStarCount: (count: number) => void;
+  setEnableNodeRotation: (enabled: boolean) => void;
+  setFpsCap: (fps: number) => void;
+  setEnableFreeRotation: (enabled: boolean) => void;
 }
 
 export const createUISlice = (set: any, get: any): UISlice => ({
@@ -59,6 +69,12 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   visibleTypes: ['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept'],
   visibleEdgeTypes: ['DEFINES', 'INHERITS', 'DEPENDS_ON', 'CALLS', 'CONTAINS', 'REL'],
   showClusters: false,
+  graphRenderSettings: {
+    starCount: 1000,
+    enableNodeRotation: false,
+    fpsCap: 60,
+    enableFreeRotation: false,
+  },
 
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
   toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
@@ -78,4 +94,8 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   setVisibleTypes: (types) => set({ visibleTypes: types }),
   setVisibleEdgeTypes: (types) => set({ visibleEdgeTypes: types }),
   toggleShowClusters: () => set({ showClusters: !get().showClusters }),
+  setStarCount: (count) => set({ graphRenderSettings: { ...get().graphRenderSettings, starCount: count } }),
+  setEnableNodeRotation: (enabled) => set({ graphRenderSettings: { ...get().graphRenderSettings, enableNodeRotation: enabled } }),
+  setFpsCap: (fps) => set({ graphRenderSettings: { ...get().graphRenderSettings, fpsCap: fps } }),
+  setEnableFreeRotation: (enabled) => set({ graphRenderSettings: { ...get().graphRenderSettings, enableFreeRotation: enabled } }),
 });
