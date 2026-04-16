@@ -239,17 +239,17 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
         </div>
       </DynamicOverlay>
 
-      {/* 3. Top-Right: Kill Switch & Settings (Static for stability) */}
-      <div className="absolute top-12 right-12 flex flex-col items-end gap-6 pointer-events-auto">
-        <button className="relative group flex items-center justify-center w-24 h-24 rounded-full bg-[#020408]/60 border-2 border-[#FF5F1F] shadow-[0_0_30px_rgba(255,95,31,0.2)] hover:shadow-[0_0_50px_rgba(255,95,31,0.6)] transition-all duration-500 backdrop-blur-xl">
-          <div className="absolute inset-[-6px] border-[1px] border-dashed border-[#FF5F1F]/40 rounded-full animate-spin-slow" />
+      {/* 3. Top-Right: Kill Switch & Settings (Pinned to absolute corner) */}
+      <div className="absolute top-4 right-4 flex flex-col items-end gap-4 pointer-events-auto z-50">
+        <button className="relative group flex items-center justify-center w-20 h-20 rounded-full bg-[#020408]/80 border-2 border-[#FF5F1F] shadow-[0_0_20px_rgba(255,95,31,0.2)] hover:shadow-[0_0_40px_rgba(255,95,31,0.6)] transition-all duration-500 backdrop-blur-xl">
+          <div className="absolute inset-[-4px] border-[1px] border-dashed border-[#FF5F1F]/40 rounded-full animate-spin-slow" />
           <div className="flex flex-col items-center gap-1 z-10">
-            <Power className="w-8 h-8 text-[#FF5F1F] drop-shadow-[0_0_12px_rgba(255,95,31,1)]" />
-            <span className="text-[9px] font-black text-[#FF5F1F] tracking-[0.2em]">HALT</span>
+            <Power className="w-6 h-6 text-[#FF5F1F] drop-shadow-[0_0_10px_rgba(255,95,31,1)]" />
+            <span className="text-[8px] font-black text-[#FF5F1F] tracking-[0.2em]">HALT</span>
           </div>
         </button>
-        <button onClick={toggleUIVersion} className="btn-pill">
-          <ExternalLink size={14} /> EXIT_OS
+        <button onClick={toggleUIVersion} className="btn-pill px-4 py-2 bg-black/40 border border-white/10 hover:bg-white/10 transition-all text-[#00FFFF] text-[9px] font-black tracking-widest flex items-center gap-2">
+          <ExternalLink size={12} /> EXIT_OS
         </button>
       </div>
 

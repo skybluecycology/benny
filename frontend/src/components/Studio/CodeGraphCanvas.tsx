@@ -31,6 +31,7 @@ import {
   Terminal, 
   ChevronRight, 
   Home, 
+  Settings,
   ExternalLink,
   Target,
   Zap,
@@ -533,19 +534,22 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
 
 export function CodeGraphCanvas() {
   const { currentWorkspace, activeGraphId, focusPath, setFocusPath, setActiveDocument } = useWorkspaceStore();
-  const { codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode } = useWorkflowStore();
+  const { 
+    codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode,
+    selectionTier, setSelectionTier,
+    synthesisMode, setSynthesisMode,
+    syncMode, setSyncMode,
+    visibleTypes, setVisibleTypes,
+    showClusters, toggleShowClusters
+  } = useWorkflowStore();
+  
   const [directories, setDirectories] = useState<string[]>([]);
-  const [visibleTypes, setVisibleTypes] = useState<string[]>(['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept']);
-  const [showClusters, setShowClusters] = useState(false);
   const [selectedDir, setSelectedDir] = useState("/");
   const [scanName, setScanName] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const isFetching = useRef(false);
-  const [selectionTier, setSelectionTier] = useState<1 | 2 | 3>(1);
-  const [synthesisMode, setSynthesisMode] = useState<'structural' | 'architectural' | 'neural'>('neural');
-  const [syncMode, setSyncMode] = useState<'real_time' | 'streaming' | 'stabilized'>('streaming');
   const cameraControlsRef = useRef<any>(null);
 
   const flyToNode = (pos: [number, number, number]) => {
@@ -732,8 +736,8 @@ export function CodeGraphCanvas() {
   return (
     <div className="absolute inset-0 bg-[#020408]" onClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}>
       
-      {/* Breadcrumbs */}
-      <div className="absolute top-24 left-12 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full">
+      {/* Breadcrumbs (Repositioned to avoid Diagnostics) */}
+      <div className="absolute top-12 left-12 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)]">
         <button 
           onClick={() => setFocusPath(null)}
           className={`p-1.5 rounded-full hover:bg-white/10 transition-all ${!focusPath ? 'text-[#00FFFF]' : 'text-white/40'}`}
@@ -751,94 +755,6 @@ export function CodeGraphCanvas() {
             </button>
           </React.Fragment>
         ))}
-      </div>
-
-      {/* Nexus Control Panel (Phase 4 - Out of the Universe) */}
-      <div className="absolute top-24 left-12 z-20 flex flex-col gap-6">
-         {/* Top Section - LoD & Synthesis */}
-         <div className="bg-black/40 backdrop-blur-2xl border border-[#00FFFF]/20 p-5 rounded-3xl w-72 shadow-[0_0_30px_rgba(0,255,255,0.05)]">
-            <div className="flex items-center gap-2 mb-6 border-b border-white/5 pb-3">
-               <Database size={14} className="text-[#00FFFF]" />
-               <span className="text-[10px] font-black text-white/90 uppercase tracking-[0.3em]">Nexus_Control</span>
-            </div>
-
-            {/* Selection Tier / LoD */}
-            <div className="space-y-4 mb-6">
-               <div className="flex justify-between items-center text-[8px] font-bold text-white/40 uppercase">
-                  <span>Level_of_Detail</span>
-                  <span className="text-[#00FFFF]">Tier_{selectionTier}</span>
-               </div>
-               <div className="grid grid-cols-3 gap-2">
-                  {[1, 2, 3].map(t => (
-                    <button 
-                      key={t}
-                      onClick={() => setSelectionTier(t as any)}
-                      className={`h-8 rounded-lg border transition-all flex items-center justify-center font-mono text-[10px] ${selectionTier === t ? 'bg-[#00FFFF]/20 border-[#00FFFF]/60 text-[#00FFFF]' : 'bg-white/5 border-white/5 text-white/40 opacity-40 hover:opacity-100'}`}
-                    >
-                      T{t}
-                    </button>
-                  ))}
-               </div>
-            </div>
-
-            {/* Synthesis Mode */}
-            <div className="space-y-3">
-               <div className="text-[8px] font-bold text-white/40 uppercase">Synthesis_Algorithm</div>
-               <div className="flex flex-col gap-2">
-                  {[
-                    { id: 'structural', label: 'STRUCTURAL', icon: <Cpu size={12}/> },
-                    { id: 'architectural', label: 'ARCHITECTURAL', icon: <Layers size={12}/> },
-                    { id: 'neural', label: 'NEURAL_NEBULA', icon: <Activity size={12}/> }
-                  ].map(mode => (
-                    <button
-                      key={mode.id}
-                      onClick={() => setSynthesisMode(mode.id as any)}
-                      className={`flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all ${synthesisMode === mode.id ? 'bg-white/10 border-[#FF00FF]/40 text-white' : 'bg-black/20 border-white/5 text-white/30 opacity-40 hover:opacity-100'}`}
-                    >
-                       <div className="flex items-center gap-3">
-                          <div className={synthesisMode === mode.id ? "text-[#FF00FF]" : ""}>{mode.icon}</div>
-                          <span className="text-[10px] font-bold tracking-widest">{mode.label}</span>
-                       </div>
-                       {synthesisMode === mode.id && <div className="w-1.5 h-1.5 rounded-full bg-[#FF00FF] shadow-[0_0_8px_#FF00FF]" />}
-                    </button>
-                  ))}
-               </div>
-            </div>
-         </div>
-
-         {/* Bottom Section - Sync & Dynamics */}
-         <div className="bg-black/40 backdrop-blur-2xl border border-white/10 p-5 rounded-3xl w-72">
-            <div className="space-y-4">
-               <div className="flex justify-between items-center text-[8px] font-bold text-white/40 uppercase">
-                  <span>Temporal_Sync</span>
-                  <Activity size={10} className="text-[#39FF14]" />
-               </div>
-               <div className="flex flex-col gap-2">
-                  {[
-                    { id: 'real_time', label: 'REAL_TIME', icon: <Zap size={12}/> },
-                    { id: 'streaming', label: 'FLUID_STREAM', icon: <Wind size={12}/> },
-                    { id: 'stabilized', label: 'STABILIZED', icon: <Home size={12}/> }
-                  ].map(mode => (
-                    <button
-                      key={mode.id}
-                      onClick={() => setSyncMode(mode.id as any)}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${syncMode === mode.id ? 'text-[#39FF14] bg-[#39FF14]/5' : 'text-white/30 hover:text-white/60'}`}
-                    >
-                       {mode.icon}
-                       <span className="text-[9px] font-mono tracking-tighter">{mode.label}</span>
-                    </button>
-                  ))}
-               </div>
-
-               <button 
-                 onClick={handleDeepLayout}
-                 className="w-full mt-2 py-3 rounded-xl border border-white/10 bg-white/5 text-[9px] font-black text-white/60 uppercase tracking-[0.2em] hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
-               >
-                  <RefreshCw size={12} />
-                  Trigger_Deep_Layout
-               </button>
-            </div>
-         </div>
       </div>
       
       {/* 3D Canvas */}
@@ -875,47 +791,6 @@ export function CodeGraphCanvas() {
 
       {/* Smart Overlays */}
       <>
-        {/* Smart Filter Bar */}
-        <div className="absolute top-24 right-12 z-20 flex flex-col gap-4">
-          <div className="bg-black/60 backdrop-blur-xl border border-white/10 p-3 rounded-2xl flex flex-col gap-2 shadow-2xl">
-            <div className="text-[10px] text-white/40 uppercase font-black tracking-tighter mb-1 px-1 flex items-center gap-2">
-              <Filter size={10} /> Structural Layers
-            </div>
-            <div className="flex flex-wrap gap-2 w-48">
-              {[
-                { id: 'Folder', icon: <FolderIcon size={12}/>, color: '#FFD700' },
-                { id: 'File', icon: <Play size={12}/>, color: '#00FFFF' },
-                { id: 'Class', icon: <Layers size={12}/>, color: '#007ACC' },
-                { id: 'Documentation', icon: <Info size={12}/>, color: '#00FFFF' },
-                { id: 'Concept', icon: <Zap size={12}/>, color: '#FF00FF' }
-              ].map(type => (
-                <button
-                  key={type.id}
-                  onClick={() => setVisibleTypes(prev => prev.includes(type.id) ? prev.filter(t => t !== type.id) : [...prev, type.id])}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition-all ${visibleTypes.includes(type.id) ? 'bg-white/10 border-white/20' : 'bg-black/20 border-white/5 opacity-40 grayscale'}`}
-                >
-                  <div style={{ color: type.color }}>{type.icon}</div>
-                  <span className="text-[10px] text-white font-mono">{type.id}</span>
-                </button>
-              ))}
-            </div>
-            
-            <div className="h-[1px] bg-white/5 my-2" />
-            
-            <button
-              onClick={() => setShowClusters(!showClusters)}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl border transition-all ${showClusters ? 'bg-[#00FFFF]/10 border-[#00FFFF]/30 shadow-[0_0_15px_rgba(0,255,255,0.1)]' : 'bg-black/20 border-white/5 opacity-60'}`}
-            >
-              <div className={`${showClusters ? 'text-[#00FFFF]' : 'text-white/40'}`}>
-                 <Share2 size={14} />
-              </div>
-              <div className="flex flex-col items-start leading-tight">
-                 <span className="text-[10px] text-white font-bold">Leiden Clustering</span>
-                 <span className="text-[8px] text-white/40">Toggle Semantic Neighborhoods</span>
-              </div>
-            </button>
-          </div>
-        </div>
 
         {/* Community Legend HUD - Only visible in cluster mode */}
         {showClusters && (
@@ -1023,39 +898,31 @@ export function CodeGraphCanvas() {
       </AnimatePresence>
       </>
 
-      {/* Floating Controls */}
-      <div className="absolute top-72 right-12 flex flex-col gap-4 pointer-events-auto">
+      {/* 4. Graph Command HUD (Tidied and Offset from HALT) */}
+      <div className="absolute top-48 right-4 flex flex-col gap-3 pointer-events-auto z-40 bg-black/20 backdrop-blur-md p-3 rounded-2xl border border-white/5 shadow-2xl">
+         <div className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] px-2 mb-1 flex items-center gap-2">
+            <Settings size={10} /> Graph_Commands
+         </div>
          <button 
            onClick={(e) => { e.stopPropagation(); handleRecenter(); }} 
-           className="btn-pill px-6 h-12 flex items-center gap-3 bg-white/5 border border-white/20 hover:bg-white/10 shadow-[0_0_15px_rgba(255,255,255,0.05)] transition-all"
+           className="btn-pill px-5 h-10 flex items-center gap-3 bg-white/5 border border-white/10 hover:bg-white/20 transition-all group"
          >
-            <Home size={16} className="text-white/60" /> 
-            <span className="text-[11px] font-black tracking-[0.2em] text-white/60">RE_CENTER</span>
+            <Home size={14} className="text-white/40 group-hover:text-white transition-colors" /> 
+            <span className="text-[10px] font-black tracking-[0.2em] text-white/40 group-hover:text-white">RE_CENTER</span>
          </button>
          
-         <button onClick={(e) => { e.stopPropagation(); setIsCodeGraphScanOpen(true); }} className="btn-pill px-6 h-12 flex items-center gap-3 bg-[#00FFFF]/10 border border-[#00FFFF]/40 hover:border-[#00FFFF] shadow-[0_0_15px_rgba(0,255,255,0.1)] transition-all">
-            <RefreshCw size={16} className={isGenerating ? "animate-spin text-[#00FFFF]" : "text-[#00FFFF]"} /> 
-            <span className="text-[11px] font-black tracking-[0.2em] text-[#00FFFF]">RE_SCAN</span>
+         <button onClick={(e) => { e.stopPropagation(); setIsCodeGraphScanOpen(true); }} className="btn-pill px-5 h-10 flex items-center gap-3 bg-[#00FFFF]/5 border border-[#00FFFF]/20 hover:border-[#00FFFF]/60 hover:bg-[#00FFFF]/10 transition-all group">
+            <RefreshCw size={14} className={isGenerating ? "animate-spin text-[#00FFFF]" : "text-[#00FFFF]/60 group-hover:text-[#00FFFF]"} /> 
+            <span className="text-[10px] font-black tracking-[0.2em] text-[#00FFFF]/60 group-hover:text-[#00FFFF]">RE_SCAN</span>
          </button>
-           <div className="p-4 bg-[#020408]/60 backdrop-blur-xl border border-white/5 rounded-sm space-y-3">
-              <div className="flex items-center gap-2 text-[9px] font-black text-[#00FFFF]/60 tracking-[0.2em]">
-                 <Filter size={10} /> LAYER_FILTERS
-              </div>
-              <div className="space-y-2">
-                 <div className="flex items-center justify-between gap-4">
-                    <span className="text-[10px] text-white/40">INHERITANCE</span>
-                    <div className="w-8 h-4 rounded-full bg-[#39FF14]/20 border border-[#39FF14]/40" />
-                 </div>
-                 <div className="flex items-center justify-between gap-4">
-                    <span className="text-[10px] text-white/40">EXECUTION</span>
-                    <div className="w-8 h-4 rounded-full bg-[#FF5F1F]/20 border border-[#FF5F1F]/40" />
-                 </div>
-                 <div className="flex items-center justify-between gap-4">
-                    <span className="text-[10px] text-white/40">DEPENDENCIES</span>
-                    <div className="w-8 h-4 rounded-full bg-[#00FFFF]/20 border border-[#00FFFF]/40" />
-                 </div>
-              </div>
-           </div>
+
+         <button 
+           onClick={handleDeepLayout}
+           className="btn-pill px-5 h-10 flex items-center gap-3 bg-white/5 border border-white/10 hover:bg-white/20 transition-all group"
+         >
+            <RefreshCw size={14} className="text-white/20 group-hover:text-white transition-colors" />
+            <span className="text-[10px] font-black tracking-[0.2em] text-white/20 group-hover:text-white">DEEP_LAYOUT</span>
+         </button>
       </div>
 
        {/* Selection Inspector */}

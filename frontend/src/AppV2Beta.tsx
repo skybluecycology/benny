@@ -12,7 +12,7 @@ import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { V2ChatOverlay } from './components/Studio/V2ChatOverlay';
 import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
-import V2GraphSelector from './components/Studio/V2GraphSelector';
+import { GraphNexusController } from './components/Studio/GraphNexusController';
 import { HybridLayout } from './components/Studio/HybridLayout';
 import DocumentManager from './components/Documents/DocumentManager';
 
@@ -51,7 +51,6 @@ export default function AppV2Beta() {
         </div>
         
         {/* Floating HUD controls */}
-        <V2GraphSelector />
         <GodModeHUD 
           onViewChange={setViewMode} 
           currentView={viewMode} 
@@ -60,6 +59,7 @@ export default function AppV2Beta() {
         />
 
         {/* Universal Floating Windows Layer */}
+        <GraphNexusController />
         <AnimatePresence>
           {isChatOpen && (
             <V2ChatOverlay onClose={() => setIsChatOpen(false)} />

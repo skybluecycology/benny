@@ -11,6 +11,13 @@ export interface UISlice {
   codeGraph: { nodes: any[], edges: any[] } | null;
   isCodeGraphScanOpen: boolean;
   isGraphManagerOpen: boolean;
+  
+  // Graph Control State
+  selectionTier: 1 | 2 | 3;
+  synthesisMode: 'structural' | 'architectural' | 'neural';
+  syncMode: 'real_time' | 'streaming' | 'stabilized';
+  visibleTypes: string[];
+  showClusters: boolean;
 
   setAuditHubOpen: (isOpen: boolean) => void;
   toggleAuditHub: () => void;
@@ -23,6 +30,13 @@ export interface UISlice {
   setCodeGraph: (graph: { nodes: any[], edges: any[] } | null) => void;
   setIsCodeGraphScanOpen: (isOpen: boolean) => void;
   setIsGraphManagerOpen: (isOpen: boolean) => void;
+  
+  // Graph Control Actions
+  setSelectionTier: (tier: 1 | 2 | 3) => void;
+  setSynthesisMode: (mode: 'structural' | 'architectural' | 'neural') => void;
+  setSyncMode: (mode: 'real_time' | 'streaming' | 'stabilized') => void;
+  setVisibleTypes: (types: string[]) => void;
+  toggleShowClusters: () => void;
 }
 
 export const createUISlice = (set: any, get: any): UISlice => ({
@@ -35,6 +49,13 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   codeGraph: null,
   isCodeGraphScanOpen: false,
   isGraphManagerOpen: false,
+  
+  // Default Graph State
+  selectionTier: 1,
+  synthesisMode: 'neural',
+  syncMode: 'streaming',
+  visibleTypes: ['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept'],
+  showClusters: false,
 
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
   toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
@@ -47,4 +68,10 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   setCodeGraph: (graph) => set({ codeGraph: graph }),
   setIsCodeGraphScanOpen: (isOpen) => set({ isCodeGraphScanOpen: isOpen }),
   setIsGraphManagerOpen: (isOpen) => set({ isGraphManagerOpen: isOpen }),
+
+  setSelectionTier: (tier) => set({ selectionTier: tier }),
+  setSynthesisMode: (mode) => set({ synthesisMode: mode }),
+  setSyncMode: (mode) => set({ syncMode: mode }),
+  setVisibleTypes: (types) => set({ visibleTypes: types }),
+  toggleShowClusters: () => set({ showClusters: !get().showClusters }),
 });
