@@ -54,6 +54,7 @@ interface CodeNodeProps {
   type: string;
   isSelected: boolean;
   isClusterMode: boolean;
+  enableNodeRotation?: boolean;
   metadata?: any;
   onClick: () => void;
 }
@@ -145,7 +146,7 @@ function NeuralSpark({ node, active }: { node: any, active: boolean }) {
   );
 }
 
-function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, isClusterMode, metadata, onClick }: CodeNodeProps) {
+function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, isClusterMode, enableNodeRotation, metadata, onClick }: CodeNodeProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
@@ -167,7 +168,9 @@ function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, i
     }
     
     if (meshRef.current) {
-      meshRef.current.rotation.y += 0.01;
+      if (enableNodeRotation) {
+        meshRef.current.rotation.y += 0.01;
+      }
       if (isSelected || hovered) {
          meshRef.current.scale.lerp(new THREE.Vector3(1.8, 1.8, 1.8), 0.1);
       } else {
@@ -480,20 +483,32 @@ const KEY_MAP = [
   { name: 'descend', keys: ['Shift'] },
 ];
 
-function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNodeClick, onEdgeClick, cameraControlsRef, showClusters }: any) {
+function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNodeClick, onEdgeClick, cameraControlsRef, showClusters, graphRenderSettings }: any) {
   const livePositions = useRef<Map<string, THREE.Vector3>>(new Map());
   const targetVec = useRef(new THREE.Vector3());
+  const lastFrameTimeRef = useRef<number>(0);
+  const frameIntervalRef = useRef<number>(1000 / graphRenderSettings.fpsCap);
 
-  useFrame(() => {
+  useEffect(() => {
+    frameIntervalRef.current = 1000 / graphRenderSettings.fpsCap;
+  }, [graphRenderSettings.fpsCap]);
+
+  useFrame(({ clock }) => {
+    const now = performance.now();
+    if (lastFrameTimeRef.current > 0 && now - lastFrameTimeRef.current < frameIntervalRef.current) {
+      return;
+    }
+    lastFrameTimeRef.current = now;
+
     // Phase 4 Sync Loop: Lerp all live positions toward their targets
     if (!processedGraph?.nodes) return;
 
     processedGraph.nodes.forEach((node: any) => {
       if (!node.position || !Array.isArray(node.position)) return;
-      
+
       const nid = String(node.id);
       targetVec.current.set(node.position[0] || 0, node.position[1] || 0, node.position[2] || 0);
-      
+
       if (!livePositions.current.has(nid)) {
         livePositions.current.set(nid, targetVec.current.clone());
       } else {
@@ -508,7 +523,7 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
       <color attach="background" args={['#020408']} />
       <ambientLight intensity={0.4} />
       <pointLight position={[10, 10, 10]} intensity={1} color="#00FFFF" />
-      <Stars radius={100} depth={50} count={10000} factor={4} saturation={1} fade speed={1.5} />
+      <Stars radius={100} depth={50} count={graphRenderSettings.starCount} factor={4} saturation={1} fade speed={1.5} />
       
       {/* Central Hub for Navigation Reference */}
       <mesh position={[0, 0, 0]}>
@@ -517,13 +532,14 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
       </mesh>
 
       {processedGraph.nodes.map((node: any) => (
-        <CodeSymbolNode 
-          key={node.id} 
-          {...node} 
+        <CodeSymbolNode
+          key={node.id}
+          {...node}
           livePositions={livePositions}
           isSelected={selectedNodeId === node.id}
           isClusterMode={showClusters}
-          onClick={() => onNodeClick(node)} 
+          enableNodeRotation={graphRenderSettings.enableNodeRotation}
+          onClick={() => onNodeClick(node)}
         />
       ))}
 
@@ -538,16 +554,29 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
         />
       ))}
 
-      <SpaceNavigator controlsRef={cameraControlsRef} />
-      <CameraControls 
-        ref={cameraControlsRef} 
-        makeDefault 
-        dollySpeed={0.2}
-        minDistance={5}
-        maxDistance={400}
-        draggingSmoothTime={0.3}
-        smoothTime={0.5}
-      />
+      {graphRenderSettings.enableFreeRotation ? (
+        <OrbitControls
+          makeDefault
+          enableDamping
+          dampingFactor={0.06}
+          minDistance={5}
+          maxDistance={400}
+          zoomSpeed={0.5}
+        />
+      ) : (
+        <>
+          <SpaceNavigator controlsRef={cameraControlsRef} />
+          <CameraControls
+            ref={cameraControlsRef}
+            makeDefault
+            dollySpeed={0.2}
+            minDistance={5}
+            maxDistance={400}
+            draggingSmoothTime={0.3}
+            smoothTime={0.5}
+          />
+        </>
+      )}
     </>
   );
 }
@@ -556,14 +585,15 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
 
 export function CodeGraphCanvas() {
   const { currentWorkspace, activeGraphId, focusPath, setFocusPath, setActiveDocument } = useWorkspaceStore();
-  const { 
+  const {
     codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode,
     selectionTier, setSelectionTier,
     synthesisMode, setSynthesisMode,
     syncMode, setSyncMode,
     visibleTypes, setVisibleTypes,
     visibleEdgeTypes, setVisibleEdgeTypes,
-    showClusters, toggleShowClusters
+    showClusters, toggleShowClusters,
+    graphRenderSettings
   } = useWorkflowStore();
   
   const [directories, setDirectories] = useState<string[]>([]);
@@ -788,7 +818,7 @@ export function CodeGraphCanvas() {
             camera={{ position: [0, 40, 80], fov: 60 }}
             onCreated={({ raycaster }) => { raycaster.params.Line.threshold = 0.5; }}
           >
-            <CodeGraphScene 
+            <CodeGraphScene
               processedGraph={processedGraph}
               selectedNodeId={selectedNodeId}
               selectedEdgeId={selectedEdgeId}
@@ -807,6 +837,7 @@ export function CodeGraphCanvas() {
               }}
               cameraControlsRef={cameraControlsRef}
               showClusters={showClusters}
+              graphRenderSettings={graphRenderSettings}
             />
           </Canvas>
         </KeyboardControls>
