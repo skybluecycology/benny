@@ -66,12 +66,22 @@ def aer_tracked(tool_name: str, workspace_resolver: Callable = None):
                 result = await func(*args, **kwargs)
                 duration = (time.monotonic() - start) * 1000
 
-                # Build a safe summary of the result
+                # Build a safe summary of the result, including token counts (C.2.3)
                 result_summary = {}
                 if result is not None:
                     result_summary["result_type"] = type(result).__name__
                     if isinstance(result, dict):
                         result_summary["keys"] = list(result.keys())[:10]
+                        # Extract token usage if present (LiteLLM usage dict)
+                        usage = result.get("usage") or result.get("token_usage")
+                        if usage:
+                            if hasattr(usage, "model_dump"):
+                                usage = usage.model_dump()
+                            elif not isinstance(usage, dict):
+                                usage = dict(usage)
+                            result_summary["prompt_tokens"]     = usage.get("prompt_tokens", 0)
+                            result_summary["completion_tokens"] = usage.get("completion_tokens", 0)
+                            result_summary["total_tokens"]      = usage.get("total_tokens", 0)
                     elif isinstance(result, (int, float)):
                         result_summary["value"] = result
                     elif isinstance(result, (list, tuple)):

@@ -35,7 +35,11 @@ import {
   Target,
   Zap,
   Info,
-  Share2
+  Share2,
+  Database,
+  Activity,
+  Cpu,
+  Wind
 } from 'lucide-react';
 import { SymbolInspector } from './SymbolInspector';
 
@@ -44,6 +48,7 @@ import { SymbolInspector } from './SymbolInspector';
 interface CodeNodeProps {
   id: string;
   position: [number, number, number];
+  livePositions: React.MutableRefObject<Map<string, THREE.Vector3>>;
   name: string;
   type: string;
   isSelected: boolean;
@@ -92,17 +97,17 @@ function NeuralSpark({ node, active }: { node: any, active: boolean }) {
   if (!active || !node.metadata) return null;
 
   // Projection of labels or related concepts as orbiting satellites
-  const satellites = [
+  const satList = [
     { label: node.type, color: "#00FFFF" },
-    { label: node.metadata.community_name || 'Neural Nexus', color: "#FF00FF" },
-    { label: node.metadata.strategy || 'safe', color: "#39FF14" }
+    { label: node.metadata?.community_name || 'Neural Nexus', color: "#FF00FF" },
+    { label: node.metadata?.strategy || 'safe', color: "#39FF14" }
   ].filter(s => s.label);
 
   return (
     <group ref={groupRef}>
-      {satellites.map((sat, i) => {
-        const phi = Math.acos(-1 + (2 * i) / satellites.length);
-        const theta = Math.sqrt(satellites.length * Math.PI) * phi;
+      {satList.map((sat, i) => {
+        const phi = Math.acos(-1 + (2 * i) / satList.length);
+        const theta = Math.sqrt(satList.length * Math.PI) * phi;
         const radius = 1.5;
         
         return (
@@ -139,17 +144,27 @@ function NeuralSpark({ node, active }: { node: any, active: boolean }) {
   );
 }
 
-function CodeSymbolNode({ id, position, name, type, isSelected, isClusterMode, metadata, onClick }: CodeNodeProps) {
+function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, isClusterMode, metadata, onClick }: CodeNodeProps) {
+  const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  const [, getKeys] = useKeyboardControls();
   
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : 'auto';
     return () => { document.body.style.cursor = 'auto'; };
   }, [hovered]);
 
-  useFrame((state) => {
+  useFrame(() => {
+    const nodeLivePos = livePositions.current.get(String(id));
+    if (groupRef.current) {
+      if (nodeLivePos) {
+        groupRef.current.position.copy(nodeLivePos);
+      } else {
+        // Fallback to target position if live physics hasn't initialized yet
+        groupRef.current.position.set(position[0], position[1], position[2]);
+      }
+    }
+    
     if (meshRef.current) {
       meshRef.current.rotation.y += 0.01;
       if (isSelected || hovered) {
@@ -191,39 +206,38 @@ function CodeSymbolNode({ id, position, name, type, isSelected, isClusterMode, m
   const getNodeColor = () => {
     // If community_id is present and we are in cluster mode (conceptual), use HSL
     if (isClusterMode && metadata?.community_id !== undefined) {
-      return `hsl(${(metadata.community_id * 137.5) % 360}, 70%, 60%)`;
+      const cId = Number(metadata.community_id);
+      if (!isNaN(cId)) {
+        return `hsl(${(cId * 137.5) % 360}, 70%, 60%)`;
+      }
     }
     return getColor();
   };
 
   return (
     <group 
-      position={position}
+      ref={groupRef}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
       onPointerOut={() => setHovered(false)}
     >
-      <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-        <mesh 
-          ref={meshRef} 
-          onClick={(e) => { e.stopPropagation(); onClick(); }}
-        >
-          {getGeometry()}
-          <MeshDistortMaterial 
-            color={getNodeColor()} 
-            speed={hovered ? 5 : 2} 
-            distort={isSelected || hovered ? 0.4 : 0} 
-            transparent 
-            opacity={0.8}
-            emissive={getNodeColor()}
-            emissiveIntensity={isSelected || hovered ? 5 : 0.5}
-          />
-        </mesh>
-      </Float>
+      <mesh 
+        ref={meshRef} 
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+      >
+        {getGeometry()}
+        <meshStandardMaterial 
+          color={getNodeColor()} 
+          emissive={getNodeColor()}
+          emissiveIntensity={isSelected || hovered ? 2 : 0.5}
+          transparent 
+          opacity={0.9}
+        />
+      </mesh>
 
       <NeuralSpark node={{ id, name, type, metadata }} active={isSelected || hovered} />
       <FloatingMetadataHUD metadata={metadata} hovered={hovered} />
       
-      <Html distanceFactor={10} position={[0, -0.8, 0]}>
+      <Html distanceFactor={15} position={[0, -0.8, 0]} center>
         <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-all duration-300 ${isSelected || hovered ? 'opacity-100 scale-110 border-[#00FFFF]/40 shadow-[0_0_10px_rgba(0,255,255,0.2)]' : 'opacity-40'}`}>
           {name}
         </div>
@@ -270,13 +284,52 @@ function UMLArrowhead({ start, end, type, color, opacity, isSelected }: { start:
 
 // --- Interactive Edge Component ---
 
-function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: any, isSelected: boolean, isNodeSelected: boolean, onClick: () => void }) {
+function CodeGraphEdge({ edge, livePositions, isSelected, isNodeSelected, onClick }: { edge: any, livePositions: React.MutableRefObject<Map<string, THREE.Vector3>>, isSelected: boolean, isNodeSelected: boolean, onClick: () => void }) {
   const [hovered, setHovered] = useState(false);
+  const lineRef = useRef<any>(null);
+  const arrowRef = useRef<THREE.Mesh>(null);
+  const hitMeshRef = useRef<THREE.Mesh>(null);
   
   useEffect(() => {
     if (hovered) document.body.style.cursor = 'pointer';
     return () => { document.body.style.cursor = 'auto'; };
   }, [hovered]);
+
+  useFrame(() => {
+    const start = livePositions.current.get(String(edge.source));
+    const end = livePositions.current.get(String(edge.target));
+
+    if (start && end) {
+      // Update Line (Drei Line ref is a Line2 instance)
+      if (lineRef.current && lineRef.current.geometry) {
+        lineRef.current.geometry.setPositions([
+          start.x, start.y, start.z,
+          end.x, end.y, end.z
+        ]);
+        lineRef.current.computeLineDistances();
+      }
+
+      // Update Hitbox and Midpoint components
+      const midpoint = start.clone().add(end).multiplyScalar(0.5);
+      const distance = start.distanceTo(end);
+      
+      if (hitMeshRef.current) {
+        hitMeshRef.current.position.copy(midpoint);
+        hitMeshRef.current.lookAt(end);
+        hitMeshRef.current.rotateX(Math.PI / 2);
+        hitMeshRef.current.scale.set(1, distance, 1);
+      }
+
+      if (arrowRef.current) {
+        // Offset arrowhead to surface
+        const dir = new THREE.Vector3().subVectors(end, start).normalize();
+        const offsetEnd = end.clone().sub(dir.clone().multiplyScalar(0.6));
+        arrowRef.current.position.copy(offsetEnd);
+        arrowRef.current.lookAt(end);
+        arrowRef.current.rotateX(Math.PI / 2);
+      }
+    }
+  });
 
   const getColor = () => {
     if (isSelected || hovered) return '#FFFFFF';
@@ -289,18 +342,17 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
     }
   };
 
-  const start = new THREE.Vector3(...edge.sourcePos);
-  const end = new THREE.Vector3(...edge.targetPos);
-  const distance = start.distanceTo(end);
-  const midpoint = start.clone().add(end).multiplyScalar(0.5);
-
   const edgeOpacity = isSelected || hovered ? 1 : isNodeSelected ? 0.9 : edge.type === 'DEFINES' ? 0.3 : 0.6;
   const lineWidth = (isSelected || hovered) ? 4 : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
+
+  const isInherits = edge.type === 'INHERITS';
+  const isCalls = edge.type === 'CALLS' || edge.type === 'DEPENDS_ON';
 
   return (
     <group>
       {/* Visible Line */}
       <Line 
+         ref={lineRef}
          points={[edge.sourcePos, edge.targetPos]}
          color={getColor()}
          transparent
@@ -311,28 +363,27 @@ function CodeGraphEdge({ edge, isSelected, isNodeSelected, onClick }: { edge: an
          dashSize={0.5}
       />
 
-      {/* UML Grounding Marker */}
-      <UMLArrowhead 
-        start={start} 
-        end={end} 
-        type={edge.type} 
-        color={getColor()} 
-        opacity={edgeOpacity}
-        isSelected={isSelected || hovered}
-      />
+      {/* UML Arrowhead */}
+      {(isInherits || isCalls) && (
+        <mesh ref={arrowRef}>
+          {isInherits ? <coneGeometry args={[0.25, 0.5, 3]} /> : <coneGeometry args={[0.15, 0.4, 8]} />}
+          <meshBasicMaterial 
+            color={isInherits ? "#ffffff" : getColor()} 
+            transparent 
+            opacity={edgeOpacity * 1.5}
+            wireframe={isInherits}
+          />
+        </mesh>
+      )}
 
       {/* Invisible Hit-Tube */}
       <mesh 
-        position={midpoint} 
+        ref={hitMeshRef}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
         onPointerOut={() => setHovered(false)}
         onClick={(e) => { e.stopPropagation(); onClick(); }}
-        onUpdate={(self) => {
-           self.lookAt(end);
-           self.rotateX(Math.PI / 2);
-        }}
       >
-        <cylinderGeometry args={[0.5, 0.5, distance, 6]} />
+        <cylinderGeometry args={[0.5, 0.5, 1, 6]} />
         <meshBasicMaterial visible={false} />
       </mesh>
     </group>
@@ -407,6 +458,28 @@ const KEY_MAP = [
 ];
 
 function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNodeClick, onEdgeClick, cameraControlsRef, showClusters }: any) {
+  const livePositions = useRef<Map<string, THREE.Vector3>>(new Map());
+  const targetVec = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    // Phase 4 Sync Loop: Lerp all live positions toward their targets
+    if (!processedGraph?.nodes) return;
+
+    processedGraph.nodes.forEach((node: any) => {
+      if (!node.position || !Array.isArray(node.position)) return;
+      
+      const nid = String(node.id);
+      targetVec.current.set(node.position[0] || 0, node.position[1] || 0, node.position[2] || 0);
+      
+      if (!livePositions.current.has(nid)) {
+        livePositions.current.set(nid, targetVec.current.clone());
+      } else {
+        const live = livePositions.current.get(nid)!;
+        live.lerp(targetVec.current, 0.05);
+      }
+    });
+  });
+
   return (
     <>
       <color attach="background" args={['#020408']} />
@@ -424,6 +497,7 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
         <CodeSymbolNode 
           key={node.id} 
           {...node} 
+          livePositions={livePositions}
           isSelected={selectedNodeId === node.id}
           isClusterMode={showClusters}
           onClick={() => onNodeClick(node)} 
@@ -434,6 +508,7 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
         <CodeGraphEdge 
           key={`${edge.source}-${edge.target}-${i}`}
           edge={edge}
+          livePositions={livePositions}
           isSelected={selectedEdgeId === `${edge.source}-${edge.target}`}
           isNodeSelected={selectedNodeId === edge.source || selectedNodeId === edge.target}
           onClick={() => onEdgeClick(edge)}
@@ -467,6 +542,10 @@ export function CodeGraphCanvas() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const isFetching = useRef(false);
+  const [selectionTier, setSelectionTier] = useState<1 | 2 | 3>(1);
+  const [synthesisMode, setSynthesisMode] = useState<'structural' | 'architectural' | 'neural'>('neural');
+  const [syncMode, setSyncMode] = useState<'real_time' | 'streaming' | 'stabilized'>('streaming');
   const cameraControlsRef = useRef<any>(null);
 
   const flyToNode = (pos: [number, number, number]) => {
@@ -502,12 +581,18 @@ export function CodeGraphCanvas() {
   };
 
   const fetchGraph = async () => {
+    if (isFetching.current) return;
+    isFetching.current = true;
     try {
-      // Only fetch if a code snapshot is selected OR we are in default mode
+      // Phase 4: Use new LoD endpoint
       const snapshotParam = activeGraphId && activeGraphId !== 'neural_nexus' ? `&snapshot_id=${activeGraphId}` : '';
       const pathParam = focusPath ? `&path=${focusPath}` : '';
       
-      const resp = await fetch(`${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}${pathParam}`, {
+      const endpoint = selectionTier === 1 && !focusPath 
+        ? `${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}`
+        : `${API_BASE_URL}/api/graph/code/lod?workspace=${currentWorkspace}&tier=${selectionTier}${snapshotParam}${pathParam}`;
+
+      const resp = await fetch(endpoint, {
          headers: { ...GOVERNANCE_HEADERS }
       });
       if (resp.ok) {
@@ -519,6 +604,8 @@ export function CodeGraphCanvas() {
       }
     } catch (e) {
       console.error("Failed to fetch graph", e);
+    } finally {
+      isFetching.current = false;
     }
   };
 
@@ -548,52 +635,64 @@ export function CodeGraphCanvas() {
     }
   };
 
+  const handleDeepLayout = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/api/graph/layout?workspace=${currentWorkspace}`, {
+        method: "POST",
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      fetchGraph();
+    } catch (e) {
+      console.error("Layout failed", e);
+    }
+  };
+
   // Layout logic
   const processedGraph = useMemo(() => {
     if (!codeGraph) return { nodes: [], edges: [] };
     
-    const filteredSourceNodes = codeGraph.nodes.filter((n: any) => visibleTypes.includes(n.type));
+    const filteredSourceNodes = codeGraph.nodes.filter((n: any) => visibleTypes.includes(String(n.type)));
 
     const nodes = filteredSourceNodes.map((node: any, i: number) => {
-       const isSymbol = !['Folder', 'File'].includes(node.type);
+       // Phase 4: Use backend coordinates if available
+       if (node.position && (node.position[0] !== 0 || node.position[1] !== 0 || node.position[2] !== 0)) {
+         return { ...node, id: String(node.id) };
+       }
+
+       // Fallback to legacy circular layout if no backend coords
+       const isSymbol = !['Folder', 'File'].includes(String(node.type));
        const parts = (node.path || "").split('/');
        const depth = parts.length;
        const nodeCount = filteredSourceNodes.length || 1;
        const baseAngle = (i / nodeCount) * Math.PI * 2;
        const baseRadius = depth * 6 + 10;
        
-       let position: [number, number, number];
-       
-       if (isSymbol) {
-         const hash = node.name.split('').reduce((a: number, b: string) => a + b.charCodeAt(0), 0);
-         const offsetAngle = (hash % 100) / 100 * Math.PI * 2;
-         const offsetRadius = 2 + (hash % 8) * 0.3;
-         position = [
-            Math.cos(baseAngle) * baseRadius + Math.cos(offsetAngle) * offsetRadius,
-            (Math.random() - 0.5) * 6,
-            Math.sin(baseAngle) * baseRadius + Math.sin(offsetAngle) * offsetRadius
-         ];
-       } else {
-         position = [
-            Math.cos(baseAngle) * baseRadius,
-            (Math.random() - 0.5) * 4,
-            Math.sin(baseAngle) * baseRadius
-         ];
-       }
-       
+       const position: [number, number, number] = [
+         Math.cos(baseAngle) * baseRadius,
+         (isSymbol ? 5 : 0) + (Math.random() * 2),
+         Math.sin(baseAngle) * baseRadius
+       ];
+
        return {
          ...node,
+         id: String(node.id),
          position
        };
     });
 
     const edges = codeGraph.edges.filter((e: any) => {
-       return nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target);
+       const sid = String(e.source);
+       const tid = String(e.target);
+       return nodes.find(n => n.id === sid) && nodes.find(n => n.id === tid);
     }).map((edge: any) => {
-       const sourceNode = nodes.find(n => n.id === edge.source);
-       const targetNode = nodes.find(n => n.id === edge.target);
+       const sid = String(edge.source);
+       const tid = String(edge.target);
+       const sourceNode = nodes.find(n => n.id === sid);
+       const targetNode = nodes.find(n => n.id === tid);
        return {
          ...edge,
+         source: sid,
+         target: tid,
          sourcePos: sourceNode?.position || [0,0,0],
          targetPos: targetNode?.position || [0,0,0]
        };
@@ -617,9 +716,17 @@ export function CodeGraphCanvas() {
     fetchGraph();
     // Reset camera on root
     if (!focusPath && cameraControlsRef.current) {
-        cameraControlsRef.current.setLookAt(0, 20, 40, 0, 0, 0, true);
+        cameraControlsRef.current.setLookAt(0, 40, 80, 0, 0, 0, true);
     }
-  }, [currentWorkspace, activeGraphId, focusPath]);
+  }, [currentWorkspace, activeGraphId, focusPath, selectionTier]);
+
+  // Sync Mode Polling (Phase 4 Streaming)
+  useEffect(() => {
+    if (syncMode === 'streaming') {
+      const timer = setInterval(() => fetchGraph(), 5000);
+      return () => clearInterval(timer);
+    }
+  }, [syncMode, currentWorkspace, selectionTier]);
 
 
   return (
@@ -644,6 +751,94 @@ export function CodeGraphCanvas() {
             </button>
           </React.Fragment>
         ))}
+      </div>
+
+      {/* Nexus Control Panel (Phase 4 - Out of the Universe) */}
+      <div className="absolute top-24 left-12 z-20 flex flex-col gap-6">
+         {/* Top Section - LoD & Synthesis */}
+         <div className="bg-black/40 backdrop-blur-2xl border border-[#00FFFF]/20 p-5 rounded-3xl w-72 shadow-[0_0_30px_rgba(0,255,255,0.05)]">
+            <div className="flex items-center gap-2 mb-6 border-b border-white/5 pb-3">
+               <Database size={14} className="text-[#00FFFF]" />
+               <span className="text-[10px] font-black text-white/90 uppercase tracking-[0.3em]">Nexus_Control</span>
+            </div>
+
+            {/* Selection Tier / LoD */}
+            <div className="space-y-4 mb-6">
+               <div className="flex justify-between items-center text-[8px] font-bold text-white/40 uppercase">
+                  <span>Level_of_Detail</span>
+                  <span className="text-[#00FFFF]">Tier_{selectionTier}</span>
+               </div>
+               <div className="grid grid-cols-3 gap-2">
+                  {[1, 2, 3].map(t => (
+                    <button 
+                      key={t}
+                      onClick={() => setSelectionTier(t as any)}
+                      className={`h-8 rounded-lg border transition-all flex items-center justify-center font-mono text-[10px] ${selectionTier === t ? 'bg-[#00FFFF]/20 border-[#00FFFF]/60 text-[#00FFFF]' : 'bg-white/5 border-white/5 text-white/40 opacity-40 hover:opacity-100'}`}
+                    >
+                      T{t}
+                    </button>
+                  ))}
+               </div>
+            </div>
+
+            {/* Synthesis Mode */}
+            <div className="space-y-3">
+               <div className="text-[8px] font-bold text-white/40 uppercase">Synthesis_Algorithm</div>
+               <div className="flex flex-col gap-2">
+                  {[
+                    { id: 'structural', label: 'STRUCTURAL', icon: <Cpu size={12}/> },
+                    { id: 'architectural', label: 'ARCHITECTURAL', icon: <Layers size={12}/> },
+                    { id: 'neural', label: 'NEURAL_NEBULA', icon: <Activity size={12}/> }
+                  ].map(mode => (
+                    <button
+                      key={mode.id}
+                      onClick={() => setSynthesisMode(mode.id as any)}
+                      className={`flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all ${synthesisMode === mode.id ? 'bg-white/10 border-[#FF00FF]/40 text-white' : 'bg-black/20 border-white/5 text-white/30 opacity-40 hover:opacity-100'}`}
+                    >
+                       <div className="flex items-center gap-3">
+                          <div className={synthesisMode === mode.id ? "text-[#FF00FF]" : ""}>{mode.icon}</div>
+                          <span className="text-[10px] font-bold tracking-widest">{mode.label}</span>
+                       </div>
+                       {synthesisMode === mode.id && <div className="w-1.5 h-1.5 rounded-full bg-[#FF00FF] shadow-[0_0_8px_#FF00FF]" />}
+                    </button>
+                  ))}
+               </div>
+            </div>
+         </div>
+
+         {/* Bottom Section - Sync & Dynamics */}
+         <div className="bg-black/40 backdrop-blur-2xl border border-white/10 p-5 rounded-3xl w-72">
+            <div className="space-y-4">
+               <div className="flex justify-between items-center text-[8px] font-bold text-white/40 uppercase">
+                  <span>Temporal_Sync</span>
+                  <Activity size={10} className="text-[#39FF14]" />
+               </div>
+               <div className="flex flex-col gap-2">
+                  {[
+                    { id: 'real_time', label: 'REAL_TIME', icon: <Zap size={12}/> },
+                    { id: 'streaming', label: 'FLUID_STREAM', icon: <Wind size={12}/> },
+                    { id: 'stabilized', label: 'STABILIZED', icon: <Home size={12}/> }
+                  ].map(mode => (
+                    <button
+                      key={mode.id}
+                      onClick={() => setSyncMode(mode.id as any)}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${syncMode === mode.id ? 'text-[#39FF14] bg-[#39FF14]/5' : 'text-white/30 hover:text-white/60'}`}
+                    >
+                       {mode.icon}
+                       <span className="text-[9px] font-mono tracking-tighter">{mode.label}</span>
+                    </button>
+                  ))}
+               </div>
+
+               <button 
+                 onClick={handleDeepLayout}
+                 className="w-full mt-2 py-3 rounded-xl border border-white/10 bg-white/5 text-[9px] font-black text-white/60 uppercase tracking-[0.2em] hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
+               >
+                  <RefreshCw size={12} />
+                  Trigger_Deep_Layout
+               </button>
+            </div>
+         </div>
       </div>
       
       {/* 3D Canvas */}

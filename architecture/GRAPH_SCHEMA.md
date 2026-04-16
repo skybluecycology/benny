@@ -6,13 +6,30 @@ This document details the schema of the spatial code graph (Neo4j) and how it is
 
 | Label | Description | Attributes |
 | :--- | :--- | :--- |
-| **`CodeEntity`** | Base label for all source symbols | `id`, `name`, `type`, `workspace`, `snapshot_id` |
+| **`CodeEntity`** | Base label for all source symbols | `id`, `name`, `type`, `workspace`, `snapshot_id`, `created_at`, `updated_at`, `ast_range_start`, `ast_range_end` |
 | **`File`** | A physical source file | `file_path`, `ext` |
 | **`Class`** | A class definition | `name` |
 | **`Function`** | A function or method | `name`, `is_method` |
 | **`Folder`** | A directory entity | `path` |
-| **`Concept`** | Semantic abstraction | `name`, `node_type: 'Concept'` |
-| **`Documentation`**| Ingested markdown/PDF | `filename`, `source_type` |
+| **`Concept`** | Semantic abstraction | `name`, `node_type: 'Concept'`, `created_at`, `updated_at` |
+| **`Documentation`**| Ingested markdown/PDF | `filename`, `source_type`, `created_at`, `updated_at` |
+| **`Document`** | Source document node in triple graph | `name`, `workspace`, `created_at`, `updated_at` |
+
+### Temporal Properties (All Nodes)
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `created_at` | datetime | When this node was first created via MERGE |
+| `updated_at` | datetime | Last time a re-ingest touched this node |
+| `superseded_by` | string (nullable) | ID of the node that replaced this one *(Phase 2 deferred)* |
+| `superseded_at` | datetime (nullable) | When this node was superseded *(Phase 2 deferred)* |
+
+### AST Range Properties (CodeEntity only)
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `ast_range_start` | list [line, col] | Tree-sitter start position of the symbol |
+| `ast_range_end` | list [line, col] | Tree-sitter end position of the symbol |
 
 ## 2. Relationship Types (Edge Modeling)
 
@@ -28,8 +45,33 @@ This document details the schema of the spatial code graph (Neo4j) and how it is
 ### 2.2 Semantic Relationships (Inferred)
 *   **`REPRESENTS`**: Bridge between a Code Symbol and a Semantic Concept.
     *   `(CodeEntity)-[:REPRESENTS]->(Concept)`
-*   **`CORRELATES_WITH`**: Deep semantic link discovered via embeddings.
+*   **`CORRELATES_WITH`**: Deep semantic link discovered via embeddings or exact name match.
     *   `(Concept)-[:CORRELATES_WITH {strategy: 'aggressive'}]->(CodeEntity)`
+    *   **Required properties on every `CORRELATES_WITH` edge**:
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `confidence` | float [0.0–1.0] | Cosine similarity score or 1.0 for exact match |
+| `rationale` | string | Human-readable explanation of why this link exists |
+| `strategy` | string | `'safe'` \| `'aggressive'` \| `'manual'` |
+| `created_at` | timestamp | When the edge was first created |
+| `updated_at` | timestamp | Last time the edge was refreshed |
+
+*   **`REL`**: Directed knowledge triple relationship between two Concepts.
+    *   `(Concept)-[:REL {predicate: 'causes'}]->(Concept)`
+    *   **Required properties on every `REL` edge**:
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `confidence` | float [0.0–1.0] | LLM-assigned confidence |
+| `rationale` | string | `Extracted from '{file}' via '{strategy}' strategy using model '{model}'` |
+| `strategy` | string | `'safe'` \| `'aggressive'` \| `'directed'` |
+| `source_file` | string | Source document filename |
+| `doc_fragment_id` | string | MD5 of source chunk text — enables DNA trace |
+| `citation` | string | Exact excerpt that justifies the claim |
+| `created_at` | timestamp | Edge creation time |
+| `updated_at` | timestamp | Last refresh time |
+
 
 ## 3. Ingestion Pipeline (Tree-Sitter Logic)
 

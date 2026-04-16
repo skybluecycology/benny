@@ -27,6 +27,7 @@ class KnowledgeTriple(BaseModel):
     section_title: str = ""
     model_id: str = "unknown"
     strategy: str = "safe" # safe, aggressive
+    fragment_id: Optional[str] = None  # DNA trace: MD5 of source chunk text
 
     @field_validator("subject", "predicate", "object")
     @classmethod

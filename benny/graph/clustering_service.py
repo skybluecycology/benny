@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class ClusteringService:
     @staticmethod
-    def run_lpa_on_workspace(workspace: str, iterations: int = 5) -> Dict[str, Any]:
+    def run_lpa_on_workspace(workspace: str, iterations: int = 5, auto_layout: bool = True) -> Dict[str, Any]:
         """
         Runs Label Propagation Algorithm on the graph for a specific workspace.
         Assigns a 'community_id' to every node (Concept, File, Symbol).
@@ -78,7 +78,7 @@ class ClusteringService:
         with driver.session() as session:
             session.run(write_query, data=data)
             
-        # 4. Generate Semantic Names for major communities
+        # 4. Generate Semantic Names for major communities (Phase 4 Refactor: Non-blocking)
         from ..synthesis.engine import name_community
         
         community_members: Dict[int, List[str]] = {}
@@ -94,29 +94,55 @@ class ClusteringService:
                 if c_id not in community_members: community_members[c_id] = []
                 community_members[c_id].append(record["name"])
 
-        for c_id, members in community_members.items():
-            if len(members) >= 3:
+        async def name_and_update(c_id, members):
+            try:
+                naming_res = await name_community(members, workspace=workspace)
+                c_name = naming_res.get("community_name", "Cluster Hub")
+                c_just = naming_res.get("justification", "")
+                
+                update_name_query = """
+                MATCH (n {workspace: $workspace, community_id: $c_id})
+                SET n.community_name = $c_name, n.community_justification = $c_just
+                """
+                with driver.session() as session:
+                    session.run(update_name_query, workspace=workspace, c_id=c_id, c_name=c_name, c_just=c_just)
+            except Exception as e:
+                logger.error(f"Failed to name community {c_id}: {e}")
+
+        # Execute naming in parallel if possible
+        try:
+            loop = asyncio.get_event_loop()
+            tasks = [name_and_update(c_id, members) for c_id, members in community_members.items() if len(members) >= 3]
+            if loop.is_running():
+                # We fire and forget naming tasks to keep the LPA response fast
+                for task in tasks: asyncio.create_task(task)
+            else:
+                loop.run_until_complete(asyncio.gather(*tasks))
+        except RuntimeError:
+            asyncio.run(asyncio.gather(*[name_and_update(cid, mems) for cid, mems in community_members.items() if len(mems) >= 3]))
+
+        # 5. Trigger Gravity Re-Indexing (Phase 4, D.1.3)
+
+        # 5. Trigger Gravity Re-Indexing (Phase 4, D.1.3)
+        if auto_layout:
+            try:
+                from .gravity_index import GravityIndex
+                # In a real async environment, this would be a background task
+                # For now we run it synchronously to ensure the final report is accurate
+                engine = GravityIndex(workspace)
+                # Note: We run this in the current event loop if possible
                 try:
                     loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(engine.run())
+                    else:
+                        loop.run_until_complete(engine.run())
                 except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    asyncio.run(engine.run())
                 
-                if loop.is_running():
-                    # If running inside a route, we use the existing event loop to run naming
-                    # Note: In production this might be better handled via a background queue
-                    pass 
-                else:
-                    naming_res = loop.run_until_complete(name_community(members, workspace=workspace))
-                    c_name = naming_res.get("community_name", "Cluster Hub")
-                    c_just = naming_res.get("justification", "")
-                    
-                    update_name_query = """
-                    MATCH (n {workspace: $workspace, community_id: $c_id})
-                    SET n.community_name = $c_name, n.community_justification = $c_just
-                    """
-                    with driver.session() as session:
-                        session.run(update_name_query, workspace=workspace, c_id=c_id, c_name=c_name, c_just=c_just)
+                logger.info(f"GravityIndex: Auto-layout triggered for {workspace}")
+            except Exception as e:
+                logger.error(f"GravityIndex: Failed to trigger auto-layout: {e}")
 
         return {
             "status": "completed",

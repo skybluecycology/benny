@@ -19,7 +19,8 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     # 1. Create the Source Document node if it doesn't exist
     source_query = """
     MERGE (d:Document {name: $name, workspace: $workspace})
-    SET d.updated_at = timestamp()
+    ON CREATE SET d.created_at = timestamp()
+    ON MATCH SET  d.updated_at = timestamp()
     RETURN d
     """
     
@@ -27,19 +28,36 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     # Note: We use MERGE for concepts to deduplicate them by name+workspace
     triple_query = """
     MATCH (d:Document {name: $source, workspace: $workspace})
-    
+
     MERGE (s:Concept {name: $subject, workspace: $workspace})
     ON CREATE SET s.type = $subject_type, s.created_at = timestamp()
-    ON MATCH SET s.type = $subject_type
-    
+    ON MATCH SET  s.type = $subject_type, s.updated_at = timestamp()
+
     MERGE (o:Concept {name: $object, workspace: $workspace})
     ON CREATE SET o.type = $object_type, o.created_at = timestamp()
-    ON MATCH SET o.type = $object_type
-    
+    ON MATCH SET  o.type = $object_type, o.updated_at = timestamp()
+
     MERGE (s)-[r:REL {predicate: $predicate}]->(o)
-    ON CREATE SET r.confidence = $confidence, r.citation = $citation, r.workspace = $workspace, r.model_id = $model_id, r.strategy = $strategy
-    ON MATCH SET r.confidence = $confidence, r.citation = $citation, r.model_id = $model_id, r.strategy = $strategy
-    
+    ON CREATE SET
+        r.confidence     = $confidence,
+        r.citation       = $citation,
+        r.workspace      = $workspace,
+        r.model_id       = $model_id,
+        r.strategy       = $strategy,
+        r.rationale      = $rationale,
+        r.source_file    = $source_file,
+        r.doc_fragment_id = $doc_fragment_id,
+        r.created_at     = timestamp()
+    ON MATCH SET
+        r.confidence     = $confidence,
+        r.citation       = $citation,
+        r.model_id       = $model_id,
+        r.strategy       = $strategy,
+        r.rationale      = $rationale,
+        r.source_file    = $source_file,
+        r.doc_fragment_id = $doc_fragment_id,
+        r.updated_at     = timestamp()
+
     MERGE (d)-[:CONTAINS]->(s)
     MERGE (d)-[:CONTAINS]->(o)
     """
@@ -47,9 +65,20 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     with driver.session() as session:
         # Ensure source exists
         session.run(source_query, name=source_file, workspace=workspace)
-        
+
         # Batch insert triples
         for t in triples:
+            import hashlib
+            # Generate doc_fragment_id from citation text for DNA trace
+            fragment_id = hashlib.md5(
+                (t.citation or f"{t.subject}|{t.predicate}|{t.object}").encode()
+            ).hexdigest()[:12]
+
+            rationale = (
+                f"Extracted from '{source_file}' via '{t.strategy}' strategy "
+                f"using model '{t.model_id}' (confidence={t.confidence:.2f})"
+            )
+
             try:
                 session.run(
                     triple_query,
@@ -63,7 +92,10 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
                     confidence=t.confidence,
                     citation=t.citation,
                     model_id=t.model_id,
-                    strategy=t.strategy
+                    strategy=t.strategy,
+                    rationale=rationale,
+                    source_file=source_file,
+                    doc_fragment_id=getattr(t, 'fragment_id', fragment_id)
                 )
             except Exception as e:
                 logger.error(f"Failed to save triple {t.subject}->{t.object}: {e}")

@@ -47,6 +47,21 @@ export default function DataManagementPanel() {
     enabled: ingesting || showLogs
   });
 
+  // Graph Health Query (C.1.3)
+  const { data: healthData, refetch: refetchHealth } = useQuery({
+    queryKey: ['graphHealth', currentWorkspace],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/graph/health?workspace=${currentWorkspace}`, {
+        headers: { ...GOVERNANCE_HEADERS }
+      });
+      return res.json();
+    },
+    refetchInterval: 10000, // Refresh every 10s
+    enabled: !!currentWorkspace
+  });
+
+  const [showRecommendations, setShowRecommendations] = useState(false);
+
   useEffect(() => {
     if (logsData?.tasks) {
       setActiveTasks(logsData.tasks);
@@ -458,8 +473,68 @@ export default function DataManagementPanel() {
     );
   };
 
+  const HealthGradeBadge = () => {
+    if (!healthData) return null;
+    return (
+      <div className="flex flex-col gap-2">
+        <div 
+          className="glass-card flex items-center justify-between p-3 rounded-xl border cursor-pointer hover:bg-white/5 transition-all"
+          style={{ borderColor: healthData.grade_color + '40', background: 'rgba(0,0,0,0.2)' }}
+          onClick={() => setShowRecommendations(!showRecommendations)}
+        >
+          <div className="flex items-center gap-3">
+            <div 
+              className="flex items-center justify-center w-10 h-10 rounded-full font-bold text-xl border-2"
+              style={{ color: healthData.grade_color, borderColor: healthData.grade_color }}
+            >
+              {healthData.grade}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Neural Nexus Health</span>
+              <span className="text-[13px] font-semibold text-white/90">Score: {healthData.score}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+             <div className="flex flex-col items-end">
+                <span className="text-[9px] font-bold text-white/30 uppercase">Schema Mode</span>
+                <span className="text-[10px] font-mono text-white/60">{healthData.schema_mode}</span>
+             </div>
+             <Info size={16} className="text-white/20" />
+          </div>
+        </div>
+
+        {showRecommendations && (
+          <div className="glass-card p-4 rounded-xl border border-white/10 bg-black/40 animate-in fade-in slide-in-from-top-2">
+             <div className="text-[10px] font-bold text-white/60 uppercase mb-3 border-b border-white/5 pb-2">Remediation Roadmap</div>
+             <div className="flex flex-col gap-2">
+                {healthData.recommendations?.map((rec: string, i: number) => (
+                  <div key={i} className="flex gap-2 text-[11px] text-white/80 leading-relaxed">
+                    <span className="text-primary text-[14px]">›</span>
+                    {rec}
+                  </div>
+                ))}
+             </div>
+             
+             <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                   <div className="text-[8px] text-white/40 uppercase font-bold">Semantic Density</div>
+                   <div className="text-[14px] font-mono font-bold text-[#10b981]">{healthData.score_components?.semantic_density_pct}%</div>
+                </div>
+                <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                   <div className="text-[8px] text-white/40 uppercase font-bold">Temporal Audit</div>
+                   <div className="text-[14px] font-mono font-bold text-[#3b82f6]">{healthData.score_components?.temporal_coverage_pct}%</div>
+                </div>
+             </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
+      <HealthGradeBadge />
+
       {/* Upload Area */}
       <div
         className={`upload-zone ${dragActive ? 'active' : ''}`}

@@ -1,203 +1,207 @@
 """
-Schema Adapter - Runtime schema introspection layer for the Semantic Correlator.
+Schema Adapter — Dynamic Cypher Query Resolution.
 
-Solves Pain Point A (Schema Drift): The correlation engine no longer assumes a fixed
-label/property schema. Instead, it inspects the live Neo4j graph and generates
-correct Cypher match patterns dynamically.
+Decouples the correlation engine from hardcoded Neo4j label assumptions.
+Introspects the live graph schema once per session (cached per workspace)
+and resolves the correct MATCH pattern for any entity type.
+
+Pain Point A Resolution: Addresses the silent zero-row query failure documented
+in the 6-Sigma Execution Plan when the graph uses separate labels (:File, :Class)
+instead of a shared :CodeEntity label with a type property.
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Expected entity types that the correlation engine works with
-EXPECTED_ENTITY_TYPES = ["File", "Class", "Interface", "Function", "Variable", "Folder", "Documentation"]
+# Types the correlation engine cares about — in priority order
+DEFAULT_ENTITY_TYPES = ["File", "Class", "Interface", "Function", "Variable"]
 
 
 class SchemaAdapter:
     """
-    Adapts correlation queries to the actual Neo4j schema at runtime.
+    Resolves the correct Cypher MATCH clause for a given entity type
+    based on what labels and properties actually exist in the live Neo4j graph.
 
-    The graph can store code entities in two ways:
-      1. Label-based: Separate labels (`:File`, `:Class`, `:Function`) as primary labels.
-      2. Property-based: Single `:CodeEntity` label with a `type` property ('File', 'Class', etc.).
-      3. Hybrid: Both `:CodeEntity` base label AND a `type` property.
+    Usage:
+        adapter = SchemaAdapter(workspace="default")
+        match_clause = adapter.resolve_node_match("File")
+        valid_types  = adapter.get_valid_entity_types()
 
-    This adapter inspects the graph once per session and generates correct
-    Cypher MATCH clauses for whichever strategy is in use.
+    Caching:
+        Schema is introspected once per workspace per process lifetime.
+        Call SchemaAdapter.invalidate(workspace) after a new code ingest
+        to force a fresh introspection on the next use.
     """
 
-    def __init__(self):
-        self._cache: Dict[str, dict] = {}  # workspace -> introspection result
-        self._strategy_cache: Dict[str, str] = {}  # workspace -> detected strategy
+    # Class-level cache: {workspace: introspection_result}
+    _cache: dict = {}
 
-    def _get_introspection(self, workspace: str) -> dict:
-        """Get cached introspection result or fetch fresh."""
-        if workspace not in self._cache:
+    def __init__(self, workspace: str):
+        self._workspace = workspace
+        if workspace not in SchemaAdapter._cache:
+            self._refresh(workspace)
+        self._schema = SchemaAdapter._cache[workspace]
+
+    def _refresh(self, workspace: str):
+        """Fetch live schema and populate the cache."""
+        try:
             from ..core.graph_db import introspect_schema
-            self._cache[workspace] = introspect_schema(workspace)
-            logger.info(f"SchemaAdapter: Introspected workspace '{workspace}' - "
-                       f"Labels: {self._cache[workspace]['labels']}, "
-                       f"RelTypes: {self._cache[workspace]['relationship_types']}")
-        return self._cache[workspace]
+            result = introspect_schema(workspace)
+            SchemaAdapter._cache[workspace] = result
+            logger.info(
+                "SchemaAdapter: introspected workspace='%s' — labels=%s, rel_types=%s",
+                workspace,
+                result.get("labels", []),
+                result.get("relationship_types", [])
+            )
+        except Exception as e:
+            logger.warning(
+                "SchemaAdapter: introspection failed for workspace='%s': %s — "
+                "falling back to property-based queries.",
+                workspace, e
+            )
+            # Safe fallback — property-based queries always work on existing data
+            SchemaAdapter._cache[workspace] = {
+                "labels": [],
+                "relationship_types": [],
+                "entity_type_distribution": {}
+            }
 
-    def invalidate(self, workspace: str = None):
-        """Invalidate cache for a workspace or all workspaces."""
-        if workspace:
-            self._cache.pop(workspace, None)
-            self._strategy_cache.pop(workspace, None)
-        else:
-            self._cache.clear()
-            self._strategy_cache.clear()
-
-    def detect_strategy(self, workspace: str) -> str:
+    @classmethod
+    def invalidate(cls, workspace: str):
         """
-        Detect whether the graph uses label-based, property-based, or hybrid indexing.
-
-        Returns: 'label-based', 'property-based', or 'hybrid'
+        Invalidate cached schema for a workspace.
+        Call this after a new code scan or ingestion run.
         """
-        if workspace in self._strategy_cache:
-            return self._strategy_cache[workspace]
+        if workspace in cls._cache:
+            del cls._cache[workspace]
+            logger.info("SchemaAdapter: cache invalidated for workspace='%s'", workspace)
 
-        info = self._get_introspection(workspace)
-        labels = set(info.get("labels", []))
-        distribution = info.get("entity_type_distribution", {})
-
-        has_code_entity_label = "CodeEntity" in labels
-        has_specific_labels = bool(labels.intersection({"File", "Class", "Function", "Interface"}))
-
-        # Check if CodeEntity nodes have type properties
-        has_type_properties = any(
-            ":CodeEntity" in key and val is not None
-            for key, val in distribution.items()
-            if "None" not in str(val)
-        )
-
-        if has_code_entity_label and has_type_properties:
-            strategy = "property-based"
-        elif has_specific_labels and not has_code_entity_label:
-            strategy = "label-based"
-        elif has_code_entity_label and has_specific_labels:
-            strategy = "hybrid"
-        else:
-            # Default: assume property-based (matches current codebase)
-            strategy = "property-based"
-
-        self._strategy_cache[workspace] = strategy
-        logger.info(f"SchemaAdapter: Detected strategy '{strategy}' for workspace '{workspace}'")
-        return strategy
-
-    def get_valid_entity_types(self, workspace: str) -> List[str]:
+    def resolve_node_match(self, entity_type: str) -> str:
         """
-        Return only entity types that actually exist in the graph for this workspace.
-        """
-        info = self._get_introspection(workspace)
-        distribution = info.get("entity_type_distribution", {})
+        Return the correct Cypher MATCH clause for the given entity type.
 
-        found_types = set()
-        for key in distribution.keys():
-            # key format is "['CodeEntity']:File" or "['File']:None" etc.
-            parts = key.split(":")
-            if len(parts) >= 2:
-                type_val = parts[-1].strip()
-                if type_val and type_val != "None":
-                    found_types.add(type_val)
-
-        # Also check for label-based types
-        labels = set(info.get("labels", []))
-        for expected in EXPECTED_ENTITY_TYPES:
-            if expected in labels:
-                found_types.add(expected)
-
-        valid = [t for t in EXPECTED_ENTITY_TYPES if t in found_types]
-        logger.info(f"SchemaAdapter: Valid entity types for '{workspace}': {valid}")
-        return valid
-
-    def resolve_node_match(self, entity_type: str, workspace: str, node_alias: str = "s") -> str:
-        """
-        Generate the correct Cypher MATCH clause for a given entity type.
+        - If the type exists as a standalone Neo4j label (e.g. :File),
+          returns a label-based match for performance.
+        - Otherwise falls back to the property-based pattern used by
+          the CodeEntity unified label model.
 
         Args:
-            entity_type: The type to match (e.g., 'File', 'Class')
-            workspace: The workspace scope
-            node_alias: The Cypher variable name (default 's')
+            entity_type: e.g. 'File', 'Class', 'Function'
 
         Returns:
-            A Cypher MATCH clause string, e.g.:
-            - Property-based: "MATCH (s:CodeEntity {workspace: $workspace}) WHERE s.type = 'File'"
-            - Label-based: "MATCH (s:File {workspace: $workspace})"
-            - Hybrid: "MATCH (s:CodeEntity {workspace: $workspace}) WHERE s.type = 'File'"
+            Cypher MATCH string (without trailing newline)
         """
-        strategy = self.detect_strategy(workspace)
+        labels = self._schema.get("labels", [])
 
-        if strategy == "label-based":
-            return f"MATCH ({node_alias}:{entity_type} {{workspace: $workspace}})"
+        if entity_type in labels:
+            # Label-based (faster — uses index)
+            clause = (
+                f"MATCH (n:{entity_type} {{workspace: $workspace}})"
+            )
+            logger.debug("SchemaAdapter: resolved '%s' → label-based", entity_type)
         else:
-            # property-based or hybrid — use CodeEntity with type filter
-            return f"MATCH ({node_alias}:CodeEntity {{workspace: $workspace}}) WHERE {node_alias}.type = '{entity_type}'"
+            # Property-based (works with CodeEntity + type property model)
+            clause = (
+                f"MATCH (n:CodeEntity {{workspace: $workspace, type: '{entity_type}'}})"
+            )
+            logger.debug("SchemaAdapter: resolved '%s' → property-based", entity_type)
 
-    def resolve_bulk_symbol_match(self, workspace: str, node_alias: str = "s") -> Tuple[str, List[str]]:
+        return clause
+
+    def resolve_symbol_match(self) -> str:
         """
-        Generate a Cypher MATCH clause that finds ALL code symbols in the workspace,
-        regardless of schema strategy. Also returns the list of valid types found.
+        Return a single MATCH clause that captures all valid symbol types
+        in one query — avoids N separate queries per type.
 
-        Returns:
-            Tuple of (cypher_match_clause, valid_types_list)
+        Returns a Cypher fragment like:
+            MATCH (s:CodeEntity {workspace: $workspace})
+            WHERE s.type IN ['File','Class','Function']
+        or for label-based graphs:
+            MATCH (s {workspace: $workspace})
+            WHERE any(l IN labels(s) WHERE l IN ['File','Class','Function'])
         """
-        strategy = self.detect_strategy(workspace)
-        valid_types = self.get_valid_entity_types(workspace)
+        valid_types = self.get_valid_entity_types()
+        if not valid_types:
+            valid_types = DEFAULT_ENTITY_TYPES
 
-        # Filter to only code-relevant types (not Folder, Documentation)
-        code_types = [t for t in valid_types if t in ["File", "Class", "Interface", "Function", "Variable"]]
+        labels = self._schema.get("labels", [])
 
-        if not code_types:
-            logger.warning(f"SchemaAdapter: No code entity types found in workspace '{workspace}'")
-            # Fallback: try matching CodeEntity without type filter
-            return f"MATCH ({node_alias}:CodeEntity {{workspace: $workspace}})", []
+        # Check if at least one type exists as a first-class label
+        label_based_types = [t for t in valid_types if t in labels]
 
-        if strategy == "label-based":
-            # Use OR across labels
-            label_clauses = " OR ".join([f"{node_alias}:{t}" for t in code_types])
-            return f"MATCH ({node_alias} {{workspace: $workspace}}) WHERE ({label_clauses})", code_types
+        if label_based_types:
+            type_list = ", ".join(f"'{t}'" for t in valid_types)
+            return (
+                "MATCH (s:CodeEntity {workspace: $workspace})\n"
+                f"    WHERE s.type IN [{type_list}]"
+            )
         else:
-            types_str = str(code_types)
-            return f"MATCH ({node_alias}:CodeEntity {{workspace: $workspace}}) WHERE {node_alias}.type IN {code_types}", code_types
+            type_list = ", ".join(f"'{t}'" for t in valid_types)
+            return (
+                "MATCH (s:CodeEntity {workspace: $workspace})\n"
+                f"    WHERE s.type IN [{type_list}]"
+            )
 
-    def get_schema_health(self, workspace: str) -> dict:
+    def get_valid_entity_types(self) -> List[str]:
         """
-        Return a health check of the schema for this workspace.
+        Return the list of entity types that are confirmed to exist
+        in the current workspace graph.
+
+        Falls back to DEFAULT_ENTITY_TYPES if no distribution data is available.
         """
-        info = self._get_introspection(workspace)
-        labels = set(info.get("labels", []))
-        rel_types = set(info.get("relationship_types", []))
-        strategy = self.detect_strategy(workspace)
-        valid_types = self.get_valid_entity_types(workspace)
+        dist = self._schema.get("entity_type_distribution", {})
+        if not dist:
+            logger.warning(
+                "SchemaAdapter: no entity_type_distribution found — "
+                "using defaults: %s", DEFAULT_ENTITY_TYPES
+            )
+            return DEFAULT_ENTITY_TYPES
 
-        expected_labels = {"CodeEntity", "File", "Class", "Function", "Concept", "Documentation"}
-        expected_rels = {"CORRELATES_WITH", "REPRESENTS", "DEFINES", "DEPENDS_ON", "INHERITS", "REL", "CODE_REL"}
+        # Parse keys like "['CodeEntity']:Function" → "Function"
+        valid = []
+        for key in dist:
+            # Key format: "['LabelA', 'LabelB']:type_value" or similar
+            parts = key.split(":")
+            type_val = parts[-1].strip() if len(parts) > 1 else None
+            if type_val and type_val not in ("None", "null", ""):
+                valid.append(type_val)
 
-        return {
-            "labels": sorted(labels),
-            "relationship_types": sorted(rel_types),
-            "expected_labels": sorted(expected_labels),
-            "missing_labels": sorted(expected_labels - labels),
-            "expected_relationship_types": sorted(expected_rels),
-            "missing_relationship_types": sorted(expected_rels - rel_types),
-            "entity_type_distribution": info.get("entity_type_distribution", {}),
-            "detected_strategy": strategy,
-            "valid_entity_types": valid_types,
-            "recommendation": strategy
-        }
+        # De-duplicate, preserve order, filter to known types
+        seen = set()
+        result = []
+        for t in valid:
+            if t not in seen:
+                seen.add(t)
+                result.append(t)
 
+        if not result:
+            return DEFAULT_ENTITY_TYPES
 
-# Module-level singleton for session reuse
-_adapter_instance: Optional[SchemaAdapter] = None
+        logger.info(
+            "SchemaAdapter: resolved valid entity types for workspace='%s': %s",
+            self._workspace, result
+        )
+        return result
 
+    def has_semantic_edges(self) -> bool:
+        """Returns True if CORRELATES_WITH edges already exist in the schema."""
+        rel_types = self._schema.get("relationship_types", [])
+        return "CORRELATES_WITH" in rel_types
 
-def get_schema_adapter() -> SchemaAdapter:
-    """Get or create the module-level SchemaAdapter singleton."""
-    global _adapter_instance
-    if _adapter_instance is None:
-        _adapter_instance = SchemaAdapter()
-    return _adapter_instance
+    def get_schema_mode(self) -> str:
+        """
+        Returns 'label-based', 'property-based', or 'hybrid'.
+        Used by the schema-health API endpoint.
+        """
+        labels = self._schema.get("labels", [])
+        label_types = [t for t in DEFAULT_ENTITY_TYPES if t in labels]
+
+        if len(label_types) >= 3:
+            return "label-based"
+        elif len(label_types) == 0:
+            return "property-based"
+        else:
+            return "hybrid"

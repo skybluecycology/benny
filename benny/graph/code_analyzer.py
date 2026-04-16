@@ -77,12 +77,15 @@ QUERIES = {
 }
 
 class CodeNode:
-    def __init__(self, id: str, name: str, type: str, file_path: str, metadata: Dict[str, Any] = None):
+    def __init__(self, id: str, name: str, type: str, file_path: str, metadata: Dict[str, Any] = None,
+                 ast_range_start: Optional[list] = None, ast_range_end: Optional[list] = None):
         self.id = id
         self.name = name
-        self.type = type # File, Class, Function, Interface
+        self.type = type  # File, Class, Function, Interface
         self.file_path = file_path
         self.metadata = metadata or {}
+        self.ast_range_start = ast_range_start  # [line, col] from Tree-sitter
+        self.ast_range_end   = ast_range_end    # [line, col] from Tree-sitter
 
 class CodeEdge:
     def __init__(self, source: str, target: str, type: str, metadata: Dict[str, Any] = None):
@@ -235,12 +238,16 @@ class CodeGraphAnalyzer:
                     name = content[node.start_byte:node.end_byte].decode("utf-8")
                     node_type = "Class" if tag == "class_name" else "Interface"
                     symbol_id = self._get_node_id(file_path, name)
-                    
+
                     if symbol_id not in self.nodes:
-                        self.nodes[symbol_id] = CodeNode(symbol_id, name, node_type, rel_path)
+                        self.nodes[symbol_id] = CodeNode(
+                            symbol_id, name, node_type, rel_path,
+                            ast_range_start=list(node.start_point),
+                            ast_range_end=list(node.end_point)
+                        )
                         # Edge File -> Class
                         self.edges.append(CodeEdge(file_node_id, symbol_id, "DEFINES"))
-                    
+
                     current_class = symbol_id
 
                 elif tag in ["function_name", "method_name"]:
@@ -249,7 +256,11 @@ class CodeGraphAnalyzer:
                     symbol_id = self._get_node_id(file_path, name)
 
                     if symbol_id not in self.nodes:
-                        self.nodes[symbol_id] = CodeNode(symbol_id, name, node_type, rel_path)
+                        self.nodes[symbol_id] = CodeNode(
+                            symbol_id, name, node_type, rel_path,
+                            ast_range_start=list(node.start_point),
+                            ast_range_end=list(node.end_point)
+                        )
                         # If inside a class, Class -> Method, else File -> Function
                         parent_id = current_class if current_class and tag == "method_name" else file_node_id
                         self.edges.append(CodeEdge(parent_id, symbol_id, "DEFINES"))
@@ -281,15 +292,28 @@ class CodeGraphAnalyzer:
             for node in self.nodes.values():
                 session.run("""
                     MERGE (n:CodeEntity {id: $id, workspace: $ws, snapshot_id: $snap})
-                    SET n.name = $name, n.type = $type, n.file_path = $path
+                    ON CREATE SET n.name = $name, n.type = $type, n.file_path = $path,
+                                  n.created_at = datetime(),
+                                  n.ast_range_start = $ast_start,
+                                  n.ast_range_end   = $ast_end
+                    ON MATCH SET  n.name = $name, n.type = $type, n.file_path = $path,
+                                  n.updated_at = datetime(),
+                                  n.ast_range_start = $ast_start,
+                                  n.ast_range_end   = $ast_end
                     WITH n
                     // Auto-align Documentation nodes to Document label for Knowledge Graph unify
                     FOREACH (ignoreMe IN CASE WHEN $type = 'Documentation' THEN [1] ELSE [] END | SET n:Document)
-                    
+
                     MERGE (c:Concept {name: $name, workspace: $ws})
                     ON CREATE SET c.node_type = 'Concept', c.created_at = datetime()
+                    ON MATCH SET  c.updated_at = datetime()
                     MERGE (n)-[:REPRESENTS]->(c)
-                """, id=node.id, ws=workspace, name=node.name, type=node.type, path=node.file_path, snap=snapshot_id)
+                """,
+                    id=node.id, ws=workspace, name=node.name, type=node.type,
+                    path=node.file_path, snap=snapshot_id,
+                    ast_start=node.ast_range_start,
+                    ast_end=node.ast_range_end
+                )
 
             # 3. Add internal code relationships (DEFINES, CALLS, etc)
             for edge in self.edges:
@@ -297,7 +321,8 @@ class CodeGraphAnalyzer:
                     MATCH (s:CodeEntity {id: $src, workspace: $ws, snapshot_id: $snap})
                     MATCH (t:CodeEntity {id: $tgt, workspace: $ws, snapshot_id: $snap})
                     MERGE (s)-[r:CODE_REL {type: $rel_type}]->(t)
-                    SET r.snapshot_id = $snap
+                    ON CREATE SET r.snapshot_id = $snap, r.created_at = datetime()
+                    ON MATCH SET  r.snapshot_id = $snap, r.updated_at = datetime()
                 """, src=edge.source, tgt=edge.target, ws=workspace, rel_type=edge.type, snap=snapshot_id)
 
 def get_workspace_graph(workspace_id: str, snapshot_id: Optional[str] = None, path_filter: Optional[str] = None):

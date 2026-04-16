@@ -51,6 +51,106 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+@router.post("/graph/layout")
+async def trigger_graph_layout(workspace: str = "default"):
+    """
+    Trigger the Gravity Index spatial layout calculation.
+    Computes 3D coordinates (x, y, z) for all nodes based on graph topology.
+    """
+    try:
+        from ..graph.gravity_index import GravityIndex
+        engine = GravityIndex(workspace)
+        result = await engine.run()
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Layout calculation failed: {str(e)}")
+
+@router.get("/graph/code/lod")
+async def get_graph_lod(workspace: str = "default", tier: int = 1):
+    """
+    Return a semantically filtered graph based on Level-of-Detail (LoD).
+    
+    Tiers:
+      1 (High):   Full graph (Files, Symbols, Concepts).
+      2 (Medium): High-level hierarchy (Files, Classes, Hub Concepts).
+      3 (Low):    Summary View (Folder Entry Points + Community Representatives).
+    """
+    try:
+        from ..core.graph_db import read_session
+        
+        # Base node types for each tier
+        tier_filters = {
+            1: ["CodeEntity", "Concept", "File", "Class", "Function", "Documentation"],
+            2: ["File", "Class", "Concept", "Documentation"],
+            3: ["File", "Concept"] # Tier 3 also uses centrality logic below
+        }
+        
+        labels = tier_filters.get(tier, tier_filters[1])
+        
+        query = """
+        MATCH (n {workspace: $ws})
+        WHERE any(label IN labels(n) WHERE label IN $labels)
+        """
+        
+        # Additional Tier 3 logic: Limit to top nodes by degree or community hub
+        if tier == 3:
+            query += """
+            WITH n
+            MATCH (n)-[r]-()
+            WITH n, count(r) as degree
+            ORDER BY degree DESC
+            LIMIT 66
+            """
+            
+        query += """
+        RETURN n.id as id, n.name as name, labels(n)[0] as type, 
+               n.pos_x as x, n.pos_y as y, n.pos_z as z,
+               n.community_id as community_id, n.community_name as community_name
+        """
+        
+        nodes = []
+        with read_session() as session:
+            result = session.run(query, ws=workspace, labels=labels)
+            for record in result:
+                # Default positions if layout hasn't run yet
+                x = record["x"] or (random.random() * 20 - 10)
+                y = record["y"] or (random.random() * 20 - 10)
+                z = record["z"] or (random.random() * 20 - 10)
+                
+                nodes.append({
+                    "id": record["id"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "position": [x, y, z],
+                    "metadata": {
+                        "community_id": record["community_id"],
+                        "community_name": record["community_name"]
+                    }
+                })
+        
+        # Fetch edges between the filtered nodes
+        node_ids = [n["id"] for n in nodes]
+        edge_query = """
+        MATCH (n)-[r]->(m)
+        WHERE id(n) IN $ids AND id(m) IN $ids
+        RETURN id(n) as source, id(m) as target, type(r) as type
+        """
+        
+        edges = []
+        with read_session() as session:
+            result = session.run(edge_query, ids=node_ids)
+            for record in result:
+                edges.append({
+                    "source": record["source"],
+                    "target": record["target"],
+                    "type": record["type"]
+                })
+                
+        return {"nodes": nodes, "edges": edges}
+        
+    except Exception as e:
+        raise HTTPException(500, f"LoD graph fetch failed: {str(e)}")
+
 
 # =============================================================================
 # MODELS
@@ -177,9 +277,92 @@ async def trigger_centrality_update(workspace: str = "default"):
         raise HTTPException(500, f"Centrality update failed: {str(e)}")
 
 
-# =============================================================================
-# GRAPH CRUD
-# =============================================================================
+@router.get("/graph/schema-health")
+async def schema_health(workspace: str = "default"):
+    """
+    Return a live schema diagnostic for the given workspace.
+
+    Useful for:
+      - Verifying that correlation queries will match actual labels.
+      - Diagnosing the zero-link condition.
+      - Confirming CORRELATES_WITH edges exist after ingestion.
+
+    Returns:
+      - labels: all Neo4j labels in the database
+      - relationship_types: all relationship type names
+      - entity_type_distribution: per-workspace entity type counts
+      - expected_labels: labels the system expects to find
+      - missing_labels: expected labels not yet present
+      - semantic_edge_types_present: CORRELATES_WITH / REL if they exist
+      - recommendation: 'label-based', 'property-based', or 'hybrid'
+      - schema_mode: same as recommendation (canonical field name)
+    """
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(503, f"Neo4j not available: {conn.get('error')}")
+
+    try:
+        from ..core.graph_db import introspect_schema
+        from ..synthesis.schema_adapter import SchemaAdapter
+
+        schema = introspect_schema(workspace)
+
+        expected_labels = [
+            "CodeEntity", "Concept", "Source", "File",
+            "Class", "Function", "Interface", "Documentation"
+        ]
+        present_labels = schema.get("labels", [])
+        missing_labels = [l for l in expected_labels if l not in present_labels]
+
+        semantic_edge_types = ["CORRELATES_WITH", "REL", "RELATES_TO"]
+        semantic_edges_present = [
+            t for t in schema.get("relationship_types", [])
+            if t in semantic_edge_types
+        ]
+
+        adapter = SchemaAdapter(workspace)
+        schema_mode = adapter.get_schema_mode()
+
+        return {
+            **schema,
+            "expected_labels": expected_labels,
+            "missing_labels": missing_labels,
+            "semantic_edge_types_present": semantic_edges_present,
+            "zero_link_condition": "CORRELATES_WITH" not in schema.get("relationship_types", []),
+            "recommendation": schema_mode,
+            "schema_mode": schema_mode,
+            "valid_entity_types": adapter.get_valid_entity_types(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Schema health check failed: {str(e)}")
+
+@router.get("/graph/health")
+async def graph_health_grade(workspace: str = "default"):
+    """
+    Return a scored health grade (A-F) for the Neural Nexus graph.
+
+    Dimensions scored:
+      - Label coverage         (30%): expected labels present in DB
+      - Semantic edge density  (40%): CORRELATES_WITH + REL edge count
+      - Temporal coverage      (20%): CodeEntity nodes with created_at
+      - Rationale coverage     (10%): CORRELATES_WITH edges with rationale
+
+    Also returns:
+      - zero_link_condition: bool — True if CORRELATES_WITH is completely absent
+      - recommendations: list of specific remediation steps
+    """
+    conn = verify_connectivity()
+    if conn["status"] != "connected":
+        raise HTTPException(503, f"Neo4j not available: {conn.get('error')}")
+    try:
+        from ..synthesis.diagnostics import get_graph_health
+        return get_graph_health(workspace)
+    except Exception as e:
+        raise HTTPException(500, f"Health grade computation failed: {str(e)}")
+
+
 
 @router.get("/graph/full")
 async def full_graph(
