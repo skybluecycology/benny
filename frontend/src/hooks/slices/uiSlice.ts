@@ -26,6 +26,30 @@ export interface UISlice {
     enableFreeRotation: boolean;
   };
 
+  // Cognitive Mesh (v2.1) — Spatial IDE feature toggles
+  cognitiveMesh: {
+    semanticZoom: boolean;          // distance-based representation morphing
+    degreeSizing: boolean;          // scale nodes by connection count
+    myelination: boolean;           // thicken/glow hot edges
+    synapticPruning: boolean;       // fade low-importance elements
+    blastRadius: boolean;           // illuminate downstream on select
+    dataFlowParticles: boolean;     // animated particles along edges
+    cycleDetection: boolean;        // TDA loop highlighting
+    neuralNebula: boolean;          // cluster particle clouds
+    clusterRotation: boolean;       // galactic slow rotation
+    agentOrbit: boolean;            // agents orbiting selection
+    agenticPanels: boolean;         // declarative contextual overlays
+    timeTravelOpen: boolean;        // scrubber visible
+    sonification: boolean;          // WebAudio cues
+    ambientHeartbeat: boolean;      // continuous ambient tone
+    foveatedLOD: boolean;           // simplify peripheral nodes
+    bloomIntensity: number;         // 0..2 emissive multiplier
+    pruneThreshold: number;         // 0..1 importance cutoff
+    particleDensity: number;        // 0..3
+    timeScrubIndex: number;         // 0..snapshots-1
+    timeCompression: number;        // 1..64x
+  };
+
   setAuditHubOpen: (isOpen: boolean) => void;
   toggleAuditHub: () => void;
   setWikiHubOpen: (isOpen: boolean) => void;
@@ -49,6 +73,10 @@ export interface UISlice {
   setEnableNodeRotation: (enabled: boolean) => void;
   setFpsCap: (fps: number) => void;
   setEnableFreeRotation: (enabled: boolean) => void;
+
+  // Cognitive Mesh actions
+  toggleCognitiveMesh: (key: keyof UISlice['cognitiveMesh']) => void;
+  setCognitiveMeshValue: <K extends keyof UISlice['cognitiveMesh']>(key: K, value: UISlice['cognitiveMesh'][K]) => void;
 }
 
 export const createUISlice = (set: any, get: any): UISlice => ({
@@ -76,6 +104,29 @@ export const createUISlice = (set: any, get: any): UISlice => ({
     enableFreeRotation: false,
   },
 
+  cognitiveMesh: {
+    semanticZoom: true,
+    degreeSizing: true,
+    myelination: true,
+    synapticPruning: false,
+    blastRadius: true,
+    dataFlowParticles: true,
+    cycleDetection: false,
+    neuralNebula: true,
+    clusterRotation: false,
+    agentOrbit: false,
+    agenticPanels: true,
+    timeTravelOpen: false,
+    sonification: false,
+    ambientHeartbeat: false,
+    foveatedLOD: true,
+    bloomIntensity: 1.0,
+    pruneThreshold: 0.2,
+    particleDensity: 1.0,
+    timeScrubIndex: 0,
+    timeCompression: 4,
+  },
+
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),
   toggleAuditHub: () => set({ isAuditHubOpen: !get().isAuditHubOpen }),
   setWikiHubOpen: (isOpen) => set({ isWikiHubOpen: isOpen }),
@@ -98,4 +149,11 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   setEnableNodeRotation: (enabled) => set({ graphRenderSettings: { ...get().graphRenderSettings, enableNodeRotation: enabled } }),
   setFpsCap: (fps) => set({ graphRenderSettings: { ...get().graphRenderSettings, fpsCap: fps } }),
   setEnableFreeRotation: (enabled) => set({ graphRenderSettings: { ...get().graphRenderSettings, enableFreeRotation: enabled } }),
+
+  toggleCognitiveMesh: (key) => set({
+    cognitiveMesh: { ...get().cognitiveMesh, [key]: !get().cognitiveMesh[key] }
+  }),
+  setCognitiveMeshValue: (key, value) => set({
+    cognitiveMesh: { ...get().cognitiveMesh, [key]: value }
+  }),
 });
