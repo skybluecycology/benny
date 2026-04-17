@@ -14,6 +14,7 @@ import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
 import { GraphNexusController } from './components/Studio/GraphNexusController';
 import { HybridLayout } from './components/Studio/HybridLayout';
+import V2GraphSelector from './components/Studio/V2GraphSelector';
 import DocumentManager from './components/Documents/DocumentManager';
 
 export default function AppV2Beta() {
@@ -59,6 +60,7 @@ export default function AppV2Beta() {
         />
 
         {/* Universal Floating Windows Layer */}
+        <V2GraphSelector />
         <GraphNexusController />
         <AnimatePresence>
           {isChatOpen && (

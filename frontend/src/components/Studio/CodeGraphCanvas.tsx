@@ -73,6 +73,7 @@ interface CodeNodeProps {
   isClusterMode: boolean;
   enableNodeRotation?: boolean;
   metadata?: any;
+  scale?: number;
   onClick: () => void;
   // Cognitive Mesh additions
   cognitiveMesh?: CogMesh;
@@ -173,7 +174,7 @@ function NeuralSpark({ node, active }: { node: any, active: boolean }) {
 
 function CodeSymbolNode({
   id, position, livePositions, name, type,
-  isSelected, isClusterMode, enableNodeRotation, metadata, onClick,
+  isSelected, isClusterMode, enableNodeRotation, metadata, scale = 1, onClick,
   cognitiveMesh, degree = 0, maxDegree = 1, zoomTier = 'macro',
   inDownstream = false, inUpstream = false, hasBlastSelection = false,
 }: CodeNodeProps) {
@@ -223,16 +224,17 @@ function CodeSymbolNode({
   });
 
   const getGeometry = () => {
-    if (farLOD) return <sphereGeometry args={[0.35, 6, 6]} />;
+    if (farLOD) return <sphereGeometry args={[0.35 * scale, 6, 6]} />;
+    const s = scale;
     switch (type) {
-      case 'Folder': return <boxGeometry args={[0.7, 0.7, 0.7]} />;
-      case 'File': return <octahedronGeometry args={[0.5, 0]} />;
-      case 'Documentation': return <octahedronGeometry args={[0.6, 0]} />;
-      case 'Class': return <boxGeometry args={[0.6, 0.6, 0.6]} />;
-      case 'Interface': return <boxGeometry args={[0.5, 0.5, 0.5]} />;
-      case 'Function': return <sphereGeometry args={[0.3, 16, 16]} />;
-      case 'Concept': return <sphereGeometry args={[0.4, 24, 24]} />;
-      default: return <sphereGeometry args={[0.2, 8, 8]} />;
+      case 'Folder':        return <boxGeometry args={[0.7 * s, 0.7 * s, 0.7 * s]} />;
+      case 'File':          return <octahedronGeometry args={[0.5 * s, 0]} />;
+      case 'Documentation': return <octahedronGeometry args={[0.6 * s, 0]} />;
+      case 'Class':         return <boxGeometry args={[0.6 * s, 0.6 * s, 0.6 * s]} />;
+      case 'Interface':     return <boxGeometry args={[0.5 * s, 0.5 * s, 0.5 * s]} />;
+      case 'Function':      return <sphereGeometry args={[0.3 * s, 16, 16]} />;
+      case 'Concept':       return <sphereGeometry args={[0.4 * s, 24, 24]} />;
+      default:              return <sphereGeometry args={[0.2 * s, 8, 8]} />;
     }
   };
 
@@ -833,34 +835,50 @@ export function CodeGraphCanvas() {
   // Layout logic
   const processedGraph = useMemo(() => {
     if (!codeGraph) return { nodes: [], edges: [] };
-    
+
     const filteredSourceNodes = codeGraph.nodes.filter((n: any) => visibleTypes.includes(String(n.type)));
 
+    // Pre-compute degree (total edge count) per node id
+    const degreeMap: Record<string, number> = {};
+    for (const edge of (codeGraph.edges || [])) {
+      const s = String(edge.source);
+      const t = String(edge.target);
+      degreeMap[s] = (degreeMap[s] || 0) + 1;
+      degreeMap[t] = (degreeMap[t] || 0) + 1;
+    }
+    const maxDegree = Math.max(1, ...Object.values(degreeMap));
+
     const nodes = filteredSourceNodes.map((node: any, i: number) => {
+       const nodeId = String(node.id);
+       const degree = degreeMap[nodeId] || 0;
+       // Tree depth from file path (root = 1, each folder level +1)
+       const parts = (node.path || "").split('/').filter(Boolean);
+       const depth = Math.max(1, parts.length);
+       // degree factor: more connections → larger (log-scaled, normalized 0–1)
+       const degreeFactor = Math.log1p(degree) / Math.log1p(maxDegree);
+       // depth factor: closer to root → larger (depth 1 = 1.0, depth 8+ = 0.4 min)
+       const depthFactor = Math.max(0.4, 1 - (depth - 1) * 0.08);
+       // Final scale: base 1.0, up to ~2x for highly-connected root nodes
+       const scale = parseFloat((depthFactor * (1 + degreeFactor * 1.2)).toFixed(3));
+
        // Phase 4: Use backend coordinates if available
        if (node.position && (node.position[0] !== 0 || node.position[1] !== 0 || node.position[2] !== 0)) {
-         return { ...node, id: String(node.id) };
+         return { ...node, id: nodeId, degree, depth, scale };
        }
 
        // Fallback to legacy circular layout if no backend coords
        const isSymbol = !['Folder', 'File'].includes(String(node.type));
-       const parts = (node.path || "").split('/');
-       const depth = parts.length;
        const nodeCount = filteredSourceNodes.length || 1;
        const baseAngle = (i / nodeCount) * Math.PI * 2;
        const baseRadius = depth * 6 + 10;
-       
+
        const position: [number, number, number] = [
          Math.cos(baseAngle) * baseRadius,
          (isSymbol ? 5 : 0) + (Math.random() * 2),
          Math.sin(baseAngle) * baseRadius
        ];
 
-       return {
-         ...node,
-         id: String(node.id),
-         position
-       };
+       return { ...node, id: nodeId, degree, depth, scale, position };
     });
 
     const edges = codeGraph.edges.filter((e: any) => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search, Download, ChevronRight, Layers, Eye } from 'lucide-react';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
+import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 
 interface GraphNode {
   id: string;
@@ -69,6 +70,7 @@ const NODE_COLORS: Record<string, string> = {
 const PERFORMANCE_NODE_THRESHOLD = 500;
 
 export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'default', refreshTrigger }: KnowledgeGraphCanvasProps) {
+  const { activeGraphId } = useWorkspaceStore() as any;
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] });
@@ -114,7 +116,10 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     setLoading(true);
     try {
       const timestamp = Date.now();
-      let graphUrl = `${API_BASE_URL}/api/graph/full?workspace=${workspace}&t=${timestamp}`;
+      const runParam = activeGraphId && activeGraphId !== 'neural_nexus'
+        ? `&run_id=${activeGraphId}`
+        : '';
+      let graphUrl = `${API_BASE_URL}/api/graph/full?workspace=${workspace}&t=${timestamp}${runParam}`;
       
       if (fetchAll) {
         graphUrl += `&show_all=true`;
@@ -133,6 +138,15 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
 
       if (graphRes.ok) {
         const data = await graphRes.json();
+        // Compute degree (edge count) per node and inject it before storing
+        const degreeMap: Record<string, number> = {};
+        for (const edge of (data.edges || [])) {
+          const s = String(edge.source);
+          const t = String(edge.target);
+          degreeMap[s] = (degreeMap[s] || 0) + 1;
+          degreeMap[t] = (degreeMap[t] || 0) + 1;
+        }
+        data.nodes = (data.nodes || []).map((n: any) => ({ ...n, degree: degreeMap[n.id] || 0 }));
         setGraphData(data);
       }
       if (statsRes.ok) {
@@ -144,7 +158,7 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     } finally {
       setLoading(false);
     }
-  }, [workspace]);
+  }, [workspace, activeGraphId]);
 
   // SSE real-time updates — replaces polling
   useEffect(() => {
@@ -274,7 +288,8 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       .nodeVal((node: any) => {
         const baseSize = (node.labels || [])[0] === 'Source' ? 4 : 6;
         const centralityBonus = node.centrality ? Math.log10(node.centrality + 1) * 8 : 0;
-        return baseSize + centralityBonus;
+        const degreeBonus = node.degree ? Math.log1p(node.degree) * 3 : 0;
+        return baseSize + centralityBonus + degreeBonus;
       })
       
       // Organic Link Curvature (MindNode style)
