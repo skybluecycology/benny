@@ -13,6 +13,7 @@ from litellm import completion
 from ..core.workspace import get_workspace_path
 from ..tools.knowledge import get_chromadb_client
 from ..core.models import call_model, get_model_config
+from ..core.manifest import should_trigger_swarm
 from ..governance.lineage import track_workflow_start, track_workflow_complete, track_llm_call
 import uuid
 
@@ -45,6 +46,8 @@ class ChatResponse(BaseModel):
     message: str
     sources: List[SourceCitation]
     context_snippets: List[str]
+    consider_swarm: bool = False
+    swarm_reason: Optional[str] = None
 
 
 def get_chat_history_file(notebook_id: str, workspace: str = "default") -> Path:
@@ -225,13 +228,17 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
         
         # Unified Audit Tracking
         run_id = f"chat_{str(uuid.uuid4())[:12]}"
-        track_workflow_start(
-            run_id, 
-            "notebook_chat", 
-            workspace,
-            inputs=[f"session_{request.session_id}"] + ([c.get("title") for c in context] if context else []),
-            outputs=[f"chat_reply_{run_id}"]
-        )
+        session_ref = f"notebook_{request.notebook_id}"
+        try:
+            track_workflow_start(
+                run_id,
+                "notebook_chat",
+                workspace,
+                inputs=[session_ref] + [c.source for c in context],
+                outputs=[f"chat_reply_{run_id}"],
+            )
+        except Exception:
+            pass  # lineage is best-effort
 
         # Call LLM
         try:
@@ -296,11 +303,21 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
         
         # Extract context snippets for UI
         context_snippets = [c.text[:300] + "..." if len(c.text) > 300 else c.text for c in context]
-        
+
+        # Swarm trigger hint — if the request looks like it warrants fan-out
+        # planning, tell the UI so it can offer a "Plan as workflow" button.
+        sources_as_files = [c.source for c in context] if context else []
+        consider_swarm, swarm_reason = should_trigger_swarm(
+            message=request.message,
+            input_files=sources_as_files,
+        )
+
         return ChatResponse(
             message=assistant_message,
             sources=context,
-            context_snippets=context_snippets
+            context_snippets=context_snippets,
+            consider_swarm=consider_swarm,
+            swarm_reason=swarm_reason if consider_swarm else None,
         )
         
     except Exception as e:

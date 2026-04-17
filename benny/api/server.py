@@ -41,6 +41,7 @@ from .governance_routes import router as governance_router
 from .system_routes import router as system_router
 from ..a2a.server import router as a2a_router
 from .live_routes import router as live_router
+from .manifest_routes import router as manifest_router
 
 
 @asynccontextmanager
@@ -166,6 +167,7 @@ app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace 
 app.include_router(governance_router, prefix="/api/governance", tags=["Security & Compliance"])
 app.include_router(system_router, prefix="/api/system", tags=["System Diagnostics"])
 app.include_router(live_router, prefix="/api", tags=["Live Mode"])
+app.include_router(manifest_router, prefix="/api", tags=["Manifests"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
 
 

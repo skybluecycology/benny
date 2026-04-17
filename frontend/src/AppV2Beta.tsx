@@ -16,6 +16,8 @@ import { GraphNexusController } from './components/Studio/GraphNexusController';
 import { HybridLayout } from './components/Studio/HybridLayout';
 import V2GraphSelector from './components/Studio/V2GraphSelector';
 import DocumentManager from './components/Documents/DocumentManager';
+import ManifestPlanner from './components/Studio/ManifestPlanner';
+import RunsPanel from './components/Studio/RunsPanel';
 
 export default function AppV2Beta() {
   const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
@@ -67,7 +69,19 @@ export default function AppV2Beta() {
             <V2ChatOverlay onClose={() => setIsChatOpen(false)} />
           )}
         </AnimatePresence>
-        
+
+        <ErrorBoundary name="ManifestPlanner">
+          <AnimatePresence>
+            <ManifestPlanner />
+          </AnimatePresence>
+        </ErrorBoundary>
+
+        <ErrorBoundary name="RunsPanel">
+          <AnimatePresence>
+            <RunsPanel />
+          </AnimatePresence>
+        </ErrorBoundary>
+
         <ErrorBoundary name="AuditHub">
           <ExecutionAuditHub />
         </ErrorBoundary>

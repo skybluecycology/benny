@@ -1,6 +1,7 @@
-import { 
-  AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap, 
-  Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw, File, BookOpen 
+import {
+  AlertTriangle, ShieldAlert, Activity, Cpu, Terminal, Power, ExternalLink, Zap,
+  Settings, Eye, FastForward, MessageSquare, Link, Share2, RefreshCw, File, BookOpen,
+  Sparkles, History
 } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -228,6 +229,27 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           </button>
           <button onClick={onToggleChat} className={`btn-pill-orange btn-pill ${isChatOpen ? 'active' : ''}`}>
             <MessageSquare size={14} /> COMMS
+          </button>
+          <div className="w-[1px] h-6 bg-white/10 mx-1" />
+          <button
+            onClick={() => {
+              const { toggleManifestPanel } = useWorkflowStore.getState() as any;
+              toggleManifestPanel();
+            }}
+            className="btn-pill hover:text-emerald-400 transition-all"
+            title="Plan a new manifest"
+          >
+            <Sparkles size={14} /> PLAN
+          </button>
+          <button
+            onClick={() => {
+              const { toggleRunsPanel } = useWorkflowStore.getState() as any;
+              toggleRunsPanel();
+            }}
+            className="btn-pill hover:text-blue-400 transition-all"
+            title="Run history"
+          >
+            <History size={14} /> RUNS
           </button>
           <div className="w-[1px] h-6 bg-white/10 mx-1" />
           <button 
