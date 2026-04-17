@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { 
@@ -19,22 +19,23 @@ export function GraphNexusController() {
     visibleEdgeTypes, setVisibleEdgeTypes,
     showClusters, toggleShowClusters,
     graphRenderSettings, setStarCount, setEnableNodeRotation, setFpsCap, setEnableFreeRotation,
-    viewMode
+    viewMode,
+    cognitiveMesh, toggleCognitiveMesh, setCognitiveMeshValue,
   } = useWorkflowStore();
 
-  const { 
-    currentWorkspace, activeGraphId, setActiveGraphId, 
-    graphCatalog, fetchGraphCatalog 
-  } = useWorkspaceStore();
+  const {
+    activeGraphId, setActiveGraphId,
+    graphCatalog, fetchGraphCatalog
+  } = useWorkspaceStore() as any;
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [isTemporalOpen, setIsTemporalOpen] = useState(false);
 
   // Selector logic
-  const activeGraph = graphCatalog.find(g => g.id === activeGraphId) || { name: 'NEURAL_NEXUS', type: 'knowledge' };
-  const codeSnapshots = graphCatalog.filter(g => g.type === 'code');
-  const knowledgeRuns = graphCatalog.filter(g => g.type === 'knowledge' && !g.is_global);
-  const globalNexus = graphCatalog.find(g => g.is_global);
+  const activeGraph = graphCatalog.find((g: any) => g.id === activeGraphId) || { name: 'NEURAL_NEXUS', type: 'knowledge' };
+  const codeSnapshots = graphCatalog.filter((g: any) => g.type === 'code');
+  const knowledgeRuns = graphCatalog.filter((g: any) => g.type === 'knowledge' && !g.is_global);
+  const globalNexus = graphCatalog.find((g: any) => g.is_global);
 
   if (viewMode !== 'graph') return null;
 
@@ -100,7 +101,7 @@ export function GraphNexusController() {
                     {codeSnapshots.length > 0 && (
                       <div>
                         <div className="text-[8px] font-black text-white/20 px-3 py-1 mb-1 tracking-widest uppercase">Snapshots</div>
-                        {codeSnapshots.map(s => (
+                        {codeSnapshots.map((s: any) => (
                           <CatalogItem key={s.id} item={s} isActive={activeGraphId === s.id} onClick={() => { setActiveGraphId(s.id); setIsSelectorOpen(false); }} />
                         ))}
                       </div>
@@ -110,7 +111,7 @@ export function GraphNexusController() {
                     {knowledgeRuns.length > 0 && (
                       <div>
                         <div className="text-[8px] font-black text-white/20 px-3 py-1 mb-1 tracking-widest uppercase">Synthesis</div>
-                        {knowledgeRuns.map(r => (
+                        {knowledgeRuns.map((r: any) => (
                           <CatalogItem key={r.id} item={r} isActive={activeGraphId === r.id} onClick={() => { setActiveGraphId(r.id); setIsSelectorOpen(false); }} />
                         ))}
                       </div>
@@ -347,6 +348,89 @@ export function GraphNexusController() {
                   );
                 })}
              </div>
+          </div>
+        </div>
+
+        {/* Section 2b: Cognitive Mesh */}
+        <div className="px-5 pb-5 space-y-3 border-t border-[#FF00FF]/10 bg-[#FF00FF]/[0.02]">
+          <div className="pt-5 text-[9px] font-black text-[#FF00FF]/60 uppercase tracking-[0.2em] flex items-center gap-2">
+            <Activity size={10} />
+            Cognitive_Mesh
+            <span className="ml-auto text-[7px] text-white/30 font-mono">v2.1</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            {([
+              ['semanticZoom', 'Semantic Zoom'],
+              ['degreeSizing', 'Degree Sizing'],
+              ['myelination', 'Myelination'],
+              ['synapticPruning', 'Pruning'],
+              ['blastRadius', 'Blast Radius'],
+              ['dataFlowParticles', 'Flow Particles'],
+              ['cycleDetection', 'Cycle Detect'],
+              ['neuralNebula', 'Nebula'],
+              ['clusterRotation', 'Cluster Rotate'],
+              ['agentOrbit', 'Agent Orbit'],
+              ['agenticPanels', 'A2UI Panels'],
+              ['foveatedLOD', 'Foveated LOD'],
+              ['sonification', 'Sonification'],
+              ['ambientHeartbeat', 'Heartbeat'],
+              ['timeTravelOpen', 'Time Travel'],
+            ] as const).map(([key, label]) => {
+              const on = cognitiveMesh[key] as boolean;
+              return (
+                <button
+                  key={key}
+                  onClick={() => toggleCognitiveMesh(key as any)}
+                  className={`px-2 py-1.5 rounded-lg border text-[8px] font-bold tracking-tighter uppercase transition-all ${
+                    on
+                      ? 'bg-[#FF00FF]/20 border-[#FF00FF]/50 text-[#FF00FF]'
+                      : 'bg-black/20 border-white/5 text-white/30 hover:text-white/50'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-1.5 pt-2">
+            <div className="flex justify-between text-[8px] text-white/60 font-mono">
+              <span>Prune Threshold</span>
+              <span className="text-[#FF00FF]">{cognitiveMesh.pruneThreshold.toFixed(2)}</span>
+            </div>
+            <input
+              type="range" min={0} max={1} step={0.05}
+              value={cognitiveMesh.pruneThreshold}
+              onChange={e => setCognitiveMeshValue('pruneThreshold', Number(e.target.value))}
+              className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-[#FF00FF]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-[8px] text-white/60 font-mono">
+              <span>Particle Density</span>
+              <span className="text-[#FF00FF]">{cognitiveMesh.particleDensity.toFixed(1)}</span>
+            </div>
+            <input
+              type="range" min={0} max={3} step={0.1}
+              value={cognitiveMesh.particleDensity}
+              onChange={e => setCognitiveMeshValue('particleDensity', Number(e.target.value))}
+              className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-[#FF00FF]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-[8px] text-white/60 font-mono">
+              <span>Bloom Intensity</span>
+              <span className="text-[#FF00FF]">{cognitiveMesh.bloomIntensity.toFixed(1)}</span>
+            </div>
+            <input
+              type="range" min={0} max={2} step={0.1}
+              value={cognitiveMesh.bloomIntensity}
+              onChange={e => setCognitiveMeshValue('bloomIntensity', Number(e.target.value))}
+              className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-[#FF00FF]"
+            />
           </div>
         </div>
 

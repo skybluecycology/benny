@@ -1,48 +1,65 @@
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { 
-  OrbitControls, 
-  Stars, 
-  Text, 
-  Sphere, 
-  Box, 
-  Octahedron, 
-  Line, 
-  Float, 
-  MeshDistortMaterial, 
-  Html, 
+import {
+  OrbitControls,
+  Stars,
+  Line,
+  Html,
   CameraControls,
   KeyboardControls,
-  useKeyboardControls,
-  Points,
-  PointMaterial
+  useKeyboardControls
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
-import { 
-  Folder as FolderIcon, 
-  Play, 
-  RefreshCw, 
-  Layers, 
-  Filter, 
-  Terminal, 
-  ChevronRight, 
-  Home, 
-  Settings,
-  ExternalLink,
-  Target,
-  Zap,
-  Info,
-  Share2,
-  Database,
-  Activity,
-  Cpu,
-  Wind
+import {
+  Folder as FolderIcon,
+  Play,
+  RefreshCw,
+  Layers,
+  Terminal,
+  ChevronRight,
+  Home,
+  Settings
 } from 'lucide-react';
 import { SymbolInspector } from './SymbolInspector';
+import { analyzeMesh, edgeKey as meshEdgeKey } from './graph/CognitiveMeshEngine';
+import type { MeshAnalysis } from './graph/CognitiveMeshEngine';
+import { Sonification } from './graph/SonificationEngine';
+import { useSemanticZoom } from './graph/useSemanticZoom';
+import type { ZoomTier } from './graph/useSemanticZoom';
+import { DataFlowParticles } from './graph/DataFlowParticles';
+import { NeuralNebula } from './graph/NeuralNebula';
+import { CycleOverlay } from './graph/CycleOverlay';
+import { AgentOrbit } from './graph/AgentOrbit';
+import { AgenticPanel } from './graph/AgenticPanel';
+import { TimeTravelScrubber } from './graph/TimeTravelScrubber';
+import { useBlastRadius, blastOpacity, blastColorTint } from './graph/BlastRadiusHighlight';
+
+type CogMesh = {
+  semanticZoom: boolean;
+  degreeSizing: boolean;
+  myelination: boolean;
+  synapticPruning: boolean;
+  blastRadius: boolean;
+  dataFlowParticles: boolean;
+  cycleDetection: boolean;
+  neuralNebula: boolean;
+  clusterRotation: boolean;
+  agentOrbit: boolean;
+  agenticPanels: boolean;
+  timeTravelOpen: boolean;
+  sonification: boolean;
+  ambientHeartbeat: boolean;
+  foveatedLOD: boolean;
+  bloomIntensity: number;
+  pruneThreshold: number;
+  particleDensity: number;
+  timeScrubIndex: number;
+  timeCompression: number;
+};
 
 // --- Visual Components ---
 
@@ -57,6 +74,14 @@ interface CodeNodeProps {
   enableNodeRotation?: boolean;
   metadata?: any;
   onClick: () => void;
+  // Cognitive Mesh additions
+  cognitiveMesh?: CogMesh;
+  degree?: number;
+  maxDegree?: number;
+  zoomTier?: ZoomTier;
+  inDownstream?: boolean;
+  inUpstream?: boolean;
+  hasBlastSelection?: boolean;
 }
 
 function FloatingMetadataHUD({ metadata, hovered }: { metadata: any, hovered: boolean }) {
@@ -89,7 +114,7 @@ function FloatingMetadataHUD({ metadata, hovered }: { metadata: any, hovered: bo
 function NeuralSpark({ node, active }: { node: any, active: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
   
-  useFrame((state) => {
+  useFrame(() => {
     if (groupRef.current && active) {
       groupRef.current.rotation.y += 0.02;
       groupRef.current.rotation.x += 0.01;
@@ -146,48 +171,67 @@ function NeuralSpark({ node, active }: { node: any, active: boolean }) {
   );
 }
 
-function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, isClusterMode, enableNodeRotation, metadata, onClick }: CodeNodeProps) {
+function CodeSymbolNode({
+  id, position, livePositions, name, type,
+  isSelected, isClusterMode, enableNodeRotation, metadata, onClick,
+  cognitiveMesh, degree = 0, maxDegree = 1, zoomTier = 'macro',
+  inDownstream = false, inUpstream = false, hasBlastSelection = false,
+}: CodeNodeProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  
+  const [farLOD, setFarLOD] = useState(false);
+  const lastLODSwap = useRef(0);
+
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : 'auto';
     return () => { document.body.style.cursor = 'auto'; };
   }, [hovered]);
 
-  useFrame(() => {
+  const degreeRatio = Math.min(1, degree / Math.max(1, maxDegree));
+  const degreeBoost = cognitiveMesh?.degreeSizing ? 1 + 1.0 * degreeRatio : 1;
+  const isPruned = !!(cognitiveMesh?.synapticPruning && degreeRatio < (cognitiveMesh?.pruneThreshold ?? 0.2) && !isSelected);
+
+  useFrame(({ camera }) => {
     const nodeLivePos = livePositions.current.get(String(id));
     if (groupRef.current) {
       if (nodeLivePos) {
         groupRef.current.position.copy(nodeLivePos);
       } else {
-        // Fallback to target position if live physics hasn't initialized yet
         groupRef.current.position.set(position[0], position[1], position[2]);
       }
+      // Foveated LOD — hysteretic swap so we don't flicker
+      if (cognitiveMesh?.foveatedLOD) {
+        const d = camera.position.distanceTo(groupRef.current.position);
+        const now = performance.now();
+        if (now - lastLODSwap.current > 250) {
+          if (!farLOD && d > 75) { setFarLOD(true); lastLODSwap.current = now; }
+          else if (farLOD && d < 65) { setFarLOD(false); lastLODSwap.current = now; }
+        }
+      } else if (farLOD) {
+        setFarLOD(false);
+      }
     }
-    
+
     if (meshRef.current) {
       if (enableNodeRotation) {
         meshRef.current.rotation.y += 0.01;
       }
-      if (isSelected || hovered) {
-         meshRef.current.scale.lerp(new THREE.Vector3(1.8, 1.8, 1.8), 0.1);
-      } else {
-         meshRef.current.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
-      }
+      const target = (isSelected || hovered) ? 1.8 * degreeBoost : degreeBoost;
+      meshRef.current.scale.lerp(new THREE.Vector3(target, target, target), 0.1);
     }
   });
 
   const getGeometry = () => {
+    if (farLOD) return <sphereGeometry args={[0.35, 6, 6]} />;
     switch (type) {
-      case 'Folder': return <boxGeometry args={[0.7, 0.7, 0.7]} />; // Folder is slightly larger box
+      case 'Folder': return <boxGeometry args={[0.7, 0.7, 0.7]} />;
       case 'File': return <octahedronGeometry args={[0.5, 0]} />;
-      case 'Documentation': return <octahedronGeometry args={[0.6, 0]} />; // Docs are larger octahedrons
+      case 'Documentation': return <octahedronGeometry args={[0.6, 0]} />;
       case 'Class': return <boxGeometry args={[0.6, 0.6, 0.6]} />;
       case 'Interface': return <boxGeometry args={[0.5, 0.5, 0.5]} />;
       case 'Function': return <sphereGeometry args={[0.3, 16, 16]} />;
-      case 'Concept': return <sphereGeometry args={[0.4, 24, 24]} />; // Concepts are glowing orbs
+      case 'Concept': return <sphereGeometry args={[0.4, 24, 24]} />;
       default: return <sphereGeometry args={[0.2, 8, 8]} />;
     }
   };
@@ -218,31 +262,50 @@ function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, i
     return getColor();
   };
 
+  const baseColor = getNodeColor();
+  const tintedColor = blastColorTint(inDownstream, inUpstream, baseColor);
+  const baseOpacity = blastOpacity(isSelected, inDownstream, inUpstream, hasBlastSelection, 0.9);
+  const finalOpacity = isPruned ? baseOpacity * 0.2 : baseOpacity;
+  const emissiveBoost = (cognitiveMesh?.bloomIntensity ?? 1);
+  const emissiveIntensity = (isSelected || hovered ? 2 : 0.5) * emissiveBoost * (isPruned ? 0.3 : 1);
+
+  // Semantic-zoom driven label visibility
+  const showLabelAlways = zoomTier === 'meso' || zoomTier === 'micro';
+  const showSatellites = zoomTier === 'micro' || isSelected || hovered;
+
   return (
-    <group 
+    <group
       ref={groupRef}
-      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHovered(true);
+        if (cognitiveMesh?.sonification) Sonification.emit('hover', { nodeType: type });
+      }}
       onPointerOut={() => setHovered(false)}
     >
-      <mesh 
-        ref={meshRef} 
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
+      <mesh
+        ref={meshRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (cognitiveMesh?.sonification) Sonification.emit('click', { nodeType: type });
+          onClick();
+        }}
       >
         {getGeometry()}
-        <meshStandardMaterial 
-          color={getNodeColor()} 
-          emissive={getNodeColor()}
-          emissiveIntensity={isSelected || hovered ? 2 : 0.5}
-          transparent 
-          opacity={0.9}
+        <meshStandardMaterial
+          color={tintedColor}
+          emissive={tintedColor}
+          emissiveIntensity={emissiveIntensity}
+          transparent
+          opacity={finalOpacity}
         />
       </mesh>
 
-      <NeuralSpark node={{ id, name, type, metadata }} active={isSelected || hovered} />
-      <FloatingMetadataHUD metadata={metadata} hovered={hovered} />
-      
+      {showSatellites && <NeuralSpark node={{ id, name, type, metadata }} active={isSelected || hovered} />}
+      {(zoomTier === 'micro' || hovered) && <FloatingMetadataHUD metadata={metadata} hovered={hovered || zoomTier === 'micro'} />}
+
       <Html distanceFactor={15} position={[0, -0.8, 0]} center>
-        <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-all duration-300 ${isSelected || hovered ? 'opacity-100 scale-110 border-[#00FFFF]/40 shadow-[0_0_10px_rgba(0,255,255,0.2)]' : 'opacity-40'}`}>
+        <div className={`whitespace-nowrap px-2 py-1 rounded bg-black/80 border border-white/10 text-[8px] font-mono text-white pointer-events-none transition-all duration-300 ${isSelected || hovered ? 'opacity-100 scale-110 border-[#00FFFF]/40 shadow-[0_0_10px_rgba(0,255,255,0.2)]' : showLabelAlways ? 'opacity-80' : 'opacity-40'}`}>
           {name}
         </div>
       </Html>
@@ -250,45 +313,23 @@ function CodeSymbolNode({ id, position, livePositions, name, type, isSelected, i
   );
 }
 
-// --- Visual Components ---
-
-function UMLArrowhead({ start, end, type, color, opacity, isSelected }: { start: THREE.Vector3, end: THREE.Vector3, type: string, color: string, opacity: number, isSelected: boolean }) {
-  const dir = new THREE.Vector3().subVectors(end, start).normalize();
-  
-  // Offset to place arrowhead at the surface of the node (approximate)
-  const offsetEnd = end.clone().sub(dir.clone().multiplyScalar(0.4));
-  
-  const isInherits = type === 'INHERITS';
-  const isCalls = type === 'CALLS' || type === 'DEPENDS_ON';
-  
-  if (!isInherits && !isCalls) return null;
-
-  return (
-    <mesh 
-      position={offsetEnd} 
-      onUpdate={(self) => {
-        self.lookAt(end);
-        self.rotateX(Math.PI / 2);
-      }}
-    >
-      {isInherits ? (
-        <coneGeometry args={[0.25, 0.5, 3]} />
-      ) : (
-        <coneGeometry args={[0.15, 0.4, 8]} />
-      )}
-      <meshBasicMaterial 
-        color={isInherits ? "#ffffff" : color} 
-        transparent 
-        opacity={opacity * 1.5}
-        wireframe={isInherits}
-      />
-    </mesh>
-  );
-}
-
 // --- Interactive Edge Component ---
 
-function CodeGraphEdge({ edge, livePositions, isSelected, isNodeSelected, onClick }: { edge: any, livePositions: React.MutableRefObject<Map<string, THREE.Vector3>>, isSelected: boolean, isNodeSelected: boolean, onClick: () => void }) {
+function CodeGraphEdge({
+  edge, livePositions, isSelected, isNodeSelected, onClick,
+  cognitiveMesh, importance = 0, inDownstream = false, inUpstream = false, hasBlastSelection = false,
+}: {
+  edge: any;
+  livePositions: React.MutableRefObject<Map<string, THREE.Vector3>>;
+  isSelected: boolean;
+  isNodeSelected: boolean;
+  onClick: () => void;
+  cognitiveMesh?: CogMesh;
+  importance?: number;
+  inDownstream?: boolean;
+  inUpstream?: boolean;
+  hasBlastSelection?: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
   const lineRef = useRef<any>(null);
   const arrowRef = useRef<THREE.Mesh>(null);
@@ -346,8 +387,15 @@ function CodeGraphEdge({ edge, livePositions, isSelected, isNodeSelected, onClic
     }
   };
 
-  const edgeOpacity = isSelected || hovered ? 1 : isNodeSelected ? 0.9 : edge.type === 'DEFINES' ? 0.3 : 0.6;
-  const lineWidth = (isSelected || hovered) ? 4 : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
+  const baseEdgeOpacity = isSelected || hovered ? 1 : isNodeSelected ? 0.9 : edge.type === 'DEFINES' ? 0.3 : 0.6;
+  const baseLineWidth = (isSelected || hovered) ? 4 : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
+
+  const myelinBoost = cognitiveMesh?.myelination ? 1 + 2 * importance : 1;
+  const prePruneOpacity = cognitiveMesh?.myelination ? Math.min(1, baseEdgeOpacity + 0.2 * importance) : baseEdgeOpacity;
+  const isEdgePruned = !!(cognitiveMesh?.synapticPruning && importance < (cognitiveMesh?.pruneThreshold ?? 0.2) && !isSelected && !hovered);
+  const preBlastOpacity = isEdgePruned ? prePruneOpacity * 0.15 : prePruneOpacity;
+  const edgeOpacity = blastOpacity(isSelected, inDownstream, inUpstream, hasBlastSelection, preBlastOpacity);
+  const lineWidth = baseLineWidth * myelinBoost;
 
   const isInherits = edge.type === 'INHERITS';
   const isCalls = edge.type === 'CALLS' || edge.type === 'DEPENDS_ON';
@@ -423,7 +471,7 @@ function SpaceNavigator({ controlsRef }: { controlsRef: any }) {
   const { camera } = useThree();
   const speed = 15; // Movement speed in units per second
 
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
     if (!controlsRef.current) return;
 
     const keys = getKeys();
@@ -483,17 +531,34 @@ const KEY_MAP = [
   { name: 'descend', keys: ['Shift'] },
 ];
 
-function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNodeClick, onEdgeClick, cameraControlsRef, showClusters, graphRenderSettings }: any) {
+function CodeGraphScene({
+  processedGraph, selectedNodeId, selectedEdgeId, onNodeClick, onEdgeClick,
+  cameraControlsRef, showClusters, graphRenderSettings,
+  cognitiveMesh, analysis, blast, pulseEdgeKeys,
+}: any) {
   const livePositions = useRef<Map<string, THREE.Vector3>>(new Map());
   const targetVec = useRef(new THREE.Vector3());
   const lastFrameTimeRef = useRef<number>(0);
   const frameIntervalRef = useRef<number>(1000 / graphRenderSettings.fpsCap);
+  const { tier: zoomTier } = useSemanticZoom(!!cognitiveMesh?.semanticZoom);
+  const [orbitTick, setOrbitTick] = useState(0); // force re-eval of selectedPos per frame
+  const lastOrbitRef = useRef(0);
+  useFrame(() => {
+    if (!cognitiveMesh?.agentOrbit) return;
+    const now = performance.now();
+    if (now - lastOrbitRef.current > 100) {
+      lastOrbitRef.current = now;
+      setOrbitTick(t => t + 1);
+    }
+  });
+  const selectedPos = selectedNodeId ? (livePositions.current.get(String(selectedNodeId)) || null) : null;
+  void orbitTick;
 
   useEffect(() => {
     frameIntervalRef.current = 1000 / graphRenderSettings.fpsCap;
   }, [graphRenderSettings.fpsCap]);
 
-  useFrame(({ clock }) => {
+  useFrame(() => {
     const now = performance.now();
     if (lastFrameTimeRef.current > 0 && now - lastFrameTimeRef.current < frameIntervalRef.current) {
       return;
@@ -531,28 +596,88 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
         <meshBasicMaterial color="#00FFFF" wireframe />
       </mesh>
 
-      {processedGraph.nodes.map((node: any) => (
-        <CodeSymbolNode
-          key={node.id}
-          {...node}
-          livePositions={livePositions}
-          isSelected={selectedNodeId === node.id}
-          isClusterMode={showClusters}
-          enableNodeRotation={graphRenderSettings.enableNodeRotation}
-          onClick={() => onNodeClick(node)}
-        />
-      ))}
+      {processedGraph.nodes.map((node: any) => {
+        const degree = analysis?.degreeMap.get(node.id) ?? 0;
+        const maxDegree = analysis?.maxDegree ?? 1;
+        const inDown = blast?.downstreamNodes?.has(node.id) ?? false;
+        const inUp = blast?.upstreamNodes?.has(node.id) ?? false;
+        return (
+          <CodeSymbolNode
+            key={node.id}
+            {...node}
+            livePositions={livePositions}
+            isSelected={selectedNodeId === node.id}
+            isClusterMode={showClusters}
+            enableNodeRotation={graphRenderSettings.enableNodeRotation}
+            onClick={() => onNodeClick(node)}
+            cognitiveMesh={cognitiveMesh}
+            degree={degree}
+            maxDegree={maxDegree}
+            zoomTier={zoomTier}
+            inDownstream={inDown}
+            inUpstream={inUp}
+            hasBlastSelection={!!blast?.hasSelection}
+          />
+        );
+      })}
 
-      {processedGraph.edges.map((edge: any, i: number) => (
-        <CodeGraphEdge 
-          key={`${edge.source}-${edge.target}-${i}`}
-          edge={edge}
-          livePositions={livePositions}
-          isSelected={selectedEdgeId === `${edge.source}-${edge.target}`}
-          isNodeSelected={selectedNodeId === edge.source || selectedNodeId === edge.target}
-          onClick={() => onEdgeClick(edge)}
+      {processedGraph.edges.map((edge: any, i: number) => {
+        const key = meshEdgeKey(edge);
+        const importance = analysis?.edgeImportance.get(key) ?? 0;
+        const inDown = blast?.downstreamEdgeKeys?.has(key) ?? false;
+        const inUp = blast?.upstreamEdgeKeys?.has(key) ?? false;
+        return (
+          <CodeGraphEdge
+            key={`${edge.source}-${edge.target}-${i}`}
+            edge={edge}
+            livePositions={livePositions}
+            isSelected={selectedEdgeId === `${edge.source}-${edge.target}`}
+            isNodeSelected={selectedNodeId === edge.source || selectedNodeId === edge.target}
+            onClick={() => onEdgeClick(edge)}
+            cognitiveMesh={cognitiveMesh}
+            importance={importance}
+            inDownstream={inDown}
+            inUpstream={inUp}
+            hasBlastSelection={!!blast?.hasSelection}
+          />
+        );
+      })}
+
+      {/* Cognitive Mesh Overlays (in-scene) */}
+      {cognitiveMesh?.neuralNebula && analysis && showClusters && (
+        <NeuralNebula
+          centroids={analysis.communityCentroids}
+          density={cognitiveMesh.particleDensity}
+          enabled
+          rotate={!!cognitiveMesh.clusterRotation}
         />
-      ))}
+      )}
+      {cognitiveMesh?.cycleDetection && analysis && (
+        <CycleOverlay
+          cycles={analysis.cycles}
+          livePositions={livePositions}
+          enabled
+        />
+      )}
+      {cognitiveMesh?.dataFlowParticles && analysis && (
+        <DataFlowParticles
+          edges={processedGraph.edges.map((e: any) => ({
+            source: String(e.source),
+            target: String(e.target),
+            type: e.type,
+            importance: analysis.edgeImportance.get(meshEdgeKey(e)) ?? 0,
+          }))}
+          livePositions={livePositions}
+          density={cognitiveMesh.particleDensity}
+          pulseEdgeKeys={pulseEdgeKeys || new Set()}
+        />
+      )}
+      {cognitiveMesh?.agentOrbit && (
+        <AgentOrbit
+          selectedPos={selectedPos}
+          enabled={!!cognitiveMesh.agentOrbit}
+        />
+      )}
 
       {graphRenderSettings.enableFreeRotation ? (
         <OrbitControls
@@ -584,17 +709,18 @@ function CodeGraphScene({ processedGraph, selectedNodeId, selectedEdgeId, onNode
 // --- Main Canvas Component ---
 
 export function CodeGraphCanvas() {
-  const { currentWorkspace, activeGraphId, focusPath, setFocusPath, setActiveDocument } = useWorkspaceStore();
+  const { currentWorkspace, activeGraphId, focusPath, setFocusPath } = useWorkspaceStore() as any;
   const {
-    codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen, setViewMode,
-    selectionTier, setSelectionTier,
-    synthesisMode, setSynthesisMode,
-    syncMode, setSyncMode,
-    visibleTypes, setVisibleTypes,
-    visibleEdgeTypes, setVisibleEdgeTypes,
-    showClusters, toggleShowClusters,
-    graphRenderSettings
+    codeGraph, setCodeGraph, isCodeGraphScanOpen, setIsCodeGraphScanOpen,
+    selectionTier,
+    syncMode,
+    visibleTypes,
+    visibleEdgeTypes,
+    showClusters,
+    graphRenderSettings,
+    cognitiveMesh,
   } = useWorkflowStore();
+  const executionEvents = useWorkflowStore(s => s.executionEvents);
   
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedDir, setSelectedDir] = useState("/");
@@ -759,8 +885,50 @@ export function CodeGraphCanvas() {
     return { nodes, edges };
   }, [codeGraph, visibleTypes, visibleEdgeTypes]);
 
-  const selectedNode = useMemo(() => 
-    processedGraph.nodes.find((n: any) => n.id === selectedNodeId), 
+  const analysis = useMemo<MeshAnalysis | null>(() => {
+    if (!processedGraph.nodes.length) return null;
+    return analyzeMesh(processedGraph.nodes, processedGraph.edges);
+  }, [processedGraph]);
+
+  const blast = useBlastRadius(analysis, processedGraph.edges, selectedNodeId, !!cognitiveMesh.blastRadius);
+
+  const pulseEdgeKeys = useMemo<Set<string>>(() => {
+    const keys = new Set<string>();
+    if (!cognitiveMesh.dataFlowParticles) return keys;
+    const recent = executionEvents.slice(-25);
+    for (const evt of recent) {
+      if (!evt.nodeId) continue;
+      for (const e of processedGraph.edges) {
+        if (e.source === evt.nodeId || e.target === evt.nodeId) {
+          keys.add(meshEdgeKey(e));
+        }
+      }
+    }
+    return keys;
+  }, [executionEvents, processedGraph.edges, cognitiveMesh.dataFlowParticles]);
+
+  // Sonification lifecycle
+  useEffect(() => {
+    Sonification.setEnabled(!!cognitiveMesh.sonification);
+    Sonification.setAmbient(!!(cognitiveMesh.sonification && cognitiveMesh.ambientHeartbeat));
+  }, [cognitiveMesh.sonification, cognitiveMesh.ambientHeartbeat]);
+
+  // Audible pulse on execution events
+  useEffect(() => {
+    if (!cognitiveMesh.sonification || executionEvents.length === 0) return;
+    const latest = executionEvents[executionEvents.length - 1];
+    if (!latest) return;
+    if (latest.type === 'node_error' || latest.type === 'workflow_failed') {
+      Sonification.emit('error');
+    } else if (latest.type === 'workflow_completed') {
+      Sonification.emit('commit');
+    } else {
+      Sonification.pulseAmbient(0.6);
+    }
+  }, [executionEvents.length, cognitiveMesh.sonification]);
+
+  const selectedNode = useMemo(() =>
+    processedGraph.nodes.find((n: any) => n.id === selectedNodeId),
     [processedGraph.nodes, selectedNodeId]
   );
 
@@ -798,7 +966,7 @@ export function CodeGraphCanvas() {
         >
           <Home size={14} />
         </button>
-        {focusPath && focusPath.split('/').filter(Boolean).map((part, i, arr) => (
+        {focusPath && focusPath.split('/').filter(Boolean).map((part: string, i: number, arr: string[]) => (
           <React.Fragment key={i}>
             <ChevronRight size={12} className="text-white/20" />
             <button 
@@ -824,6 +992,7 @@ export function CodeGraphCanvas() {
               selectedEdgeId={selectedEdgeId}
               onNodeClick={(node: any) => {
                 setSelectedNodeId(node.id);
+                if (cognitiveMesh.sonification) Sonification.emit('select', { nodeType: node.type });
                 if (node.type === 'Folder') {
                    setFocusPath(node.id);
                    flyToNode(node.position);
@@ -834,10 +1003,15 @@ export function CodeGraphCanvas() {
               onEdgeClick={(edge: any) => {
                 setSelectedEdgeId(`${edge.source}-${edge.target}`);
                 setSelectedNodeId(null);
+                if (cognitiveMesh.sonification) Sonification.emit('edge_pulse');
               }}
               cameraControlsRef={cameraControlsRef}
               showClusters={showClusters}
               graphRenderSettings={graphRenderSettings}
+              cognitiveMesh={cognitiveMesh}
+              analysis={analysis}
+              blast={blast}
+              pulseEdgeKeys={pulseEdgeKeys}
             />
           </Canvas>
         </KeyboardControls>
@@ -979,6 +1153,19 @@ export function CodeGraphCanvas() {
             <span className="text-[10px] font-black tracking-[0.2em] text-white/20 group-hover:text-white">DEEP_LAYOUT</span>
          </button>
       </div>
+
+       {/* Cognitive Mesh DOM Overlays */}
+       <AgenticPanel
+         selectedNode={selectedNode}
+         analysis={analysis}
+         enabled={!!cognitiveMesh.agenticPanels}
+         onAction={(id) => {
+           if (id === 'trace' && cognitiveMesh.sonification) Sonification.emit('edge_pulse');
+           if (id === 'prune' && cognitiveMesh.sonification) Sonification.emit('prune');
+           if (id === 'summon' && selectedNode?.position) flyToNode(selectedNode.position);
+         }}
+       />
+       <TimeTravelScrubber />
 
        {/* Selection Inspector */}
        <AnimatePresence>
