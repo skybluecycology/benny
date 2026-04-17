@@ -28,6 +28,9 @@ class KnowledgeTriple(BaseModel):
     model_id: str = "unknown"
     strategy: str = "safe" # safe, aggressive
     fragment_id: Optional[str] = None  # DNA trace: MD5 of source chunk text
+    # Live Mode provenance fields
+    source_type: Literal["document", "live"] = "document"
+    fetched_at: Optional[str] = None  # ISO-8601 timestamp set by live connectors
 
     @field_validator("subject", "predicate", "object")
     @classmethod
@@ -102,6 +105,55 @@ class IngestionEvent(BaseModel):
 
 
 # =============================================================================
+# LIVE MODE CONFIGURATION
+# =============================================================================
+
+class LiveConfig(BaseModel):
+    """Per-workspace Live Mode configuration stored in manifest.yaml."""
+    enabled_sources: List[str] = Field(
+        default_factory=list,
+        description="Source IDs to enable, e.g. ['tmdb', 'spotify', 'wikipedia']"
+    )
+    cache_ttl_hours: int = Field(default=24, description="Hours before cached API responses expire")
+    max_entities_per_run: int = Field(default=100, description="Hard cap on entities enriched per run")
+    auto_enrich_on_ingest: bool = Field(
+        default=False,
+        description="Automatically trigger enrichment when new files are ingested"
+    )
+    credential_source: Literal["env", "vault"] = Field(
+        default="env",
+        description="Where to read API keys: 'env' (env vars) or 'vault' (credential store)"
+    )
+
+
+class SourceManifestExample(BaseModel):
+    """One enrichment example embedded in a source manifest."""
+    entity_name: str
+    entity_type: str
+    expected_triples: List[List[str]] = Field(
+        default_factory=list,
+        description="List of [subject, predicate, object] triples expected from this entity"
+    )
+
+
+class SourceManifest(BaseModel):
+    """
+    Per-source configuration manifest loaded from workspace/live/sources/<id>.yaml.
+    Drives connector behaviour and documents expected output for testing.
+    """
+    source_id: str
+    name: str
+    version: str = "v1"
+    base_url: str
+    entity_types: List[str] = Field(default_factory=lambda: ["any"])
+    auth: Dict[str, Any] = Field(default_factory=dict)
+    rate_limit: Dict[str, Any] = Field(default_factory=dict)
+    confidence_default: float = Field(default=0.80, ge=0.0, le=1.0)
+    enabled: bool = True
+    examples: List[SourceManifestExample] = Field(default_factory=list)
+
+
+# =============================================================================
 # WORKSPACE MANIFEST
 # =============================================================================
 
@@ -122,6 +174,10 @@ class WorkspaceManifest(BaseModel):
 
     # Synthesis engine overrides
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig, description="Synthesis engine config")
+
+    # Live Mode
+    live_mode: bool = Field(default=False, description="Enable external data enrichment")
+    live_config: LiveConfig = Field(default_factory=LiveConfig, description="Live mode connector settings")
 
     class Config:
         json_schema_extra = {

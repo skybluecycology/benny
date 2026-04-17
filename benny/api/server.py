@@ -40,6 +40,7 @@ from .task_routes import router as task_router
 from .governance_routes import router as governance_router
 from .system_routes import router as system_router
 from ..a2a.server import router as a2a_router
+from .live_routes import router as live_router
 
 
 @asynccontextmanager
@@ -97,6 +98,7 @@ GOVERNANCE_WHITELIST = [
     "/openapi.json",
     "/redoc",
     "/api/graph/ingest/events",
+    "/api/live/enrich/events",   # Live Mode SSE streams
     "/api/workflows/execute/",   # Studio and Swarm event streams (SSE)
     "/.well-known/agent.json"    # A2A discovery must be public
 ]
@@ -163,6 +165,7 @@ app.include_router(graph_router, prefix="/api", tags=["Knowledge Graph"])
 app.include_router(workspace_router, prefix="/api/workspaces", tags=["Workspace Settings"])
 app.include_router(governance_router, prefix="/api/governance", tags=["Security & Compliance"])
 app.include_router(system_router, prefix="/api/system", tags=["System Diagnostics"])
+app.include_router(live_router, prefix="/api", tags=["Live Mode"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
 
 

@@ -14,6 +14,7 @@ import SwarmStatePanel from './components/Studio/SwarmStatePanel';
 import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
 import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
 import SynthesisPanel from './components/Notebook/SynthesisPanel';
+import V2GraphSelector from './components/Studio/V2GraphSelector';
 import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import ErrorBoundary from './components/Shared/ErrorBoundary';
@@ -103,6 +104,9 @@ function App() {
     <ReactFlowProvider>
 
       <div className="app-layout">
+        {/* Graph snapshot selector — fixed overlay, only in notebook view */}
+        {view === 'notebook' && <V2GraphSelector />}
+
         {/* 1. Global Navigation Rail */}
         <div className="nav-rail">
           <div style={{

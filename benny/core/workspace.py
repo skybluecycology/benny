@@ -53,7 +53,10 @@ def ensure_workspace_structure(workspace_id: str = "default") -> dict:
     Create workspace directory structure and initial manifest if it doesn't exist.
     """
     base = get_workspace_path(workspace_id)
-    subdirs = ["agents", "chromadb", "data_in", "data_out", "reports", "skills", "runs", "staging"]
+    subdirs = [
+        "agents", "chromadb", "data_in", "data_out", "reports", "skills", "runs", "staging",
+        "live/sources", "live/cache", "live/runs",
+    ]
     
     created = []
     for subdir in subdirs:
@@ -128,6 +131,9 @@ Professional, precise, and transparent. Always explain reasoning.
 - Include timestamps and provenance in generated artifacts
 """)
 
+    # Seed default Live Mode source manifests (only if they don't exist)
+    _seed_live_source_manifests(base / "live" / "sources")
+
     # Create security subdirectories
     for sec_dir in ["policies", "agents", "credentials"]:
         path = base / sec_dir
@@ -154,6 +160,204 @@ def _create_default_manual(path: Path, content: str) -> None:
             # We don't want task saving to crash the main process
             import logging
             logging.error(f"TaskManager persistence failed for {path}: {e}")
+
+
+_DEFAULT_SOURCE_MANIFESTS = {
+    "tmdb.yaml": """\
+source_id: tmdb
+name: "The Movie Database"
+version: "3"
+base_url: "https://api.themoviedb.org/3"
+entity_types: [movie, tv_show, person]
+auth:
+  type: api_key
+  env_var: TMDB_API_KEY
+rate_limit:
+  requests_per_second: 40
+confidence_default: 0.95
+enabled: true
+examples:
+  - entity_name: "Inception"
+    entity_type: movie
+    expected_triples:
+      - [Inception, directed_by, "Christopher Nolan"]
+      - [Inception, released_on, "2010-07-16"]
+      - [Inception, has_genre, "Science Fiction"]
+      - [Inception, has_runtime_minutes, "148"]
+  - entity_name: "Breaking Bad"
+    entity_type: tv_show
+    expected_triples:
+      - [Breaking Bad, created_by, "Vince Gilligan"]
+      - [Breaking Bad, first_aired_on, "2008-01-20"]
+      - [Breaking Bad, has_genre, Drama]
+""",
+    "spotify.yaml": """\
+source_id: spotify
+name: "Spotify Web API"
+version: "v1"
+base_url: "https://api.spotify.com/v1"
+entity_types: [track, artist, album]
+auth:
+  type: oauth2_client_credentials
+  env_var_client_id: SPOTIFY_CLIENT_ID
+  env_var_client_secret: SPOTIFY_CLIENT_SECRET
+  token_url: "https://accounts.spotify.com/api/token"
+rate_limit:
+  requests_per_second: 10
+confidence_default: 0.92
+enabled: true
+examples:
+  - entity_name: "Bohemian Rhapsody"
+    entity_type: track
+    expected_triples:
+      - [Bohemian Rhapsody, performed_by, Queen]
+      - [Bohemian Rhapsody, released_on, "1975-10-31"]
+      - [Bohemian Rhapsody, belongs_to_album, "A Night at the Opera"]
+  - entity_name: "Queen"
+    entity_type: artist
+    expected_triples:
+      - [Queen, has_genre, Rock]
+      - [Queen, origin_country, "United Kingdom"]
+""",
+    "wikipedia.yaml": """\
+source_id: wikipedia
+name: "Wikipedia REST API"
+version: "v1"
+base_url: "https://en.wikipedia.org/api/rest_v1"
+entity_types: [any]
+auth:
+  type: none
+rate_limit:
+  requests_per_second: 5
+confidence_default: 0.78
+enabled: true
+examples:
+  - entity_name: "Dune (novel)"
+    entity_type: any
+    expected_triples:
+      - ["Dune (novel)", written_by, "Frank Herbert"]
+      - ["Dune (novel)", published_on, "1965-08-01"]
+      - ["Dune (novel)", has_genre, "Science Fiction"]
+  - entity_name: "Python (programming language)"
+    entity_type: any
+    expected_triples:
+      - ["Python (programming language)", created_by, "Guido van Rossum"]
+      - ["Python (programming language)", first_appeared_on, "1991-02-20"]
+""",
+    "wikidata.yaml": """\
+source_id: wikidata
+name: "Wikidata SPARQL"
+version: "v1"
+base_url: "https://query.wikidata.org/sparql"
+entity_types: [any]
+auth:
+  type: none
+rate_limit:
+  requests_per_second: 2
+confidence_default: 0.88
+enabled: true
+examples:
+  - entity_name: "The Godfather"
+    entity_type: movie
+    expected_triples:
+      - ["The Godfather", directed_by, "Francis Ford Coppola"]
+      - ["The Godfather", released_on, "1972-03-24"]
+      - ["The Godfather", has_imdb_id, tt0068646]
+  - entity_name: "David Bowie"
+    entity_type: person
+    expected_triples:
+      - ["David Bowie", born_on, "1947-01-08"]
+      - ["David Bowie", has_genre, "Glam Rock"]
+      - ["David Bowie", citizen_of, "United Kingdom"]
+""",
+    "google_cse.yaml": """\
+source_id: google_cse
+name: "Google Custom Search Engine"
+version: "v1"
+base_url: "https://www.googleapis.com/customsearch/v1"
+entity_types: [any]
+auth:
+  type: api_key
+  env_var: GOOGLE_CSE_API_KEY
+  cx_env_var: GOOGLE_CSE_CX
+rate_limit:
+  requests_per_day: 100
+confidence_default: 0.60
+enabled: false
+examples:
+  - entity_name: "Pulp Fiction"
+    entity_type: movie
+    expected_triples:
+      - ["Pulp Fiction", directed_by, "Quentin Tarantino"]
+      - ["Pulp Fiction", released_on, "1994-10-14"]
+""",
+    "youtube.yaml": """\
+source_id: youtube
+name: "YouTube Data API v3"
+version: "v3"
+base_url: "https://www.googleapis.com/youtube/v3"
+entity_types: [video, music_video, channel, playlist]
+auth:
+  type: api_key
+  env_var: YOUTUBE_API_KEY
+rate_limit:
+  quota_units_per_day: 10000
+  search_cost_units: 100
+  videos_cost_units: 1
+confidence_default: 0.88
+enabled: true
+examples:
+  - entity_name: "Bohemian Rhapsody Official Video"
+    entity_type: music_video
+    expected_triples:
+      - ["Bohemian Rhapsody Official Video", uploaded_by, "Queen Official"]
+      - ["Bohemian Rhapsody Official Video", has_view_count, "1800000000"]
+      - ["Bohemian Rhapsody Official Video", has_duration_seconds, "354"]
+      - ["Bohemian Rhapsody Official Video", belongs_to_topic, "Rock music"]
+  - entity_name: "Queen Official"
+    entity_type: channel
+    expected_triples:
+      - ["Queen Official", has_subscriber_count, "20000000"]
+      - ["Queen Official", has_country, GB]
+""",
+    "duckduckgo.yaml": """\
+source_id: duckduckgo
+name: "DuckDuckGo Instant Answer API"
+version: "v1"
+base_url: "https://api.duckduckgo.com"
+entity_types: [any]
+auth:
+  type: none
+rate_limit:
+  requests_per_second: 2
+confidence_default: 0.55
+enabled: true
+examples:
+  - entity_name: "Interstellar"
+    entity_type: movie
+    expected_triples:
+      - [Interstellar, directed_by, "Christopher Nolan"]
+      - [Interstellar, released_on, "2014-11-07"]
+  - entity_name: "Taylor Swift"
+    entity_type: artist
+    expected_triples:
+      - ["Taylor Swift", has_genre, "Country Pop"]
+      - ["Taylor Swift", born_on, "1989-12-13"]
+""",
+}
+
+
+def _seed_live_source_manifests(sources_dir: Path) -> None:
+    """Write default source manifests if they don't already exist."""
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    for filename, content in _DEFAULT_SOURCE_MANIFESTS.items():
+        dest = sources_dir / filename
+        if not dest.exists():
+            try:
+                dest.write_text(content, encoding="utf-8")
+            except Exception as e:
+                import logging
+                logging.warning(f"Could not seed live source manifest {filename}: {e}")
 
 
 def load_manifest(workspace_id: str) -> WorkspaceManifest:
