@@ -23,56 +23,65 @@ LANGUAGES = {
 DOC_EXTENSIONS = {".md", ".pdf", ".txt"}
 
 # --- UML Pattern Queries ---
-# These extract Classes, Functions, Inheritance, and Imports
+# These extract Classes, Functions, Inheritance, Imports, and Call Sites
 QUERIES = {
     "python": """
         (class_definition
           name: (identifier) @class_name
-          superclasses: (argument_list (identifier) @parent_name)? @parents
-        ) @class
+          superclasses: (argument_list (identifier) @parent_name)?
+        )
 
         (function_definition
           name: (identifier) @function_name
-        ) @function
+        )
 
         (import_statement) @import
         (import_from_statement) @import
+
+        (call function: (identifier) @call_target)
+        (call function: (attribute attribute: (identifier) @call_target))
     """,
     "typescript": """
         (class_declaration
           name: (type_identifier) @class_name
-          (class_heritage (_)? @parent_name)? @parents
-        ) @class
+          (class_heritage (_)? @parent_name)?
+        )
 
         (function_declaration
           name: (identifier) @function_name
-        ) @function
+        )
 
         (method_definition
           name: (property_identifier) @method_name
-        ) @method
+        )
 
         (interface_declaration
           name: (type_identifier) @interface_name
-        ) @interface
+        )
 
         (import_statement) @import
+
+        (call_expression function: (identifier) @call_target)
+        (call_expression function: (member_expression property: (property_identifier) @call_target))
     """,
     "javascript": """
         (class_declaration
           name: (identifier) @class_name
-          (class_heritage (_)? @parent_name)? @parents
-        ) @class
+          (class_heritage (_)? @parent_name)?
+        )
 
         (function_declaration
           name: (identifier) @function_name
-        ) @function
+        )
 
         (method_definition
           name: (property_identifier) @method_name
-        ) @method
+        )
 
         (import_statement) @import
+
+        (call_expression function: (identifier) @call_target)
+        (call_expression function: (member_expression property: (property_identifier) @call_target))
     """
 }
 
@@ -226,59 +235,76 @@ class CodeGraphAnalyzer:
         # captures() returns a dictionary of lists in 0.25.2
         captures = cursor.captures(tree.root_node)
         
-        # Process classes and functions
+        # Process symbols in document order.
+        # Flatten captures dict (tag -> [Node]) into (start_byte, tag, node) and sort
+        # so that current_class is always set before method_name/parent_name are processed.
+        all_captures = []
+        for cap_tag, cap_nodes in captures.items():
+            for cap_node in cap_nodes:
+                all_captures.append((cap_node.start_byte, cap_tag, cap_node))
+        all_captures.sort(key=lambda x: x[0])
+
         current_class = None
-        
-        for tag, nodes in captures.items():
-            for node in nodes:
-                name = None
-                node_type = None
 
-                if tag in ["class_name", "interface_name"]:
-                    name = content[node.start_byte:node.end_byte].decode("utf-8")
-                    node_type = "Class" if tag == "class_name" else "Interface"
-                    symbol_id = self._get_node_id(file_path, name)
+        for _, tag, node in all_captures:
+            name = content[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
-                    if symbol_id not in self.nodes:
-                        self.nodes[symbol_id] = CodeNode(
-                            symbol_id, name, node_type, rel_path,
-                            ast_range_start=list(node.start_point),
-                            ast_range_end=list(node.end_point)
-                        )
-                        # Edge File -> Class
-                        self.edges.append(CodeEdge(file_node_id, symbol_id, "DEFINES"))
+            if tag in ["class_name", "interface_name"]:
+                node_type = "Class" if tag == "class_name" else "Interface"
+                symbol_id = self._get_node_id(file_path, name)
+                if symbol_id not in self.nodes:
+                    self.nodes[symbol_id] = CodeNode(
+                        symbol_id, name, node_type, rel_path,
+                        ast_range_start=list(node.start_point),
+                        ast_range_end=list(node.end_point)
+                    )
+                    # Edge: File -> Class/Interface
+                    self.edges.append(CodeEdge(file_node_id, symbol_id, "DEFINES"))
+                current_class = symbol_id
 
-                    current_class = symbol_id
+            elif tag in ["function_name", "method_name"]:
+                node_type = "Function"
+                symbol_id = self._get_node_id(file_path, name)
+                if symbol_id not in self.nodes:
+                    self.nodes[symbol_id] = CodeNode(
+                        symbol_id, name, node_type, rel_path,
+                        ast_range_start=list(node.start_point),
+                        ast_range_end=list(node.end_point)
+                    )
+                    # Edge: Class -> Method, or File -> top-level Function
+                    parent_id = current_class if (current_class and tag == "method_name") else file_node_id
+                    self.edges.append(CodeEdge(parent_id, symbol_id, "DEFINES"))
 
-                elif tag in ["function_name", "method_name"]:
-                    name = content[node.start_byte:node.end_byte].decode("utf-8")
-                    node_type = "Function"
-                    symbol_id = self._get_node_id(file_path, name)
+            elif tag == "parent_name":
+                # Inheritance: current class extends this parent
+                if current_class:
+                    target_id = f"virtual::{name}"
+                    if target_id not in self.nodes:
+                        self.nodes[target_id] = CodeNode(target_id, name, "ExternalClass", "unknown")
+                    self.edges.append(CodeEdge(current_class, target_id, "INHERITS"))
 
-                    if symbol_id not in self.nodes:
-                        self.nodes[symbol_id] = CodeNode(
-                            symbol_id, name, node_type, rel_path,
-                            ast_range_start=list(node.start_point),
-                            ast_range_end=list(node.end_point)
-                        )
-                        # If inside a class, Class -> Method, else File -> Function
-                        parent_id = current_class if current_class and tag == "method_name" else file_node_id
-                        self.edges.append(CodeEdge(parent_id, symbol_id, "DEFINES"))
+            elif tag == "import":
+                # Create a unique Import node per import statement so the Neo4j
+                # MATCH (t:CodeEntity) in save_to_neo4j can resolve both sides of the edge.
+                import_id = f"import::{file_node_id}::{node.start_byte}"
+                first_line = name.strip().split("\n")[0][:80]
+                if import_id not in self.nodes:
+                    self.nodes[import_id] = CodeNode(
+                        import_id, first_line, "Import", rel_path,
+                        ast_range_start=list(node.start_point),
+                        ast_range_end=list(node.end_point)
+                    )
+                self.edges.append(CodeEdge(file_node_id, import_id, "DEPENDS_ON", {"raw": name}))
 
-                elif tag == "parent_name":
-                    parent_name = content[node.start_byte:node.end_byte].decode("utf-8")
-                    if current_class:
-                        # We don't know the exact file of the parent without full indexing
-                        # but we create a virtual node for now or link and let Neo4j merge
-                        target_id = f"virtual::{parent_name}"
-                        self.edges.append(CodeEdge(current_class, target_id, "INHERITS"))
-                        if target_id not in self.nodes:
-                             self.nodes[target_id] = CodeNode(target_id, parent_name, "ExternalClass", "unknown")
+            elif tag == "call_target":
+                # Emit CALLS only when the callee is a known symbol in this scan.
+                # Single-pass: covers calls to functions defined earlier in the file.
+                callee_id = self._get_node_id(file_path, name)
+                caller_id = current_class or file_node_id
+                if callee_id in self.nodes and caller_id != callee_id:
+                    self.edges.append(CodeEdge(caller_id, callee_id, "CALLS"))
 
-                elif tag == "import":
-                    # Very basic import dependency tracking
-                    # A more thorough implementation would resolve these paths
-                    self.edges.append(CodeEdge(file_node_id, "external_dependency", "DEPENDS_ON", {"raw": content[node.start_byte:node.end_byte].decode("utf-8")}))
+        return file_node_id
 
     def save_to_neo4j(self, workspace: str, snapshot_id: str, name: Optional[str] = None):
         """Sync the analyzed graph to Neo4j as a unique snapshot"""

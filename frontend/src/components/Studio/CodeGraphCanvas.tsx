@@ -234,6 +234,8 @@ function CodeSymbolNode({
       case 'Interface':     return <boxGeometry args={[0.5 * s, 0.5 * s, 0.5 * s]} />;
       case 'Function':      return <sphereGeometry args={[0.3 * s, 16, 16]} />;
       case 'Concept':       return <sphereGeometry args={[0.4 * s, 24, 24]} />;
+      case 'Import':        return <octahedronGeometry args={[0.25 * s, 0]} />;
+      case 'ExternalClass': return <octahedronGeometry args={[0.45 * s, 1]} />;
       default:              return <sphereGeometry args={[0.2 * s, 8, 8]} />;
     }
   };
@@ -249,6 +251,8 @@ function CodeSymbolNode({
       case 'Function': return "#FF5F1F";
       case 'Documentation': return "#00FFFF";
       case 'Concept': return "#FF00FF";
+      case 'Import': return "#00BFFF";       // Deep sky blue — DEPENDS_ON targets
+      case 'ExternalClass': return "#AAFFAA"; // Ghost green — INHERITS targets
       default: return "#888888";
     }
   };

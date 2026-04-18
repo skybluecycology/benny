@@ -94,7 +94,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   selectionTier: 1,
   synthesisMode: 'neural',
   syncMode: 'streaming',
-  visibleTypes: ['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept'],
+  visibleTypes: ['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept', 'Import', 'ExternalClass'],
   visibleEdgeTypes: ['DEFINES', 'INHERITS', 'DEPENDS_ON', 'CALLS', 'CONTAINS', 'REL'],
   showClusters: false,
   graphRenderSettings: {

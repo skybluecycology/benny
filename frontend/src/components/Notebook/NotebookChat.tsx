@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader, User, Bot, FileText, AlertCircle, Share2, Zap, Copy, Check, History } from 'lucide-react';
+import { Send, Loader, User, Bot, FileText, AlertCircle, Share2, Zap, Copy, Check, History, Mic, Volume2 } from 'lucide-react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -20,6 +20,12 @@ export const NotebookChat: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [chatMode, setChatMode] = useState<'semantic' | 'graph_agent' | 'discovery_swarm'>('semantic');
   const [telemetry, setTelemetry] = useState<{[key: string]: string[]}>({});
+  const [isRecording, setIsRecording] = useState(false);
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Float32Array[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -36,32 +42,19 @@ ${JSON.stringify(audit, null, 2)}
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  const handleSend = async (overrideInput?: string, audioFile?: File) => {
+    const textToSubmit = overrideInput !== undefined ? overrideInput : input.trim();
+    if (!textToSubmit && !audioFile) return;
+    if (loading) return;
 
-    const userMessage = input.trim();
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    if (!audioFile) setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: textToSubmit || "(Audio message)" }]);
     setLoading(true);
 
-    // Placeholder for assistant response to show loading state
     setMessages(prev => [...prev, { role: 'assistant', content: '', isLoading: true }]);
 
     try {
-      // 1. Generate local run_id for event subscription (or use one from response if server allows)
-      // Since we don't have the run_id until the POST returns, we can wait for response 
-      // or the server can return the run_id immediately. 
-      // Actually, my rag_routes.py generates it AFTER receiving the POST. 
-      // I'll make a more reactive change: wait for data, then check if it's still loading for more?
-      // No, for swarm, the POST stays open until the swarm is DONE. 
-      // SO, we need to get the run_id BEFORE or DURING the request.
-      
-      // I'll modify the logic: 
-      // The POST /rag/chat will now return a small "meta" response first? No.
-      // WE will generate the run_id here!
       const clientRunId = `chat-${Math.random().toString(36).substr(2, 9)}`;
-
-      // Start listening for events even before the fetch completes
       const eventSource = new EventSource(`${API_BASE_URL}/api/rag/chat/events/${clientRunId}`);
       
       eventSource.onmessage = (event) => {
@@ -78,42 +71,71 @@ ${JSON.stringify(audit, null, 2)}
         }
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/rag/chat`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...GOVERNANCE_HEADERS
-        },
-        body: JSON.stringify({
-          query: userMessage,
-          workspace: currentWorkspace,
-          selected_sources: selectedDocuments,
-          provider: activeLLMProvider,
-          model: activeLLMModels[activeLLMProvider],
-          mode: chatMode,
-          active_nexus_id: activeGraphId,
-          run_id: clientRunId // Pass our generated run_id to the server
-        })
-      });
+      let data;
+      if (audioFile) {
+        // Voice Chat Hub Path
+        const formData = new FormData();
+        formData.append('file', audioFile);
+        formData.append('notebook_id', currentWorkspace); // Assuming workspace used as notebook_id for now
+        formData.append('model', 'qwen3-tk-4b-FLM');
+        formData.append('workspace', currentWorkspace);
 
-      if (!response.ok) {
-        eventSource.close();
-        throw new Error(`Chat failed: ${response.statusText}`);
+        const response = await fetch(`${API_BASE_URL}/api/audio/talk`, {
+          method: 'POST',
+          headers: { 
+            ...GOVERNANCE_HEADERS
+          },
+          body: formData
+        });
+
+        if (!response.ok) throw new Error(`Voice chat failed: ${response.statusText}`);
+        data = await response.json();
+        
+        // Handle audio playback
+        if (data.audio) {
+          const audio = new Audio(`data:${data.media_type};base64,${data.audio}`);
+          audio.play().catch(e => console.error("Audio playback failed", e));
+        }
+
+        // The voice hub returns {transcript, answer, audio}
+        data.answer = data.answer || "No response generated";
+      } else {
+        // Standard Text Path
+        const response = await fetch(`${API_BASE_URL}/api/rag/chat`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            ...GOVERNANCE_HEADERS
+          },
+          body: JSON.stringify({
+            query: textToSubmit,
+            workspace: currentWorkspace,
+            selected_sources: selectedDocuments,
+            provider: activeLLMProvider,
+            model: activeLLMModels[activeLLMProvider],
+            mode: chatMode,
+            active_nexus_id: activeGraphId,
+            run_id: clientRunId
+          })
+        });
+
+        if (!response.ok) {
+          eventSource.close();
+          throw new Error(`Chat failed: ${response.statusText}`);
+        }
+        data = await response.json();
       }
 
-      const data = await response.json();
       eventSource.close();
       
-      // Update the loading assistant message with actual data
       setMessages(prev => {
         const updated = [...prev];
         const lastIndex = updated.length - 1;
         
-        // Handle nexus required status specially
         const isNexusRequired = data.status === 'nexus_required';
         const finalContent = isNexusRequired 
           ? `⚠️ **Nexus Context Required**\n\nThe Neural Graph Agent needs a grounded code graph (Nexus) to reason about this workspace. Please select a nexus from the Forge or Map catalog and try again.`
-          : data.answer;
+          : (data.answer || data.message);
 
         updated[lastIndex] = {
           role: 'assistant',
@@ -125,6 +147,19 @@ ${JSON.stringify(audit, null, 2)}
         };
         return updated;
       });
+
+      // Special case: update the user message if it was an empty audio message initially
+      if (audioFile && data.transcript) {
+        setMessages(prev => {
+          const updated = [...prev];
+          const userIndex = updated.length - 2;
+          if (updated[userIndex] && updated[userIndex].role === 'user') {
+            updated[userIndex].content = `🎤 ${data.transcript}`;
+          }
+          return updated;
+        });
+      }
+
     } catch (error) {
       console.error('Chat error:', error);
       setMessages(prev => {
@@ -139,6 +174,126 @@ ${JSON.stringify(audit, null, 2)}
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const encodeWAV = (samples: Float32Array, sampleRate: number) => {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 32 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      audioContextRef.current = audioContext;
+      processorRef.current = processor;
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        audioChunksRef.current.push(new Float32Array(inputData));
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Failed to start recording", err);
+      alert("Microphone access denied or not available. Please ensure you are on HTTPS or localhost.");
+    }
+  };
+
+  const handleSpeak = async (text: string, index: number) => {
+    if (speakingIdx === index) return;
+    
+    setSpeakingIdx(index);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/audio/speech`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...GOVERNANCE_HEADERS 
+        },
+        body: new URLSearchParams({ text, voice: 'af_sky' })
+      });
+
+      if (!response.ok) throw new Error("Speech synthesis failed");
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      
+      audio.onended = () => {
+        setSpeakingIdx(null);
+        URL.revokeObjectURL(url);
+      };
+      
+      await audio.play();
+    } catch (err) {
+      console.error("Failed to speak message", err);
+      setSpeakingIdx(null);
+    }
+  };
+
+  const stopRecording = () => {
+    if (processorRef.current && isRecording) {
+      processorRef.current.disconnect();
+      if (audioContextRef.current) {
+        const sampleRate = audioContextRef.current.sampleRate;
+        
+        // Flatten chunks
+        const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+        const flattened = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunksRef.current) {
+          flattened.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        const audioBlob = encodeWAV(flattened, sampleRate);
+        const audioFile = new File([audioBlob], "voice_input.wav", { type: 'audio/wav' });
+        handleSend("", audioFile);
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      setIsRecording(false);
     }
   };
 
@@ -179,6 +334,27 @@ ${JSON.stringify(audit, null, 2)}
         
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}>
+            {msg.role === 'assistant' && !msg.isLoading && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
+                <button
+                  onClick={() => handleSpeak(msg.content, i)}
+                  className="btn-icon"
+                  title="Read aloud"
+                  style={{ 
+                    padding: '2px', 
+                    color: speakingIdx === i ? 'var(--accent-primary)' : 'var(--text-muted)',
+                    opacity: 0.6,
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <Volume2 size={14} className={speakingIdx === i ? 'animate-pulse' : ''} />
+                </button>
+              </div>
+            )}
             <div className="message-content">
               {msg.isLoading ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -358,9 +534,28 @@ ${JSON.stringify(audit, null, 2)}
             }}
           />
           <button
+            className={`btn ${isRecording ? 'btn-danger' : 'btn-gradient'}`}
+            onMouseDown={startRecording}
+            onMouseUp={stopRecording}
+            onMouseLeave={stopRecording}
+            disabled={loading}
+            style={{ 
+              width: '44px', 
+              height: '44px', 
+              borderRadius: 'var(--radius-md)', 
+              padding: 0,
+              background: isRecording ? 'var(--error-red)' : undefined,
+              boxShadow: isRecording ? '0 0 15px var(--error-red)' : undefined,
+              transition: 'all 0.2s ease'
+            }}
+            title="Push to Talk"
+          >
+            {isRecording ? <Volume2 size={18} className="animate-pulse" /> : <Mic size={18} />}
+          </button>
+          <button
             className="btn btn-gradient"
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
+            onClick={() => handleSend()}
+            disabled={loading || (!input.trim() && !isRecording)}
             style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-md)', padding: 0 }}
           >
             {loading ? <Loader size={18} className="animate-spin" /> : <Send size={18} />}

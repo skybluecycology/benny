@@ -42,6 +42,7 @@ from .system_routes import router as system_router
 from ..a2a.server import router as a2a_router
 from .live_routes import router as live_router
 from .manifest_routes import router as manifest_router
+from .audio_routes import router as audio_router
 
 
 @asynccontextmanager
@@ -168,6 +169,7 @@ app.include_router(governance_router, prefix="/api/governance", tags=["Security 
 app.include_router(system_router, prefix="/api/system", tags=["System Diagnostics"])
 app.include_router(live_router, prefix="/api", tags=["Live Mode"])
 app.include_router(manifest_router, prefix="/api", tags=["Manifests"])
+app.include_router(audio_router, prefix="/api/audio", tags=["Audio Interaction"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
 
 

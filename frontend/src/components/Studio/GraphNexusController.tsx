@@ -297,18 +297,29 @@ export function GraphNexusController() {
                </button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-               {['Folder', 'File', 'Class', 'Interface', 'Function', 'Documentation', 'Concept'].map(type => {
-                 const isActive = visibleTypes.includes(type);
-                 return (
-                   <button
-                     key={type}
-                     onClick={() => setVisibleTypes(isActive ? visibleTypes.filter(t => t !== type) : [...visibleTypes, type])}
-                     className={`text-[8px] font-bold px-2.5 py-1.5 rounded-lg border transition-all uppercase tracking-tighter ${isActive ? 'bg-white/10 border-white/30 text-white' : 'bg-black/20 border-white/5 text-white/20 opacity-40'}`}
-                   >
-                     {type}
-                   </button>
-                 );
-               })}
+               {[
+               { label: 'Folder',        hint: null },
+               { label: 'File',          hint: null },
+               { label: 'Class',         hint: null },
+               { label: 'Interface',     hint: null },
+               { label: 'Function',      hint: null },
+               { label: 'Documentation', hint: null },
+               { label: 'Concept',       hint: null },
+               { label: 'Import',        hint: 'DEP' },
+               { label: 'ExternalClass', hint: 'INH' },
+             ].map(({ label, hint }) => {
+               const isActive = visibleTypes.includes(label);
+               return (
+                 <button
+                   key={label}
+                   onClick={() => setVisibleTypes(isActive ? visibleTypes.filter(t => t !== label) : [...visibleTypes, label])}
+                   title={hint === 'DEP' ? 'Required for Dependency edges' : hint === 'INH' ? 'Required for Lineage (Inheritance) edges' : undefined}
+                   className={`text-[8px] font-bold px-2.5 py-1.5 rounded-lg border transition-all uppercase tracking-tighter ${isActive ? 'bg-white/10 border-white/30 text-white' : 'bg-black/20 border-white/5 text-white/20 opacity-40'} ${hint === 'DEP' && isActive ? 'border-[#00FFFF]/40' : ''} ${hint === 'INH' && isActive ? 'border-[#39FF14]/40' : ''}`}
+                 >
+                   {label}{hint ? <span className="ml-1 opacity-50 text-[6px]">{hint}</span> : null}
+                 </button>
+               );
+             })}
             </div>
           </div>
 

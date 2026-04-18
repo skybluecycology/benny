@@ -125,6 +125,12 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "provider": "litert",
         "cost_per_1k": 0.0,
         "use_for": ["on-device", "offline", "npu-accelerated", "testing", "gemma-4"]
+    },
+    "voice_speed": {
+        "model": "openai/qwen3-tk-4b-FLM",
+        "provider": "lemonade",
+        "cost_per_1k": 0.0,
+        "use_for": ["voice", "speed", "high_speed", "low_latency"]
     }
 }
 
