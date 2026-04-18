@@ -27,6 +27,9 @@ dev = [
     "ruff>=0.8.0",
 ]
 
+[project.scripts]
+benny = "benny_cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
