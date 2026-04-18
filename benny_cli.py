@@ -233,6 +233,25 @@ def build_parser() -> argparse.ArgumentParser:
     manifests_sub = p_manifests.add_subparsers(dest="manifests_cmd", required=True)
     manifests_sub.add_parser("ls", help="List saved manifests")
 
+    # portable $BENNY_HOME lifecycle (PBR-001 Phase 1a)
+    p_init = sub.add_parser("init", help="Create or refresh a portable $BENNY_HOME on the SSD")
+    p_init.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME (e.g. D:/optimus)")
+    p_init.add_argument("--profile", choices=["app", "native"], required=True)
+
+    p_doctor = sub.add_parser("doctor", help="Validate the portable $BENNY_HOME layout")
+    p_doctor.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
+
+    p_uninstall = sub.add_parser(
+        "uninstall",
+        help="Remove the app/runtime boundary (workspaces survive with --keep-data)",
+    )
+    p_uninstall.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
+    p_uninstall.add_argument(
+        "--keep-data",
+        action="store_true",
+        help="Preserve workspaces, data, models, config, and state",
+    )
+
     return p
 
 
@@ -252,9 +271,65 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "manifests":
         if args.manifests_cmd == "ls":
             return cmd_manifests_ls(args)
+    if args.cmd == "init":
+        return cmd_init(args)
+    if args.cmd == "doctor":
+        return cmd_doctor(args)
+    if args.cmd == "uninstall":
+        return cmd_uninstall(args)
 
     parser.print_help()
     return 1
+
+
+# =============================================================================
+# PORTABLE LIFECYCLE COMMANDS (PBR-001 Phase 1a)
+# =============================================================================
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from benny.portable import home as home_mod
+
+    try:
+        bh = home_mod.init(Path(args.home), profile=args.profile)
+    except home_mod.PortableHomeError as exc:
+        print(f"benny init failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"initialised $BENNY_HOME at {bh.root} (profile={bh.profile})")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from benny.portable import config as cfg_mod
+    from benny.portable import home as home_mod
+
+    root = Path(args.home)
+    report = home_mod.validate(root)
+    if not report.ok:
+        print("benny doctor: layout problems", file=sys.stderr)
+        for p in report.problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
+    try:
+        cfg = cfg_mod.load(root)
+    except cfg_mod.PortableConfigError as exc:
+        print(f"benny doctor: config invalid: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"benny doctor: ok  profile={cfg.profile}  schema={cfg.schema_version}")
+    return 0
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    from benny.portable import home as home_mod
+
+    home_mod.uninstall(Path(args.home), keep_data=bool(args.keep_data))
+    print(
+        f"uninstalled from {args.home} "
+        f"({'data preserved' if args.keep_data else 'data removed'})"
+    )
+    return 0
 
 
 if __name__ == "__main__":
