@@ -41,19 +41,20 @@ async def get_workspace_manifest(workspace_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{workspace_id}/manifest", response_model=WorkspaceManifest)
-async def update_workspace_manifest(workspace_id: str, manifest: WorkspaceManifest):
+async def update_workspace_manifest(workspace_id: str, updates: dict = Body(...)):
     """
-    Update the workspace manifest (YAML).
-    This endpoint enforces schema validation and governance policies.
+    Update specific fields in the workspace manifest (YAML).
+    Performs a merge with existing configuration.
     """
     try:
         ensure_workspace_structure(workspace_id)
         
-        # Governance: Audit version increment or policy checks can go here
-        if manifest.llm_timeout > 3600:
+        # Validation specific to critical fields if present
+        if "llm_timeout" in updates and updates["llm_timeout"] > 3600:
             raise HTTPException(status_code=400, detail="Timeout exceeds maximum governance limit (3600s)")
             
-        save_manifest(workspace_id, manifest)
+        from ..core.workspace import update_manifest
+        manifest = update_manifest(workspace_id, updates)
         return manifest
     except HTTPException as he:
         raise he

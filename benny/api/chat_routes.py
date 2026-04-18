@@ -242,12 +242,11 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
 
         # Call LLM
         try:
-            # We use call_model to get automatic auditing if we can,
-            # but since chat_routes uses completion directly, we'll keep it for now 
-            # and just call track_llm_call manually to ensure full visibility.
+            # Resolve model via role-based orchestrator
+            active_model = await get_active_model(workspace, role="chat")
             
             response = completion(
-                model="openai/gpt-3.5-turbo",  # Uses OPENAI_API_BASE env var
+                model=active_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=request.temperature,
             )
@@ -255,10 +254,11 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
             assistant_message = response.choices[0].message.content
             
             # Record LLM call to Governance Log
+            config = get_model_config(active_model)
             track_llm_call(
                 parent_run_id=run_id,
-                model="gpt-3.5-turbo",
-                provider="openai",
+                model=config.get("model", active_model),
+                provider=config.get("provider", "openai"),
                 usage=response.get("usage"),
                 parent_job_name="notebook_chat"
             )

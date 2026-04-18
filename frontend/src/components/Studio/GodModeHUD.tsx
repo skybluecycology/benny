@@ -128,7 +128,21 @@ interface HUDProps {
 }
 
 export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen }: HUDProps) {
-  const { uiVersion, toggleUIVersion, tokenUsage, executionPhase, viewMode, setIsCodeGraphScanOpen, isGraphManagerOpen, setIsGraphManagerOpen } = useWorkflowStore();
+  const { 
+    uiVersion, 
+    toggleUIVersion, 
+    tokenUsage, 
+    executionPhase, 
+    viewMode, 
+    setIsCodeGraphScanOpen, 
+    isGraphManagerOpen, 
+    setIsGraphManagerOpen,
+    isLLMManagerOpen,
+    setIsLLMManagerOpen,
+    setWikiHubOpen,
+    toggleManifestPanel,
+    toggleRunsPanel
+  } = useWorkflowStore() as any;
   const { currentWorkspace } = useWorkspaceStore();
   const [glitchMode, setGlitchMode] = useState(false);
   const [lowPower, setLowPower] = useState(false);
@@ -212,18 +226,18 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
             <File size={14} /> DOCS
           </button>
           <div className="w-[1px] h-6 bg-[#00FFFF]/20 mx-1" />
-          <button onClick={() => onViewChange('llm')} className={`btn-pill ${currentView === 'llm' ? 'active' : ''}`}>
+          <button 
+            onClick={() => setIsLLMManagerOpen(!isLLMManagerOpen)} 
+            className={`btn-pill ${isLLMManagerOpen ? 'active' : ''}`}
+          >
             <Link size={14} /> LINK
           </button>
           <button onClick={() => onViewChange('graph')} className={`btn-pill ${currentView === 'graph' ? 'active' : ''}`}>
             <Share2 size={14} /> GRAPH
           </button>
           <button 
-            onClick={() => {
-              const { setWikiHubOpen } = (useWorkflowStore.getState() as any);
-              setWikiHubOpen(true);
-            }} 
-            className="btn-pill hover:text-[#FF00FF] transition-all"
+            onClick={() => setWikiHubOpen(true)} 
+            className={`btn-pill hover:text-[#FF00FF] transition-all ${(useWorkflowStore((state: any) => state.isWikiHubOpen)) ? 'active' : ''}`}
           >
             <BookOpen size={14} /> WIKI
           </button>
@@ -232,21 +246,15 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           </button>
           <div className="w-[1px] h-6 bg-white/10 mx-1" />
           <button
-            onClick={() => {
-              const { toggleManifestPanel } = useWorkflowStore.getState() as any;
-              toggleManifestPanel();
-            }}
-            className="btn-pill hover:text-emerald-400 transition-all"
+            onClick={() => toggleManifestPanel()}
+            className={`btn-pill hover:text-emerald-400 transition-all ${(useWorkflowStore((state: any) => state.isManifestPanelOpen)) ? 'active' : ''}`}
             title="Plan a new manifest"
           >
             <Sparkles size={14} /> PLAN
           </button>
           <button
-            onClick={() => {
-              const { toggleRunsPanel } = useWorkflowStore.getState() as any;
-              toggleRunsPanel();
-            }}
-            className="btn-pill hover:text-blue-400 transition-all"
+            onClick={() => toggleRunsPanel()}
+            className={`btn-pill hover:text-blue-400 transition-all ${(useWorkflowStore((state: any) => state.isRunsPanelOpen)) ? 'active' : ''}`}
             title="Run history"
           >
             <History size={14} /> RUNS
@@ -341,9 +349,7 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
       </DynamicOverlay>
  
       <AnimatePresence>
-        {isGraphManagerOpen && (
-          <GraphManager onClose={() => setIsGraphManagerOpen(false)} />
-        )}
+        <WikiHub />
       </AnimatePresence>
 
       <AnimatePresence>

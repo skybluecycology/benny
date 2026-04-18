@@ -263,17 +263,19 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
     return config
 
 
-async def get_active_model(workspace_id: str = "default") -> str:
+async def get_active_model(workspace_id: str = "default", role: str = "default") -> str:
     """
     Get the first available model by checking workspace manifest, then probing providers.
     
     Priority:
-    1. Workspace default_model from manifest.yaml
-    2. Auto-detect which provider is actually running by probing check URLs
-    3. Raise error if nothing available
+    1. Role-specific assignment in manifest.model_roles
+    2. Global workspace default_model from manifest.yaml
+    3. Auto-detect which provider is actually running by probing check URLs
+    4. Raise error if nothing available
     
     Args:
         workspace_id: Workspace identifier
+        role: Task role (chat, swarm, tts, stt, graph_synthesis)
         
     Returns:
         Model identifier string (e.g., "lmstudio/gemma-2-27b")
@@ -283,11 +285,20 @@ async def get_active_model(workspace_id: str = "default") -> str:
     """
     from .workspace import load_manifest
     
-    # Priority 1: Load workspace manifest and use default_model if set
+    # Priority 1: Check role-specific assignment
     try:
         manifest = load_manifest(workspace_id)
+        
+        # 1a. Check for specific role assignment
+        if role != "default" and hasattr(manifest, "model_roles") and manifest.model_roles:
+            role_model = manifest.model_roles.get(role)
+            if role_model:
+                print(f"Using role-specific model for '{role}': {role_model}")
+                return role_model
+        
+        # 1b. Fallback to global default_model
         if manifest.default_model:
-            print(f"✓ Using workspace default_model: {manifest.default_model}")
+            print(f"Using workspace default_model: {manifest.default_model}")
             return manifest.default_model
     except Exception as e:
         logging.warning(f"Could not load manifest for {workspace_id}: {e}")
@@ -332,7 +343,7 @@ async def get_active_model(workspace_id: str = "default") -> str:
                             
                             model_id = best_model.get("id", best_model)
                             result = f"{provider_name}/{model_id}"
-                            print(f"✓ Auto-detected active provider {provider_name}: {result}")
+                            print(f"Auto-detected active provider {provider_name}: {result}")
                             return result
                 except Exception as e:
                     print(f"DEBUG: Provider {provider_name} probe failed: {e}")

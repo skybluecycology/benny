@@ -80,7 +80,7 @@ class InputSpec(BaseModel):
 class ManifestConfig(BaseModel):
     """Execution-time configuration."""
 
-    model: str = Field(default="ollama/llama3.2")
+    model: str = Field(default="")
     max_concurrency: int = Field(default=1)
     max_depth: int = Field(default=3)
     handover_summary_limit: int = Field(default=500)

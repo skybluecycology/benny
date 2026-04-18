@@ -10,6 +10,7 @@ import SourcePanel from './components/Studio/SourcePanel';
 import SymbolInspector from './components/Studio/SymbolInspector';
 import { HybridLayout } from './components/Studio/HybridLayout';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
+import { AnimatePresence } from 'framer-motion';
 
 import ErrorBoundary from './components/Shared/ErrorBoundary';
 
@@ -50,6 +51,8 @@ export default function AppV2() {
       <ErrorBoundary name="AuditHub">
           <ExecutionAuditHub />
       </ErrorBoundary>
+
+
     </div>
   );
 }

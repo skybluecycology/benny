@@ -105,7 +105,7 @@ async def plan_manifest(req: PlanRequest) -> SwarmManifest:
         # if not explicitly provided in the request or config.
         model = req.model or (req.config.model if req.config else None)
         if not model:
-            model = await get_active_model(req.workspace)
+            model = await get_active_model(req.workspace, role="swarm")
 
         manifest = await plan_from_requirement(
             requirement=req.requirement,

@@ -11,20 +11,26 @@ import io
 import json
 from typing import Optional
 
-from ..core.models import LOCAL_PROVIDERS, call_model
+from ..core.models import LOCAL_PROVIDERS, call_model, get_active_model
 
 router = APIRouter()
 
-LEMONADE_URL = "http://[::1]:13305/api/v1"
+LEMONADE_URL = "http://127.0.0.1:13305/api/v1"
 
 @router.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(file: UploadFile = File(...), workspace: str = "default"):
     """Transcribe audio using Lemonade's Whisper (NPU optimized)"""
     try:
+        # Resolve STT model via role
+        stt_model = await get_active_model(workspace, role="stt")
+        # Strip provider prefix if present (e.g. 'lemonade/Whisper...')
+        model_id = stt_model.split('/')[-1] if '/' in stt_model else stt_model
+        
         content = await file.read()
         async with httpx.AsyncClient(timeout=60.0) as client:
             files = {'file': ("audio.wav", content, "audio/wav")}
-            resp = await client.post(f"{LEMONADE_URL}/audio/transcriptions", files=files)
+            data = {'model': model_id}
+            resp = await client.post(f"{LEMONADE_URL}/audio/transcriptions", files=files, data=data)
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, f"Lemonade transcription failed: {resp.text}")
             return resp.json()
@@ -32,13 +38,17 @@ async def transcribe_audio(file: UploadFile = File(...)):
         raise HTTPException(500, f"STT failed: {str(e)}")
 
 @router.post("/speech")
-async def text_to_speech(text: str = Form(...), voice: str = "af_sky"):
+async def text_to_speech(text: str = Form(...), voice: str = "af_sky", workspace: str = "default"):
     """Synthesize speech using Lemonade's Kokoro (TTS)"""
     try:
+        # Resolve TTS model via role
+        tts_model = await get_active_model(workspace, role="tts")
+        model_id = tts_model.split('/')[-1] if '/' in tts_model else tts_model
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{LEMONADE_URL}/audio/speech",
-                json={"model": "kokoro-v1", "input": text, "voice": voice}
+                json={"model": model_id, "input": text, "voice": voice}
             )
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, f"Lemonade synthesis failed: {resp.text}")
@@ -65,10 +75,13 @@ async def voice_chat(
         print(f"Step 1: Sending {len(content)} bytes to Lemonade Whisper at {LEMONADE_URL}")
         
         async with httpx.AsyncClient(timeout=60.0) as client:
-            # We expect a WAV file from the client now. 
-            # Lemonade strictly requires 'model' field for OpenAI compatibility.
+            # 1. Transcribe
+            # Resolve STT model via role
+            stt_model = await get_active_model(workspace, role="stt")
+            stt_id = stt_model.split('/')[-1] if '/' in stt_model else stt_model
+            
             files = {'file': ("voice.wav", content, "audio/wav")}
-            data = {'model': "Whisper-Large-v3-Turbo"}
+            data = {'model': stt_id}
             
             stt_resp = await client.post(
                 f"{LEMONADE_URL}/audio/transcriptions",
@@ -86,7 +99,9 @@ async def voice_chat(
                 return {"error": "No speech detected", "transcript": ""}
 
             # 2. Query LLM
-            print(f"Step 2: Querying LLM {model} with transcription...")
+            # Resolve Chat model via role
+            active_chat_model = await get_active_model(workspace, role="chat")
+            print(f"Step 2: Querying LLM {active_chat_model} with transcription...")
             from .chat_routes import load_chat_history, save_chat_history, ChatMessage, retrieve_context, build_prompt
             
             # Workspace guard: ensure notebook directory exists
@@ -99,7 +114,7 @@ async def voice_chat(
             prompt = build_prompt(transcription, context, history)
             
             assistant_text = await call_model(
-                model=model,
+                model=active_chat_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7
             )
@@ -112,11 +127,15 @@ async def voice_chat(
             save_chat_history(notebook_id, history, workspace)
 
             # 3. Synthesize
-            print(f"Step 3: Synthesizing speech with Kokoro...")
+            # Resolve TTS model via role
+            tts_model_resolved = await get_active_model(workspace, role="tts")
+            tts_id = tts_model_resolved.split('/')[-1] if '/' in tts_model_resolved else tts_model_resolved
+
+            print(f"Step 3: Synthesizing speech with {tts_id}...")
             tts_resp = await client.post(
                 f"{LEMONADE_URL}/audio/speech",
                 json={
-                    "model": "kokoro-v1",
+                    "model": tts_id,
                     "input": assistant_text,
                     "voice": voice
                 }

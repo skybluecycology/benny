@@ -11,6 +11,7 @@ export interface UISlice {
   codeGraph: { nodes: any[], edges: any[] } | null;
   isCodeGraphScanOpen: boolean;
   isGraphManagerOpen: boolean;
+  isLLMManagerOpen: boolean;
   
   // Graph Control State
   selectionTier: 1 | 2 | 3;
@@ -61,6 +62,7 @@ export interface UISlice {
   setCodeGraph: (graph: { nodes: any[], edges: any[] } | null) => void;
   setIsCodeGraphScanOpen: (isOpen: boolean) => void;
   setIsGraphManagerOpen: (isOpen: boolean) => void;
+  setIsLLMManagerOpen: (isOpen: boolean) => void;
   
   // Graph Control Actions
   setSelectionTier: (tier: 1 | 2 | 3) => void;
@@ -89,6 +91,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   codeGraph: null,
   isCodeGraphScanOpen: false,
   isGraphManagerOpen: false,
+  isLLMManagerOpen: false,
   
   // Default Graph State
   selectionTier: 1,
@@ -138,6 +141,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
   setCodeGraph: (graph) => set({ codeGraph: graph }),
   setIsCodeGraphScanOpen: (isOpen) => set({ isCodeGraphScanOpen: isOpen }),
   setIsGraphManagerOpen: (isOpen) => set({ isGraphManagerOpen: isOpen }),
+  setIsLLMManagerOpen: (isOpen) => set({ isLLMManagerOpen: isOpen }),
 
   setSelectionTier: (tier) => set({ selectionTier: tier }),
   setSynthesisMode: (mode) => set({ synthesisMode: mode }),

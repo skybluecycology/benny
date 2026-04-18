@@ -11,17 +11,10 @@ interface WorkspaceState {
   setActiveLLMProvider: (provider: string) => void;
   activeLLMModels: Record<string, string>;
   setActiveLLMModel: (provider: string, model: string) => void;
-  activeDocument: { name: string, subdir: 'data_in' | 'data_out' | 'rag_status' } | null;
-  setActiveDocument: (doc: { name: string, subdir: 'data_in' | 'data_out' | 'rag_status' } | null) => void;
-  selectedDocuments: string[];
-  toggleSelectedDocument: (name: string) => void;
-  synthesisResults: any;
-  setSynthesisResults: (results: any) => void;
-  synthesisHistory: any[];
-  fetchSynthesisHistory: () => Promise<void>;
-  deleteRun: (runId: string) => Promise<boolean>;
-  
-  fetchGraphCatalog: () => Promise<void>;
+  // LLM Roles
+  modelRoles: Record<string, string>;
+  setActiveModelRole: (role: string, modelId: string) => void;
+  syncManifest: () => Promise<void>;
   
   // Spatial Navigation
   focusPath: string | null;
@@ -97,6 +90,48 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         [provider]: model
       }
     }));
+  },
+
+  modelRoles: {
+    chat: 'lemonade/qwen3-tk-4b-FLM',
+    swarm: 'lemonade/deepseek-r1-8b-FLM',
+    stt: 'lemonade/Whisper-Large-v3-Turbo',
+    tts: 'lemonade/kokoro-v1',
+    graph_synthesis: 'lemonade/deepseek-r1-8b-FLM'
+  },
+
+  setActiveModelRole: (role, modelId) => {
+    set((state) => ({
+      modelRoles: {
+        ...state.modelRoles,
+        [role]: modelId
+      }
+    }));
+    
+    // Debounced sync
+    const store = get() as any;
+    if (store._syncTimeout) clearTimeout(store._syncTimeout);
+    store._syncTimeout = setTimeout(() => {
+      get().syncManifest();
+    }, 1000);
+  },
+
+  syncManifest: async () => {
+    const { currentWorkspace, modelRoles } = get();
+    try {
+      await fetch(`${API_BASE_URL}/api/workspaces/${currentWorkspace}/manifest`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...GOVERNANCE_HEADERS 
+        },
+        body: JSON.stringify({
+          model_roles: modelRoles
+        })
+      });
+    } catch (error) {
+      console.error('Failed to sync manifest:', error);
+    }
   },
 
   activeDocument: null,

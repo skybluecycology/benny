@@ -166,6 +166,7 @@ class WorkspaceManifest(BaseModel):
     version: str = Field(default="1.0.0", description="Schema version for governance and migrations")
     llm_timeout: float = Field(default=300.0, description="LLM call timeout in seconds")
     default_model: Optional[str] = Field(None, description="Primary model for this workspace")
+    model_roles: Dict[str, str] = Field(default_factory=dict, description="Task-specific model assignments (chat, swarm, tts, stt, graph_synthesis)")
     embedding_provider: str = Field(default="local", description="Provider for vector embeddings")
     governance_tags: List[str] = Field(default_factory=list, description="Audit and compliance tags")
     exclude_patterns: List[str] = Field(default_factory=lambda: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.venv/**"], description="Glob patterns for graph exclusion")

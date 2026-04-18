@@ -652,12 +652,14 @@ async def chat_rag(request: QueryRequest):
 
         # 3. Call LLM
         try:
-            provider_name = request.provider or "fastflowlm"
-            provider_config = LOCAL_PROVIDERS.get(provider_name, LOCAL_PROVIDERS["fastflowlm"])
+            # Resolve model via role-based orchestrator
+            active_model = await get_active_model(request.workspace, role="chat")
             
-            # Model selection
-            model_name = request.model or ("llama3" if provider_name == "ollama" else "amd/Qwen3-8B-Hybrid" if provider_name == "lemonade" else "gemma3:4b")
-            model_core = model_name.split('/')[-1]
+            from ..core.models import get_model_config
+            config = get_model_config(active_model)
+            provider_name = config.get("provider", "openai")
+            provider_config = LOCAL_PROVIDERS.get(provider_name, LOCAL_PROVIDERS["fastflowlm"])
+            model_core = config.get("model", active_model).split('/')[-1]
 
             chat_url = f"{provider_config['base_url']}/chat/completions"
             payload = {

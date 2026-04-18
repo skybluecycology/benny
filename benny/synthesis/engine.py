@@ -240,7 +240,8 @@ async def call_llm(
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     run_id: Optional[str] = None,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    role: str = "default"
 ) -> str:
     """
     Consolidated LLM call with retry and exponential backoff.
@@ -254,7 +255,7 @@ async def call_llm(
     if not model and workspace:
         try:
             from ..core.models import get_active_model
-            model = await get_active_model(workspace)
+            model = await get_active_model(workspace, role=role)
         except Exception:
             pass
 
@@ -465,8 +466,8 @@ async def extract_triples(
         from ..core.models import get_active_model
         resolved_model = await get_active_model(workspace)
 
-        # Pass workspace to ensure manifest-level model selection
-        raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg)
+        # Pass workspace and role to ensure manifest-level model selection
+        raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg, role="graph_synthesis")
         
         # Simple extraction of JSON block from LLM output
         json_match = re.search(r'\[.*\]', raw, re.DOTALL)
@@ -553,7 +554,8 @@ async def extract_directed_triples_from_section(
         model=model or resolved_model, 
         timeout=timeout, 
         config=cfg, 
-        run_id=run_id
+        run_id=run_id,
+        role="graph_synthesis"
     )
     
     raw_triples, thinking = _parse_json_from_llm(raw)

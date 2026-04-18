@@ -10,7 +10,8 @@ import { TemporalAudit } from './components/Studio/TemporalAudit';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { V2ChatOverlay } from './components/Studio/V2ChatOverlay';
-import { V2LLMOverlay } from './components/Studio/V2LLMOverlay';
+import V2LLMOverlay from './components/LLMManager/V2LLMOverlay';
+import { GraphManager } from './components/Studio/GraphManager';
 import { CodeGraphCanvas } from './components/Studio/CodeGraphCanvas';
 import { GraphNexusController } from './components/Studio/GraphNexusController';
 import { HybridLayout } from './components/Studio/HybridLayout';
@@ -20,7 +21,14 @@ import ManifestPlanner from './components/Studio/ManifestPlanner';
 import RunsPanel from './components/Studio/RunsPanel';
 
 export default function AppV2Beta() {
-  const { viewMode, setViewMode, uiVersion } = useWorkflowStore();
+  const { 
+    viewMode, 
+    setViewMode, 
+    uiVersion,
+    isLLMManagerOpen,
+    isGraphManagerOpen,
+    setIsGraphManagerOpen
+  } = useWorkflowStore() as any;
   const [isChatOpen, setIsChatOpen] = useState(false);
 
   if (uiVersion !== 'v2') return null;
@@ -44,7 +52,6 @@ export default function AppV2Beta() {
             {viewMode === 'knowledge' && <SynopticWeb />}
             {viewMode === 'marketplace' && <MarketplaceV2 />}
             {viewMode === 'documents' && <DocumentManager />}
-            {viewMode === 'llm' && <V2LLMOverlay onClose={() => setViewMode('swarm')} />}
             {viewMode === 'graph' && <CodeGraphCanvas />}
           </motion.div>
         </AnimatePresence>
@@ -64,6 +71,18 @@ export default function AppV2Beta() {
         {/* Universal Floating Windows Layer */}
         <V2GraphSelector />
         <GraphNexusController />
+        <AnimatePresence>
+          {isLLMManagerOpen && (
+            <V2LLMOverlay />
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {isGraphManagerOpen && (
+            <GraphManager onClose={() => setIsGraphManagerOpen(false)} />
+          )}
+        </AnimatePresence>
+
         <AnimatePresence>
           {isChatOpen && (
             <V2ChatOverlay onClose={() => setIsChatOpen(false)} />

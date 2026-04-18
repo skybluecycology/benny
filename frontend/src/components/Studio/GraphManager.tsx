@@ -124,11 +124,67 @@ function HistoryTab({ history, onDelete, workspace }: { history: any[], onDelete
   );
 }
 
+// --- Tab: Providers (Utility LLM Management) ---
+
+function ProvidersTab({ providers, loading, activeProvider, setActiveProvider, start, stop }: any) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[10px] font-black text-[#00FFFF]/60 tracking-[0.2em] uppercase">NERUAL_RUNNERS</h3>
+      </div>
+      
+      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+        {Object.entries(providers).map(([key, provider]: any) => (
+          <div key={key} className={`p-4 border ${activeProvider === key ? 'border-[#00FFFF]/40 bg-[#00FFFF]/5' : 'border-white/5 bg-white/2'} rounded-sm space-y-3`}>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${provider.running ? 'bg-[#39FF14] shadow-[0_0_10px_#39FF14]' : 'bg-white/20'}`} />
+              <div className="flex-1">
+                <div className="text-[10px] font-black text-white tracking-wider uppercase">{provider.name}</div>
+                <div className="text-[8px] font-mono text-white/40">PORT_{provider.port}</div>
+              </div>
+              {activeProvider === key && <span className="text-[8px] font-black text-[#00FFFF] border border-[#00FFFF]/40 px-1.5 py-0.5 rounded-xs">ACTIVE_KERN</span>}
+            </div>
+
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setActiveProvider(key)}
+                className={`flex-1 h-8 text-[9px] font-black tracking-widest uppercase transition-all border ${activeProvider === key ? 'bg-[#00FFFF] text-black border-[#00FFFF]' : 'border-white/10 text-white/40 hover:text-white/60'}`}
+              >
+                {activeProvider === key ? 'ACTIVE' : 'SELECT'}
+              </button>
+              {!provider.running ? (
+                <button 
+                  disabled={!provider.can_start}
+                  onClick={() => start(key)}
+                  className="px-3 h-8 border border-white/10 text-white/40 hover:text-[#39FF14] hover:border-[#39FF14] transition-all disabled:opacity-30"
+                >
+                  <Play size={12} />
+                </button>
+              ) : (
+                <button 
+                  disabled={!provider.can_stop}
+                  onClick={() => stop(key)}
+                  className="px-3 h-8 border border-white/10 text-white/40 hover:text-[#FF5F1F] hover:border-[#FF5F1F] transition-all disabled:opacity-30"
+                >
+                  <Square size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- Main Manager Component ---
 
 export function GraphManager({ onClose }: { onClose: () => void }) {
   const { currentWorkspace } = useWorkspaceStore();
-  const [activeTab, setActiveTab] = useState<'overview' | 'sources' | 'history'>('overview');
+  const { activeLLMProvider, setActiveLLMProvider } = useWorkspaceStore() as any;
+  const { providers, loading: providersLoading, refresh: refreshProviders, startProvider, stopProvider } = (require('../../hooks/useLLMStatus').useLLMStatus(15000));
+  
+  const [activeTab, setActiveTab] = useState<'overview' | 'sources' | 'history' | 'providers'>('overview');
   const [stats, setStats] = useState<any>({});
   const [sources, setSources] = useState<string[]>([]);
   const [history, setHistory] = useState<any[]>([]);
@@ -237,6 +293,12 @@ export function GraphManager({ onClose }: { onClose: () => void }) {
           >
             AUDIT_LOGS
           </button>
+          <button 
+            onClick={() => setActiveTab('providers')}
+            className={`flex-1 p-4 text-[10px] font-black tracking-widest uppercase transition-all ${activeTab === 'providers' ? 'bg-[#00FFFF]/10 text-[#00FFFF]' : 'text-white/40 hover:text-white/60'}`}
+          >
+            PROVIDERS
+          </button>
         </div>
 
         {/* Content */}
@@ -244,6 +306,16 @@ export function GraphManager({ onClose }: { onClose: () => void }) {
           {activeTab === 'overview' && <OverviewTab stats={stats} loading={loading} />}
           {activeTab === 'sources' && <SourcesTab sources={sources} onDelete={handleDeleteSource} workspace={currentWorkspace} />}
           {activeTab === 'history' && <HistoryTab history={history} onDelete={handleDeleteRun} workspace={currentWorkspace} />}
+          {activeTab === 'providers' && (
+            <ProvidersTab 
+              providers={providers} 
+              loading={providersLoading} 
+              activeProvider={activeLLMProvider}
+              setActiveProvider={setActiveLLMProvider}
+              start={startProvider}
+              stop={stopProvider}
+            />
+          )}
         </div>
 
         {/* Footer Actions */}
