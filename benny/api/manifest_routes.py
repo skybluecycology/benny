@@ -39,6 +39,7 @@ from ..core.manifest import (
     SwarmManifest,
     should_trigger_swarm,
 )
+from ..core.models import get_active_model
 from ..graph.manifest_runner import execute_manifest, plan_from_requirement
 from ..persistence import run_store
 
@@ -100,10 +101,16 @@ class TriggerCheckResponse(BaseModel):
 async def plan_manifest(req: PlanRequest) -> SwarmManifest:
     """Run the planner and return a SwarmManifest WITHOUT executing."""
     try:
+        # Resolve the model ID using the LLM Manager's configuration/auto-detection
+        # if not explicitly provided in the request or config.
+        model = req.model or (req.config.model if req.config else None)
+        if not model:
+            model = await get_active_model(req.workspace)
+
         manifest = await plan_from_requirement(
             requirement=req.requirement,
             workspace=req.workspace,
-            model=(req.model or (req.config.model if req.config else None) or "ollama/llama3.2"),
+            model=model,
             input_files=list(req.inputs.files),
             output_spec=req.outputs,
             max_concurrency=(req.config.max_concurrency if req.config else req.max_concurrency),

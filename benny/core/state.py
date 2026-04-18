@@ -137,7 +137,7 @@ def create_swarm_state(
     execution_id: str,
     workspace: str = "default",
     original_request: str = "",
-    model: str = "ollama/llama3.2",
+    model: str = None,  # Resolved model from LLM Manager
     max_concurrency: int = 1,
     handover_summary_limit: int = 500,
     input_files: Optional[List[str]] = None,

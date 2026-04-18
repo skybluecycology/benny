@@ -24,29 +24,29 @@ LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
     "lemonade": {
         "name": "Lemonade",
         "port": 13305,
-        "base_url": "http://localhost:13305/api/v1",
+        "base_url": "http://127.0.0.1:13305/api/v1",
         "api_key": "not-needed",
         "description": "AMD NPU accelerated inference",
         "startup_cmd": "LemonadeServer.exe serve --port 13305",
-        "check_url": "http://localhost:13305/api/v1/models"
+        "check_url": "http://127.0.0.1:13305/api/v1/models"
     },
     "ollama": {
         "name": "Ollama",
         "port": 11434,
-        "base_url": "http://localhost:11434/v1",
+        "base_url": "http://127.0.0.1:11434/v1",
         "api_key": "ollama",
         "description": "Popular local LLM server",
         "startup_cmd": "ollama serve",
-        "check_url": "http://localhost:11434/v1/models"
+        "check_url": "http://127.0.0.1:11434/v1/models"
     },
     "fastflowlm": {
         "name": "FastFlowLM",
         "port": 52625,
-        "base_url": "http://localhost:52625/v1",
+        "base_url": "http://127.0.0.1:52625/v1",
         "api_key": "not-needed",
         "description": "Intel NPU accelerated inference",
         "startup_cmd": None,  # Manual start required
-        "check_url": "http://localhost:52625/v1/models"
+        "check_url": "http://127.0.0.1:52625/v1/models"
     },
     "lmstudio": {
         "name": "LM Studio",

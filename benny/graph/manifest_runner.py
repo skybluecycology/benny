@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 async def plan_from_requirement(
     requirement: str,
     workspace: str = "default",
-    model: str = "ollama/llama3.2",
+    model: str = None,  # Must be resolved by caller via LLM Manager
     input_files: Optional[List[str]] = None,
     output_spec: Optional[OutputSpec] = None,
     max_concurrency: int = 1,

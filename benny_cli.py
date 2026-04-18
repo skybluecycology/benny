@@ -40,6 +40,7 @@ from benny.core.manifest import (
 
 
 async def cmd_plan(args: argparse.Namespace) -> int:
+    from benny.core.models import get_active_model
     from benny.graph.manifest_runner import plan_from_requirement
     from benny.persistence import run_store
 
@@ -50,8 +51,13 @@ async def cmd_plan(args: argparse.Namespace) -> int:
         spec=args.spec or "",
     )
 
+    # Resolve model from manager if not provided
+    model = args.model
+    if not model:
+        model = await get_active_model(args.workspace)
+
     print(f"[plan] requirement: {args.requirement[:120]}{'...' if len(args.requirement) > 120 else ''}")
-    print(f"[plan] workspace={args.workspace} model={args.model} max_concurrency={args.max_concurrency}")
+    print(f"[plan] workspace={args.workspace} model={model} max_concurrency={args.max_concurrency}")
     if args.input:
         print(f"[plan] inputs: {args.input}")
     if output_spec.word_count_target:
@@ -60,7 +66,7 @@ async def cmd_plan(args: argparse.Namespace) -> int:
     manifest = await plan_from_requirement(
         requirement=args.requirement,
         workspace=args.workspace,
-        model=args.model,
+        model=model,
         input_files=args.input or [],
         output_spec=output_spec,
         max_concurrency=args.max_concurrency,
@@ -193,7 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan = sub.add_parser("plan", help="Build a SwarmManifest from a requirement (no execution)")
     p_plan.add_argument("requirement", help="Natural-language requirement")
     p_plan.add_argument("--workspace", default="default")
-    p_plan.add_argument("--model", default="ollama/llama3.2")
+    p_plan.add_argument("--model", default=None, help="LLM model ID (defaults to active manager selection)")
     p_plan.add_argument("--name", default=None)
     p_plan.add_argument("--input", "-i", action="append", default=[], help="Input file (repeatable)")
     p_plan.add_argument("--output", "-o", action="append", default=[], help="Output file (repeatable)")
