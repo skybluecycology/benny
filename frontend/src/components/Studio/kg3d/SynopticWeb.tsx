@@ -110,14 +110,21 @@ const SynopticWeb: React.FC<SynopticWebProps> = ({ enabled, focusedLayer = null 
         nodeRelSize={6}
         nodeVal={(n: any) => n.metrics.pagerank * 100 + 1}
         nodeOpacity={1}
+        nodeY={(n: any) => {
+          // Vertical depth by abstraction layer (KG3D-F13): layer 1 (abstract) at top, layer 5 (concrete) at bottom
+          const layer = n.aot_layer || 3;
+          return (5 - layer) * 50; // Layer 1 = +200, Layer 5 = 0
+        }}
         nodeThreeObject={(n: any) => {
             // TODO(KG3D-001 Phase 5): re-introduce instanced custom layer
             return undefined;
         }}
         linkColor={(l: any) => EDGE_COLORS[l.kind] || EDGE_COLORS.references}
-        linkWidth={1.5}
-        linkDirectionalParticles={2}
-        linkDirectionalParticleSpeed={0.01}
+        linkWidth={(l: any) => l.kind === 'prerequisite' ? 2.5 : 1}
+        linkOpacity={0.6}
+        linkDirectionalParticles={(l: any) => l.kind === 'prerequisite' ? 3 : 0}
+        linkDirectionalParticleSpeed={0.015}
+        linkCurveRotation={0.3}
         showNavInfo={false}
         onNodeClick={(node: any) => {
           selectConcept(node.id);
