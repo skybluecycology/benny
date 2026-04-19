@@ -71,6 +71,118 @@ _SERVER_OPS_ALLOWLIST_JSON = """{
 }
 """
 
+# Portable launcher scripts (PBR-001 §4.3). Each launcher derives $BENNY_HOME
+# from its own location so the SSD can be mounted at any drive letter or path.
+_POSIX_LAUNCHER = """#!/usr/bin/env sh
+# Portable Benny launcher (POSIX). Self-locates $BENNY_HOME.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+exec python3 -m benny_cli "$@"
+"""
+
+_WINDOWS_LAUNCHER = """@echo off
+rem Portable Benny launcher (Windows). Self-locates %BENNY_HOME%.
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
+python -m benny_cli %*
+"""
+
+_POSIX_UI_LAUNCHER = """#!/usr/bin/env sh
+# Starts the UI dev server relative to $BENNY_HOME.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$BENNY_HOME/app/ui" 2>/dev/null || cd "$BENNY_HOME"
+exec npm run dev -- "$@"
+"""
+
+_WINDOWS_UI_LAUNCHER = """@echo off
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
+if exist "%BENNY_HOME%\\app\\ui" (cd /d "%BENNY_HOME%\\app\\ui") else (cd /d "%BENNY_HOME%")
+npm run dev -- %*
+"""
+
+_POSIX_LLM_LAUNCHER = """#!/usr/bin/env sh
+# Starts the local LLM runtime (Lemonade). Placeholder until the bundled
+# binary is side-loaded under models/ or app/; for now defers to PATH.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+exec lemonade-server "$@"
+"""
+
+_WINDOWS_LLM_LAUNCHER = """@echo off
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
+LemonadeServer.exe %*
+"""
+
+_POSIX_NEO4J_LAUNCHER = """#!/usr/bin/env sh
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+exec neo4j "$@"
+"""
+
+_WINDOWS_NEO4J_LAUNCHER = """@echo off
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
+neo4j.bat %*
+"""
+
+_LAUNCHERS: tuple[tuple[str, str, bool], ...] = (
+    ("benny", _POSIX_LAUNCHER, True),
+    ("benny.cmd", _WINDOWS_LAUNCHER, False),
+    ("benny-ui", _POSIX_UI_LAUNCHER, True),
+    ("benny-ui.cmd", _WINDOWS_UI_LAUNCHER, False),
+    ("benny-llm", _POSIX_LLM_LAUNCHER, True),
+    ("benny-llm.cmd", _WINDOWS_LLM_LAUNCHER, False),
+    ("benny-neo4j", _POSIX_NEO4J_LAUNCHER, True),
+    ("benny-neo4j.cmd", _WINDOWS_NEO4J_LAUNCHER, False),
+)
+
+# Declarative compose manifest for the `app` profile (PBR-001 §4.3).
+# Kept minimal and generic — the image tags are placeholders the app-profile
+# builder pins at release time. Paths use relative-to-$BENNY_HOME forms only.
+_COMPOSE_YML = """# Portable Benny — profile=app stack (see PBR-001 §4.3).
+# This file is seeded on `benny init --profile app`. Paths MUST stay relative
+# to the enclosing $BENNY_HOME; absolute host paths are rejected by SR-1.
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5.20-community
+    environment:
+      NEO4J_AUTH: "neo4j/benny_local"
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ../data/graph:/data
+      - ../logs:/logs
+
+  api:
+    image: benny-api:latest
+    depends_on:
+      - neo4j
+    environment:
+      BENNY_HOME: /benny-home
+      NEO4J_URI: bolt://neo4j:7687
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../:/benny-home
+
+  ui:
+    image: benny-ui:latest
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+"""
+
 
 class PortableHomeError(RuntimeError):
     """Raised on illegal portable-home state transitions."""
@@ -146,6 +258,38 @@ def _seed_state(root: Path, profile: Profile) -> None:
     (state / "profile-lock").write_text(profile, encoding="utf-8")
 
 
+def _seed_launchers(root: Path) -> None:
+    """Write the portable launcher scripts into ``<root>/bin/``.
+
+    On POSIX we also chmod +x; on Windows the x-bit is meaningless, but the
+    ``.cmd`` extension is what makes them runnable.
+    """
+    import os
+    import stat
+
+    bin_dir = root / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    for name, content, executable in _LAUNCHERS:
+        path = bin_dir / name
+        # Re-seed every init so template updates ship with new versions.
+        # Preserve the user's file if they edited it (detected by marker line
+        # absence) — for now a plain overwrite is fine; customisations go in
+        # config/, not bin/.
+        path.write_text(content, encoding="utf-8")
+        if executable and os.name == "posix":
+            mode = path.stat().st_mode
+            path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _seed_app_compose(root: Path) -> None:
+    """Seed ``<root>/app/compose.yml`` for the `app` profile only."""
+    compose = root / "app" / "compose.yml"
+    compose.parent.mkdir(parents=True, exist_ok=True)
+    if not compose.is_file():
+        compose.write_text(_COMPOSE_YML, encoding="utf-8")
+
+
 def _seed_config(root: Path, profile: Profile) -> None:
     config = root / "config"
     config.mkdir(parents=True, exist_ok=True)
@@ -195,6 +339,9 @@ def init(root: Path, *, profile: Profile) -> BennyHome:
 
     _seed_state(root, profile)
     _seed_config(root, profile)
+    _seed_launchers(root)
+    if profile == "app":
+        _seed_app_compose(root)
 
     return BennyHome(root=root, profile=profile)
 

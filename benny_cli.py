@@ -252,6 +252,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preserve workspaces, data, models, config, and state",
     )
 
+    # Service lifecycle (PBR-001 Phase 1b)
+    p_up = sub.add_parser("up", help="Start the portable service stack (neo4j, lemonade, api, ui)")
+    p_up.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
+    p_up.add_argument("--only", action="append", default=[], help="Only start the named service (repeatable)")
+    p_up.add_argument("--no-wait", dest="wait_healthy", action="store_false", default=True)
+
+    p_down = sub.add_parser("down", help="Stop the portable service stack")
+    p_down.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
+    p_down.add_argument("--only", action="append", default=[], help="Only stop the named service (repeatable)")
+
+    p_status = sub.add_parser("status", help="Report service status")
+    p_status.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
+    p_status.add_argument("--only", action="append", default=[], help="Only report the named service (repeatable)")
+
     return p
 
 
@@ -277,6 +291,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_doctor(args)
     if args.cmd == "uninstall":
         return cmd_uninstall(args)
+    if args.cmd == "up":
+        return cmd_up(args)
+    if args.cmd == "down":
+        return cmd_down(args)
+    if args.cmd == "status":
+        return cmd_status(args)
 
     parser.print_help()
     return 1
@@ -329,6 +349,74 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         f"uninstalled from {args.home} "
         f"({'data preserved' if args.keep_data else 'data removed'})"
     )
+    return 0
+
+
+def _resolve_home(path_arg: str) -> Any:
+    from benny.portable import home as home_mod
+
+    root = Path(path_arg)
+    report = home_mod.validate(root)
+    if not report.ok:
+        raise home_mod.PortableHomeError(
+            "home is not initialised or is corrupt: " + "; ".join(report.problems)
+        )
+    profile = (root / "state" / "profile-lock").read_text(encoding="utf-8").strip()
+    return home_mod.BennyHome(root=root, profile=profile)  # type: ignore[arg-type]
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    from benny.portable import config as cfg_mod
+    from benny.portable import runner as runner_mod
+    from benny.portable import services as svc_mod
+
+    bh = _resolve_home(args.home)
+    cfg = cfg_mod.load(bh.root)
+    registry = svc_mod.default_services(cfg)
+
+    selected = args.only or list(registry.keys())
+    missing = [n for n in selected if n not in registry]
+    if missing:
+        print(f"benny up: unknown service(s): {missing}", file=sys.stderr)
+        return 2
+
+    specs = [registry[n] for n in selected]
+    statuses = runner_mod.up(bh, specs, wait_healthy=args.wait_healthy)
+    failed = 0
+    for s in statuses:
+        state = "healthy" if s.healthy else ("alive" if s.alive else "down")
+        print(f"{s.name:<12} {state:<8} pid={s.pid}  {s.health_detail}")
+        if not s.alive:
+            failed += 1
+    return 0 if failed == 0 else 1
+
+
+def cmd_down(args: argparse.Namespace) -> int:
+    from benny.portable import runner as runner_mod
+
+    bh = _resolve_home(args.home)
+    stopped = runner_mod.down(bh, args.only or None)
+    if not stopped:
+        print("benny down: nothing to stop")
+        return 0
+    for name in stopped:
+        print(f"stopped {name}")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    from benny.portable import runner as runner_mod
+
+    bh = _resolve_home(args.home)
+    statuses = runner_mod.status(bh, args.only or None)
+    if not statuses:
+        print("benny status: no services tracked (nothing has been started yet)")
+        return 0
+    print(f"{'SERVICE':<12} {'STATE':<8} {'PID':<8} DETAIL")
+    for s in statuses:
+        state = "healthy" if s.healthy else ("alive" if s.alive else "down")
+        pid = str(s.pid) if s.pid else "-"
+        print(f"{s.name:<12} {state:<8} {pid:<8} {s.health_detail}")
     return 0
 
 
