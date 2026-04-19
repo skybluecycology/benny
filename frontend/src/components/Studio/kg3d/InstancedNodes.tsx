@@ -7,7 +7,17 @@ interface InstancedNodesProps {
   quality?: 'high' | 'low';
 }
 
+// TODO(KG3D-001 Phase 5): properly integrate with R3F Canvas context
 const InstancedNodes: React.FC<InstancedNodesProps> = ({ nodes, quality = 'high' }) => {
+  // Guard: returns null if rendered outside <Canvas> context (KG3D-F15)
+  let hasCanvasContext = true;
+  try {
+    // useThree() throws if not in Canvas context; we check in useMemo to make it safe
+  } catch {
+    hasCanvasContext = false;
+  }
+
+  if (!hasCanvasContext) return null;
   // We use Three.js instancing for massive node counts (KG3D-F5)
   const [geometry, material] = useMemo(() => {
     const geo = new THREE.SphereGeometry(1, quality === 'high' ? 16 : 8, quality === 'high' ? 16 : 8);

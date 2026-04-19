@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { GodModeHUD } from './components/Studio/GodModeHUD';
 import { SwarmCanvas3D } from './components/Studio/SwarmCanvas3D';
-import { SynopticWeb } from './components/Studio/kg3d/SynopticWeb';
 import { MarketplaceV2 } from './components/MarketplaceV2';
+import Kg3dErrorBoundary from './components/Studio/kg3d/Kg3dErrorBoundary';
+import { UI_FLAGS } from './constants';
+
+const SynopticWeb = React.lazy(() =>
+  import('./components/Studio/kg3d/SynopticWeb').then(m => ({ default: m.SynopticWeb }))
+);
 import { OmniDialog } from './components/Studio/OmniDialog';
 import { TemporalAudit } from './components/Studio/TemporalAudit';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
@@ -52,7 +57,19 @@ export default function AppV2Beta() {
             className="w-full h-full"
           >
             {viewMode === 'swarm' && <SwarmCanvas3D />}
-            {viewMode === 'knowledge' && <SynopticWeb enabled={cognitiveMesh.synopticWeb} focusedLayer={cognitiveMesh.focusedLayer} />}
+            {viewMode === 'knowledge' && (
+              UI_FLAGS.kg3d_enabled ? (
+                <Kg3dErrorBoundary>
+                  <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-[#39FF14] font-mono">KG3D loading...</div>}>
+                    <SynopticWeb enabled={cognitiveMesh.synopticWeb} focusedLayer={cognitiveMesh.focusedLayer} />
+                  </Suspense>
+                </Kg3dErrorBoundary>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-white/40 font-mono text-sm">
+                  Cognitive mesh disabled — enable ui.kg3d_enabled to activate
+                </div>
+              )
+            )}
             {viewMode === 'marketplace' && <MarketplaceV2 />}
             {viewMode === 'documents' && <DocumentManager />}
             {viewMode === 'graph' && <CodeGraphCanvas />}

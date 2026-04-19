@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
+import ForceGraph3D from 'react-force-graph-3d';
 import { CATEGORY_COLORS, EDGE_COLORS } from './palette';
 import InstancedNodes from './InstancedNodes';
 import { useKg3dStore, type KgNode, type KgEdge, type DeltaEvent } from '../../../hooks/useKg3dStore';
@@ -11,10 +11,11 @@ interface SynopticWebProps {
   focusedLayer?: number;
 }
 
+// TODO(KG3D-001 Phase 5): replace ForceGraphMethods type usage when API stabilizes
 const SynopticWeb: React.FC<SynopticWebProps> = ({ enabled, focusedLayer = null }) => {
-  const fgRef = useRef<ForceGraphMethods>();
+  const fgRef = useRef<any>(null);
   const { selectConcept, setGraph } = useKg3dStore();
-  const [data, setData] = useState<{ nodes: any[]; links: any[] }>({ nodes: [], edges: [] });
+  const [data, setData] = useState<{ nodes: any[]; links: any[] }>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
 
   // Fetch initial ontology
@@ -110,14 +111,8 @@ const SynopticWeb: React.FC<SynopticWebProps> = ({ enabled, focusedLayer = null 
         nodeVal={(n: any) => n.metrics.pagerank * 100 + 1}
         nodeOpacity={1}
         nodeThreeObject={(n: any) => {
-            // Optimization: If using customLayer, we return null here
-            return data.nodes.length > 500 ? new THREE.Object3D() : undefined;
-        }}
-        customLayerOrder={['node', 'link', 'custom']}
-        customLayerData={[data.nodes]}
-        customLayerElement={(nodes: any[]) => {
-            if (nodes[0].length <= 500) return null;
-            return <InstancedNodes nodes={nodes[0]} quality="low" />;
+            // TODO(KG3D-001 Phase 5): re-introduce instanced custom layer
+            return undefined;
         }}
         linkColor={(l: any) => EDGE_COLORS[l.kind] || EDGE_COLORS.references}
         linkWidth={1.5}

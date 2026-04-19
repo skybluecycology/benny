@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Database, 
-  Activity, 
-  Trash2, 
-  History, 
-  Settings, 
-  Cpu, 
-  Layers, 
+import {
+  Database,
+  Activity,
+  Trash2,
+  History,
+  Settings,
+  Cpu,
+  Layers,
   AlertCircle,
   ShieldCheck,
   Search,
   Zap,
   RefreshCw,
-  X
+  X,
+  Play,
+  Square
 } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';

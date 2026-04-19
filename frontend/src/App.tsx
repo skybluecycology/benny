@@ -1,34 +1,57 @@
-console.log("BOOT: App.tsx (Emergency Rollback Phase 2)");
 import { useState, useEffect } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import WorkflowCanvas from './components/Studio/WorkflowCanvas';
 import NodePalette from './components/Studio/NodePalette';
-import SidebarTabs from './components/Studio/SidebarTabs';
+import ConfigPanel from './components/Studio/ConfigPanel';
+import ExecutionBar from './components/Studio/ExecutionBar';
+import LLMManager from './components/LLMManager/LLMManager';
 import WorkflowList from './components/Studio/WorkflowList';
+import SourcePanel from './components/Studio/SourcePanel';
 import ResultPanel from './components/Studio/ResultPanel';
+import NotebookView from './components/Notebook/NotebookView';
+import DocumentViewer from './components/Notebook/DocumentViewer';
+import SwarmStatePanel from './components/Studio/SwarmStatePanel';
+import SwarmConfigPanel from './components/Studio/SwarmConfigPanel';
+import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
+import SynthesisPanel from './components/Notebook/SynthesisPanel';
+import V2GraphSelector from './components/Studio/V2GraphSelector';
+import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
+import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
+import ErrorBoundary from './components/Shared/ErrorBoundary';
+import { RootErrorBoundary } from './components/Shared/RootErrorBoundary';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { useWorkspaceStore } from './hooks/useWorkspaceStore';
-import ErrorBoundary, { withErrorBoundary } from './components/Shared/ErrorBoundary';
 import AppV2 from './AppV2Beta';
 
-import { 
-  Settings, 
-  ChevronRight, ChevronLeft, Layout, Sparkles
-} from 'lucide-react';
 
-type View = 'studio' | 'agents' | 'topology' | 'settings' | 'marketplace' | 'documents';
+
+import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
+
+type View = 'studio' | 'notebook' | 'llm' | 'admin';
+
+import WorkspaceSelector from './components/Shared/WorkspaceSelector';
+import SidebarTabs from './components/Studio/SidebarTabs';
 
 function App() {
   const [view, setView] = useState<View>('studio');
   const [sidebarTab, setSidebarTab] = useState<'flows' | 'agents' | 'nodes' | 'sources'>('flows');
+  const [showResults, setShowResults] = useState(false);
+  const swarmExecutionId = useWorkflowStore((state) => state.swarmExecutionId);
+  const [swarmConfig, setSwarmConfig] = useState({
+    model: 'Qwen3-8B-Hybrid',
+    max_concurrency: 1,
+    workspace: 'default'
+  });
+  const selectedNode = useWorkflowStore((state) => state.selectedNode);
   const [isLeftPaneOpen, setIsLeftPaneOpen] = useState(true);
   const [isRightPaneOpen, setIsRightPaneOpen] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [isDraggingRight, setIsDraggingRight] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isDraggingLeft, setIsDraggingLeft] = useState(false);
-  
-  const uiVersion = useWorkflowStore((state) => state.uiVersion);
+  const [isDocPaneOpen, setIsDocPaneOpen] = useState(true);
+  const [graphKey, setGraphKey] = useState(0); // used to force re-fetch in graph canvas
+  const { currentWorkspace } = useWorkspaceStore();
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -38,7 +61,7 @@ function App() {
           setRightPanelWidth(newWidth);
         }
       } else if (isDraggingLeft) {
-        const newWidth = e.clientX - 64;
+        const newWidth = e.clientX - 64; // nav rail is 64px width
         if (newWidth >= 200 && newWidth <= window.innerWidth * 0.5) {
           setLeftPanelWidth(newWidth);
         }
@@ -53,116 +76,267 @@ function App() {
     if (isDraggingRight || isDraggingLeft) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ew-resize';
+    } else {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
     }
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
     };
   }, [isDraggingRight, isDraggingLeft]);
 
-  // V2 Beta Toggle Logic
+  const uiVersion = useWorkflowStore((state) => state.uiVersion);
+
   if (uiVersion === 'v2') {
     return (
-      <ErrorBoundary name="AppV2Beta">
+      <RootErrorBoundary uiVersion="v2">
         <AppV2 />
-      </ErrorBoundary>
+      </RootErrorBoundary>
     );
   }
 
+
+
   return (
-    <div className="flex h-screen bg-[#020408] overflow-hidden obsidian-theme">
-      <div className="scanline z-50 pointer-events-none" />
-      
-      {/* Navigation Rail */}
-      <nav className="w-16 border-r border-white/5 flex flex-col items-center py-6 gap-6 z-40 bg-[#020408]">
-        <div className="w-10 h-10 rounded bg-[#39FF14]/10 border border-[#39FF14]/30 flex items-center justify-center mb-4">
-          <Sparkles className="text-[#39FF14]" size={20} />
-        </div>
-        
-        <button 
-          onClick={() => setView('studio')}
-          className={`p-3 rounded transition-all ${view === 'studio' ? 'text-[#39FF14] bg-[#39FF14]/10' : 'text-white/40 hover:text-white/60'}`}
-        >
-          <Layout size={20} />
-        </button>
-        
-        <div className="mt-auto flex flex-col gap-4">
-          <button className="p-3 text-white/20 hover:text-white/60 transition-all">
-            <Settings size={20} />
+    <ReactFlowProvider>
+
+      <div className="app-layout">
+        {/* Graph snapshot selector — fixed overlay, only in notebook view */}
+        {view === 'notebook' && <V2GraphSelector />}
+
+        {/* 1. Global Navigation Rail */}
+        <div className="nav-rail">
+          <div style={{
+            width: '40px',
+            height: '40px',
+            background: 'var(--gradient-primary)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => useWorkflowStore.getState().setUIVersion('v2')}
+          title="Switch to God-Mode (V2)"
+          >B</div>
+
+          
+          <button 
+            className={`nav-rail-item ${view === 'studio' ? 'active' : ''}`}
+            onClick={() => setView('studio')}
+            title="Studio"
+          >
+            <Layers size={20} />
+          </button>
+          
+          <button 
+            className={`nav-rail-item ${view === 'notebook' ? 'active' : ''}`}
+            onClick={() => {
+              setView('notebook');
+              setIsRightPaneOpen(true);
+            }}
+            title="Notebook"
+          >
+            <BookOpen size={20} />
+          </button>
+
+          <button 
+            className={`nav-rail-item ${view === 'llm' ? 'active' : ''}`}
+            onClick={() => setView('llm')}
+            title="LLM Manager"
+          >
+            <Cpu size={20} />
+          </button>
+          
+          <button 
+            className={`nav-rail-item ${view === 'admin' ? 'active' : ''}`}
+            onClick={() => setView('admin')}
+            title="Mesh Governance"
+          >
+            <Shield size={20} />
+          </button>
+
+          <div style={{ flex: 1 }} />
+          
+          <button 
+            className="nav-rail-item"
+            onClick={() => setIsLeftPaneOpen(!isLeftPaneOpen)}
+            title="Toggle Sidebar"
+          >
+            {isLeftPaneOpen ? <PanelLeftClose size={20} /> : <PanelLeft size={20} />}
           </button>
         </div>
-      </nav>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
-        <main className="flex-1 flex overflow-hidden">
-          
-          {/* Left Sidebar */}
-          <div 
-            style={{ width: isLeftPaneOpen ? `${leftPanelWidth}px` : '0' }}
-            className={`border-r border-white/5 transition-all duration-300 relative flex flex-col bg-[#020408]/40 ${!isLeftPaneOpen ? 'overflow-hidden border-none' : ''}`}
-          >
-            <div className="h-full flex flex-col w-full min-w-[280px]">
+        {/* 2. Left Contextual Sidebar */}
+        <div className={`context-sidebar ${!isLeftPaneOpen ? 'collapsed' : ''}`} style={{ width: `${leftPanelWidth}px` }}>
+          {/* Studio Sidebar - Tabbed view */}
+          {view === 'studio' && (
+            <div className="studio-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
+                  <WorkspaceSelector />
+              </div>
+              
               <SidebarTabs activeTab={sidebarTab} onTabChange={setSidebarTab} />
-              <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {sidebarTab === 'flows' && <WorkflowList />}
+              
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {sidebarTab === 'flows' && <WorkflowList mode="flows" />}
+                {sidebarTab === 'agents' && <WorkflowList mode="agents" />}
                 {sidebarTab === 'nodes' && <NodePalette />}
-                {(sidebarTab === 'agents' || sidebarTab === 'sources') && (
-                  <div className="p-8 text-center text-white/20 text-[10px] uppercase tracking-widest font-mono">
-                    Module_Integrity_Pending...
-                  </div>
-                )}
+                {sidebarTab === 'sources' && <SourcePanel />}
               </div>
-            </div>
-            
-            <div 
-              onMouseDown={() => setIsDraggingLeft(true)}
-              className="absolute top-0 right-0 w-1 h-full cursor-ew-resize hover:bg-[#39FF14]/40 z-30 transition-colors"
-              title="Drag to resize"
-            />
-          </div>
 
-          {/* Canvas Area */}
-          <div className="flex-1 relative bg-[#020408] overflow-hidden">
-            <ReactFlowProvider>
-              <div className="w-full h-full relative">
-                <WorkflowCanvas />
-                
-                {/* Floating Status / Control Overlay */}
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40">
-                   <div 
-                     onClick={() => setIsRightPaneOpen(!isRightPaneOpen)}
-                     className="px-6 py-2 bg-[#020408]/80 border border-[#39FF14]/30 text-[#39FF14] text-[10px] font-black tracking-widest hover:bg-[#39FF14]/10 transition-all shadow-[0_0_20px_rgba(57,255,20,0.1)] rounded-full cursor-pointer flex items-center gap-3 grayscale hover:grayscale-0"
-                   >
-                     <div className="w-2 h-2 rounded-full bg-[#39FF14] animate-pulse" />
-                     {isRightPaneOpen ? 'CLOSE_AUDIT_PANE' : 'ACCESS_AUDIT_PANE'}
-                   </div>
+              {(sidebarTab === 'flows' || sidebarTab === 'agents') && (
+                <div style={{ borderTop: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.1)' }}>
+                  <SwarmConfigPanel 
+                    config={swarmConfig}
+                    onChange={setSwarmConfig}
+                  />
+                  <SwarmStatePanel executionId={swarmExecutionId} />
                 </div>
-              </div>
-            </ReactFlowProvider>
-          </div>
-
-          {/* Right Side Panel */}
-          <div 
-            style={{ width: isRightPaneOpen ? `${rightPanelWidth}px` : '0' }}
-            className={`border-l border-white/5 bg-[#020408]/80 backdrop-blur-xl transition-all duration-300 relative ${!isRightPaneOpen ? 'overflow-hidden border-none' : ''}`}
-          >
-            <div className="h-full min-w-[380px] flex flex-col">
-              <ResultPanel isOpen={isRightPaneOpen} onClose={() => setIsRightPaneOpen(false)} />
+              )}
             </div>
-            
-            <div 
-              onMouseDown={() => setIsDraggingRight(true)}
-              className="absolute top-0 left-0 w-1 h-full cursor-ew-resize hover:bg-[#39FF14]/40 z-30 transition-colors"
-              title="Drag to resize"
-            />
-          </div>
+          )}
+
+          {/* Notebook Sidebar - Sources */}
+          {view === 'notebook' && (
+            <div className="notebook-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
+                  <WorkspaceSelector />
+              </div>
+              <SourcePanel />
+              <SynthesisPanel onGraphUpdated={() => setGraphKey(k => k + 1)} />
+            </div>
+          )}
+        </div>
+
+        {isLeftPaneOpen && (
+          <div 
+            className="resize-handle left-resize-handle"
+            onMouseDown={() => setIsDraggingLeft(true)}
+          />
+        )}
+
+        {/* 3. Main Content (Canvas) */}
+        <div className="main-content">
+          {view === 'studio' && (
+            <>
+              <ExecutionBar onNavigateToLLM={() => setView('llm')} />
+              <div className="canvas-container">
+                <WorkflowCanvas />
+              </div>
+            </>
+          )}
+
+          {view === 'notebook' && (
+             <div className="canvas-container notebook-split" style={{ background: 'var(--surface)', position: 'relative' }}>
+               {isDocPaneOpen && (
+                 <div className="notebook-doc-pane" style={{ transition: 'all 0.3s ease' }}>
+                   <DocumentViewer />
+                 </div>
+               )}
+               <div className="notebook-graph-pane">
+                 <button 
+                   className="btn-icon"
+                   onClick={() => setIsDocPaneOpen(!isDocPaneOpen)}
+                   style={{
+                     position: 'absolute',
+                     top: '16px',
+                     left: '16px',
+                     zIndex: 100,
+                     background: 'var(--surface)',
+                     border: '1px solid var(--border-color)',
+                     borderRadius: '8px',
+                     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                     padding: '6px'
+                   }}
+                   title={isDocPaneOpen ? "Collapse Document Reading Pane" : "Expand Document Reading Pane"}
+                 >
+                   {isDocPaneOpen ? <PanelLeftClose size={18} /> : <BookOpen size={18} />}
+                 </button>
+                 <KnowledgeGraphCanvas key={graphKey} workspace={currentWorkspace} />
+               </div>
+             </div>
+          )}
           
-        </main>
+          {view === 'llm' && <LLMManager />}
+          {view === 'admin' && <GlobalAdminDashboard />}
+
+          {(view === 'studio' || view === 'notebook') && (
+            <button 
+              className="btn btn-gradient"
+              onClick={() => setIsRightPaneOpen(!isRightPaneOpen)}
+              style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 100, borderRadius: '50%', width: '40px', height: '40px', padding: 0 }}
+              title="Toggle Right Panel"
+            >
+              {isRightPaneOpen ? <PanelRightClose size={20} /> : <PanelRight size={20} />}
+            </button>
+          )}
+        </div>
+
+        {/* 4. Right Panel (Config / Chat / Results) */}
+        {(view === 'studio' || view === 'notebook') && (
+          <>
+            {isRightPaneOpen && (
+              <div 
+                className="resize-handle right-resize-handle"
+                onMouseDown={() => setIsDraggingRight(true)}
+              />
+            )}
+            <div 
+              className={`right-panel ${!isRightPaneOpen ? 'collapsed' : ''}`}
+              style={{ 
+                width: isRightPaneOpen ? `${rightPanelWidth}px` : '0px',
+                minWidth: isRightPaneOpen ? `${rightPanelWidth}px` : '0px',
+                transition: isDraggingRight ? 'none' : 'width var(--transition-normal), min-width var(--transition-normal)'
+              }}
+            >
+               <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                 <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                     {view === 'studio' ? 'Configuration' : 'Notebook Chat'}
+                 </h2>
+                 <button className="btn-icon btn-ghost" onClick={() => setIsRightPaneOpen(false)}>
+                     <PanelRightClose size={16} />
+                 </button>
+             </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+                {view === 'studio' && selectedNode && (
+                  <ConfigPanel 
+                    isOpen={!!selectedNode} 
+                    nodeId={selectedNode} 
+                  />
+                )}
+                
+                {view === 'studio' && showResults && (
+                  <ResultPanel 
+                    isOpen={showResults}
+                    onClose={() => setShowResults(false)}
+                  />
+                )}
+
+                {view === 'notebook' && (
+                    <NotebookView />
+                )}
+            </div>
+          </div>
+          </>
+        )}
+        
+        {/* 5. Execution Audit Hub (Terminal) */}
+        <ErrorBoundary name="AuditHub">
+          <ExecutionAuditHub />
+        </ErrorBoundary>
       </div>
-    </div>
+    </ReactFlowProvider>
   );
 }
 
-export default withErrorBoundary(App, "GlobalApp");
+export default App;
