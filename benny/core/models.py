@@ -135,6 +135,68 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 
+# =============================================================================
+# PORTABILITY / OFFLINE HARDENING (PBR-001 Phase 3)
+# =============================================================================
+
+# Prefixes that identify a model string as pointing at a local provider.
+# ``litert`` is the only one that doesn't carry a live process — it's an
+# on-device inference engine — but it is still "local" for the purposes of
+# offline/local-only policy.
+_LOCAL_PREFIXES: tuple[str, ...] = tuple(f"{name}/" for name in LOCAL_PROVIDERS.keys())
+
+
+class OfflineRefusal(RuntimeError):
+    """Raised when BENNY_OFFLINE blocks a call to a non-local model.
+
+    Separate from generic ``Exception`` so callers can handle "offline
+    policy" differently from "the remote API failed".
+    """
+
+
+def _offline_enabled() -> bool:
+    """Is the runtime-wide offline kill-switch engaged?"""
+    val = os.environ.get("BENNY_OFFLINE", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
+def is_local_model(model: str) -> bool:
+    """Classify a model string as local (on-SSD / on-device) or cloud.
+
+    The classifier is intentionally prefix-based: all local model IDs in
+    ``MODEL_REGISTRY`` and every provider-forwarded string (e.g.
+    ``lemonade/openai/foo``) begin with one of the ``LOCAL_PROVIDERS`` keys.
+    Bare IDs like ``claude-3-sonnet-20240229`` or ``gpt-4`` are cloud.
+    """
+    if not model:
+        return False
+    return model.lower().startswith(_LOCAL_PREFIXES)
+
+
+def _run_completion(**kwargs):
+    """Seam around ``litellm.completion`` so tests can stub it.
+
+    Returns the **full LiteLLM response object** (not the string content).
+    Tests may substitute either a sync or async callable that returns
+    a string OR an object with ``.choices[0].message.content``; see
+    ``_unwrap_completion`` for the normalisation.
+
+    Keeps all LiteLLM specifics in one place; when Phase 5 introduces the
+    local-LLM executor capabilities, this is where we branch to typed
+    handlers instead of LiteLLM.
+    """
+    return completion(**kwargs)
+
+
+async def _await_if_needed(value):
+    """Await a coroutine, pass a plain value through."""
+    import inspect as _inspect
+
+    if _inspect.isawaitable(value):
+        return await value
+    return value
+
+
 
 def configure_local_provider(provider: str = "ollama", port: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -263,44 +325,76 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
     return config
 
 
-async def get_active_model(workspace_id: str = "default", role: str = "default") -> str:
+async def get_active_model(
+    workspace_id: str = "default",
+    role: str = "default",
+    *,
+    executor_override: Optional[str] = None,
+    local_only: bool = False,
+) -> str:
     """
     Get the first available model by checking workspace manifest, then probing providers.
-    
-    Priority:
+
+    Priority (PBR-001 §5, Phase 3):
+    0. ``executor_override`` — a per-task explicit model wins over every
+       other resolution rule. This is how a manifest pins "this task runs
+       on Claude" irrespective of workspace defaults.
     1. Role-specific assignment in manifest.model_roles
     2. Global workspace default_model from manifest.yaml
     3. Auto-detect which provider is actually running by probing check URLs
     4. Raise error if nothing available
-    
+
+    ``local_only`` (used by ``--offline``) is a hard gate: if the resolved
+    model is not local, we refuse rather than silently fall back.
+
     Args:
         workspace_id: Workspace identifier
         role: Task role (chat, swarm, tts, stt, graph_synthesis)
-        
+        executor_override: Per-task explicit model; wins over everything
+        local_only: Refuse to resolve a cloud model
+
     Returns:
         Model identifier string (e.g., "lmstudio/gemma-2-27b")
-        
+
     Raises:
-        Exception if no model available and default_model is null
+        Exception if no model available and default_model is null, or if
+        ``local_only`` is set and the resolved model is not local.
     """
     from .workspace import load_manifest
-    
+
+    def _enforce_local(model: str, source: str) -> str:
+        if local_only and not is_local_model(model):
+            raise Exception(
+                f"local_only resolution refused: {source} resolved to "
+                f"non-local model '{model}'. Set a local default_model or "
+                f"disable --offline to use cloud."
+            )
+        return model
+
+    # Priority 0: Per-task explicit override (manifest-pinned executor)
+    if executor_override:
+        return _enforce_local(executor_override, "executor_override")
+
     # Priority 1: Check role-specific assignment
     try:
         manifest = load_manifest(workspace_id)
-        
+
         # 1a. Check for specific role assignment
         if role != "default" and hasattr(manifest, "model_roles") and manifest.model_roles:
             role_model = manifest.model_roles.get(role)
             if role_model:
                 print(f"Using role-specific model for '{role}': {role_model}")
-                return role_model
-        
+                return _enforce_local(role_model, f"model_roles[{role}]")
+
         # 1b. Fallback to global default_model
         if manifest.default_model:
             print(f"Using workspace default_model: {manifest.default_model}")
-            return manifest.default_model
+            return _enforce_local(manifest.default_model, "default_model")
     except Exception as e:
+        # Preserve the local_only refusal — don't swallow it as a manifest
+        # load error.
+        if local_only and "local_only resolution refused" in str(e):
+            raise
         logging.warning(f"Could not load manifest for {workspace_id}: {e}")
     
     # Priority 2: Probe each local provider to see which is running
@@ -344,7 +438,7 @@ async def get_active_model(workspace_id: str = "default", role: str = "default")
                             model_id = best_model.get("id", best_model)
                             result = f"{provider_name}/{model_id}"
                             print(f"Auto-detected active provider {provider_name}: {result}")
-                            return result
+                            return _enforce_local(result, f"probe[{provider_name}]")
                 except Exception as e:
                     print(f"DEBUG: Provider {provider_name} probe failed: {e}")
                     logging.debug(f"Provider {provider_name} not available: {e}")
@@ -393,7 +487,19 @@ async def call_model(
         
     Returns:
         Generated text response
+
+    Raises:
+        OfflineRefusal: when ``BENNY_OFFLINE`` is engaged and ``model`` is
+            not a local model. The check happens BEFORE any network I/O.
     """
+    # PBR-001 Phase 3: offline kill-switch. Must be the first thing we do
+    # — before system-prompt augmentation, before LiteRT routing — so a
+    # misconfigured task can't leak data to the cloud on the way in.
+    if _offline_enabled() and not is_local_model(model):
+        raise OfflineRefusal(
+            f"BENNY_OFFLINE is set; refusing to call non-local model: {model}"
+        )
+
     # Operating Manual: Prepend identity and rules to the system prompt
     # Extract workspace_id from messages if present (assuming meta or context might have it, 
     # but for now we often pass it in run_id or it's 'default').
@@ -503,9 +609,16 @@ async def call_model(
         if timeout:
             kwargs["timeout"] = timeout
             
-        from litellm import completion
         print(f"DEBUG: FINAL LiteLLM call: completion(model='{litellm_model}', api_base='{kwargs.get('api_base')}')")
-        response = completion(**kwargs)
+        # Routed through _run_completion so tests (and Phase 5's local
+        # executor) can substitute the backend without patching litellm.
+        # Patches may be sync or async — _await_if_needed normalises.
+        response = await _await_if_needed(_run_completion(**kwargs))
+
+        # If the seam returned a plain string (typical for stubs or a
+        # future typed local executor), that is the completion content.
+        if isinstance(response, str):
+            return response
         
         # Emit Resource Usage for UI
         try:

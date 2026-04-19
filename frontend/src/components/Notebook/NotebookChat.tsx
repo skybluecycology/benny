@@ -77,7 +77,12 @@ ${JSON.stringify(audit, null, 2)}
         const formData = new FormData();
         formData.append('file', audioFile);
         formData.append('notebook_id', currentWorkspace); // Assuming workspace used as notebook_id for now
-        formData.append('model', 'qwen3-tk-4b-FLM');
+        // PBR-001 Phase 3: no hardcoded model. Prefer the workspace's
+        // configured voice/chat model; fall back to the active provider's
+        // selection. The backend still resolves role="voice" via
+        // get_active_model if this is empty.
+        const voiceModel = activeLLMModels['voice'] || activeLLMModels[activeLLMProvider] || '';
+        if (voiceModel) formData.append('model', voiceModel);
         formData.append('workspace', currentWorkspace);
 
         const response = await fetch(`${API_BASE_URL}/api/audio/talk`, {
