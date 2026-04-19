@@ -28,19 +28,20 @@ def get_workspace_path(workspace_id: str = "default", subdir: str = "") -> Path:
         Absolute path to the workspace directory or subdirectory
     """
     # 1. Resolve potential traversal before joining
-    # We use .absolute() to ensure we aren't tricked by relative paths
-    root_abs = WORKSPACE_ROOT.absolute()
+    # We use .resolve() to satisfy traversal checks
+    root_abs = WORKSPACE_ROOT.resolve()
     
     # Construct the target path
-    target = root_abs / workspace_id
+    target = root_abs / str(workspace_id)
     if subdir:
-        target = target / subdir
+        target = target / str(subdir)
         
-    target_abs = target.absolute()
+    target_abs = target.resolve()
     
     # 2. Strict validation: Target must be a child of root_abs
     try:
-        if os.path.commonpath([str(root_abs), str(target_abs)]) != str(root_abs):
+        common = os.path.commonpath([str(root_abs), str(target_abs)])
+        if common != str(root_abs):
             raise PermissionError(f"Path traversal attempt detected: {workspace_id}/{subdir}")
     except ValueError:
         raise PermissionError(f"Invalid workspace path: {workspace_id}/{subdir}")

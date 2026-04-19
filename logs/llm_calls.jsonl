@@ -41,3 +41,15 @@
 {"ts": "2026-04-19T14:46:57.309507", "run_id": null, "model": "lemonade/openai/deepseek-r1-8b-FLM", "ok": true, "provider": "local/test-provider", "duration_ms": 1, "tokens_in": 10, "tokens_out": 10}
 {"ts": "2026-04-19T14:46:57.734471", "run_id": null, "model": "lemonade/model", "ok": true, "provider": "local/test", "duration_ms": 1, "tokens_in": 1, "tokens_out": 1}
 {"ts": "2026-04-19T14:46:57.739310", "run_id": null, "model": "ollama/llama3", "ok": true, "provider": "local/test", "duration_ms": 1, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:02:07.075939", "run_id": null, "model": "lemonade/openai/deepseek-r1-8b-FLM", "ok": true, "provider": "local/test-provider", "duration_ms": 3, "tokens_in": 10, "tokens_out": 10}
+{"ts": "2026-04-19T15:02:07.473359", "run_id": null, "model": "lemonade/model", "ok": true, "provider": "local/test", "duration_ms": 1, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:02:07.477720", "run_id": null, "model": "ollama/llama3", "ok": true, "provider": "local/test", "duration_ms": 0, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:03:00.248126", "run_id": null, "model": "lemonade/openai/deepseek-r1-8b-FLM", "ok": true, "provider": "local/test-provider", "duration_ms": 2, "tokens_in": 10, "tokens_out": 10}
+{"ts": "2026-04-19T15:03:00.694001", "run_id": null, "model": "lemonade/model", "ok": true, "provider": "local/test", "duration_ms": 1, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:03:00.699943", "run_id": null, "model": "ollama/llama3", "ok": true, "provider": "local/test", "duration_ms": 1, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:21:14.728901", "run_id": null, "model": "lemonade/openai/deepseek-r1-8b-FLM", "ok": true, "provider": "local/test-provider", "duration_ms": 2, "tokens_in": 10, "tokens_out": 10}
+{"ts": "2026-04-19T15:21:15.160991", "run_id": null, "model": "lemonade/model", "ok": true, "provider": "local/test", "duration_ms": 2, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:21:15.169700", "run_id": null, "model": "ollama/llama3", "ok": true, "provider": "local/test", "duration_ms": 2, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:26:13.630537", "run_id": null, "model": "lemonade/openai/deepseek-r1-8b-FLM", "ok": true, "provider": "local/test-provider", "duration_ms": 3, "tokens_in": 10, "tokens_out": 10}
+{"ts": "2026-04-19T15:26:14.252011", "run_id": null, "model": "lemonade/model", "ok": true, "provider": "local/test", "duration_ms": 3, "tokens_in": 1, "tokens_out": 1}
+{"ts": "2026-04-19T15:26:14.262815", "run_id": null, "model": "ollama/llama3", "ok": true, "provider": "local/test", "duration_ms": 3, "tokens_in": 1, "tokens_out": 1}

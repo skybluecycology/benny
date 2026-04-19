@@ -1,0 +1,32 @@
+# 6σ Release Gate Thresholds
+# These are enforced by tests/release/test_release_gates.py
+
+gates:
+  G-COV:
+    name: "Core Code Coverage"
+    threshold: 0.85
+    scope: ["benny/core", "benny/api", "benny/persistence", "benny/ops"]
+
+  G-SR1:
+    name: "Absolute Path Safety (Ratchet)"
+    threshold: 408
+    baseline_path: "tests/portability/absolute_paths_baseline.json"
+
+  G-LAT:
+    name: "Planning Latency (Platform Overhead)"
+    threshold_ms: 300
+    samples: 50
+    warmup: 5
+
+  G-ERR:
+    name: "Concurrency & Flake Resistance"
+    loops: 10
+    required_success_rate: 1.0
+
+  G-SIG:
+    name: "Manifest Signature Integrity"
+    required: true
+
+  G-OFF:
+    name: "Offline Compliance"
+    required: true
