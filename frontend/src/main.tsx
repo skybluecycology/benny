@@ -1,3 +1,5 @@
+console.log("BOOT: main.tsx");
+console.log("CACHE_BUST_2: main.tsx");
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'

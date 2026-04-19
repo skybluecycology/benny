@@ -55,7 +55,7 @@ export function GraphNexusController() {
             Structural_Context
           </div>
           
-          <div className="relative">
+          <div className="flex flex-col gap-2 relative">
             <div className="flex items-center gap-1">
               <button 
                 onClick={() => setIsSelectorOpen(!isSelectorOpen)}
@@ -78,6 +78,22 @@ export function GraphNexusController() {
                 <RefreshCw size={14} className={isSelectorOpen ? "animate-spin" : ""} />
               </button>
             </div>
+
+            {/* Synoptic Web Toggle (KG3D-001) */}
+            <button
+              onClick={() => toggleCognitiveMesh('synopticWeb')}
+              className={`flex items-center justify-between px-4 py-2.5 rounded-xl border transition-all ${
+                cognitiveMesh.synopticWeb 
+                ? 'bg-[#39FF14]/10 border-[#39FF14]/40 text-[#39FF14]' 
+                : 'bg-white/5 border-white/5 text-white/40 hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Wind size={14} />
+                <span className="text-[9px] font-black tracking-[0.2em] uppercase">Synoptic_Web</span>
+              </div>
+              <div className={`w-1.5 h-1.5 rounded-full ${cognitiveMesh.synopticWeb ? 'bg-[#39FF14] shadow-[0_0_8px_#39FF14]' : 'bg-white/10'}`} />
+            </button>
 
             <AnimatePresence>
               {isSelectorOpen && (

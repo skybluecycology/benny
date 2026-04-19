@@ -131,6 +131,21 @@ def check_hardware_clock() -> CheckResult:
         )
     return CheckResult(name="Hardware Clock", status="OK", message=f"System time verified: {time.strftime('%Y-%m-%d')}")
 
+def check_kg3d_stack() -> List[CheckResult]:
+    """Check availability of KG3D persistence layers."""
+    results = []
+    
+    # Check SQLite metrics cache
+    home = os.environ.get("BENNY_HOME")
+    if home:
+        cache_path = Path(home) / "data" / "kg3d_metrics.db"
+        if cache_path.exists():
+            results.append(CheckResult(name="KG3D: Metrics Cache", status="OK", message="Database exists and is reachable."))
+        else:
+            results.append(CheckResult(name="KG3D: Metrics Cache", status="WARN", message="Cache DB missing. Will be initialized on first run."))
+
+    return results
+
 async def run_doctor() -> DoctorReport:
     """Run all diagnostics and return a report."""
     checks = []
@@ -149,5 +164,8 @@ async def run_doctor() -> DoctorReport:
         status="OK", 
         message=f"v{MANIFEST_SCHEMA_VERSION}"
     ))
+
+    # KG3D Stack checks
+    checks.extend(check_kg3d_stack())
     
     return DoctorReport(checks=checks)

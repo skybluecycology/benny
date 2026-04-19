@@ -16,6 +16,7 @@ import {
 import Editor from '@monaco-editor/react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { useKg3dStore } from '../../hooks/useKg3dStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
 interface InspectorProps {
@@ -40,6 +41,13 @@ export function SymbolInspector({ selection, onClose }: InspectorProps) {
   if (!selection) return null;
 
   const { type, data } = selection;
+
+  // Sync Synoptic Web side-effect (KG3D-F7)
+  React.useEffect(() => {
+    if (type === 'node' && data.name) {
+      useKg3dStore.getState().syncWithSymbol(data.name);
+    }
+  }, [type, data.name]);
 
   const fetchCode = async () => {
     if (!data.path || showCode) {

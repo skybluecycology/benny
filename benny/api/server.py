@@ -45,6 +45,7 @@ from .manifest_routes import router as manifest_router
 from .workflow_endpoints import router as workflow_endpoints_router
 from .audio_routes import router as audio_router
 from .ops_endpoints import router as ops_router
+from .kg3d import router as kg3d_router
 
 
 @asynccontextmanager
@@ -105,6 +106,7 @@ GOVERNANCE_WHITELIST = [
     "/api/graph/ingest/events",
     "/api/live/enrich/events",   # Live Mode SSE streams
     "/api/workflows/execute/",   # Studio and Swarm event streams (SSE)
+    "/api/kg3d/stream",          # Synoptic Web SSE stream
     "/.well-known/agent.json"    # A2A discovery must be public
 ]
 
@@ -175,6 +177,7 @@ app.include_router(manifest_router, prefix="/api", tags=["Manifests"])
 app.include_router(workflow_endpoints_router, prefix="/api", tags=["Workflows (PBR-001)"])
 app.include_router(audio_router, prefix="/api/audio", tags=["Audio Interaction"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
+app.include_router(kg3d_router)
 app.include_router(ops_router)
 
 

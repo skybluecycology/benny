@@ -36,14 +36,14 @@ uses looser language, this document's definitions are authoritative.
 
 ## 3. Actors & surfaces
 
-| Actor | Surface | Interaction |
-|-------|---------|-------------|
-| Studio user | React app (`frontend/src`) | Opens "Synoptic Web" panel; interacts with 3D graph. |
-| Studio code editor | Monaco instance inside Studio | Emits AST symbol events over the existing IPC bus. |
-| Benny backend | `benny/graph/kg3d/*` | Serves ontology, accepts ingest proposals, streams deltas. |
-| LLM ingest worker | `benny/graph/kg3d/ingest.py` | Parses documents, emits Text-to-Cypher proposals. |
-| HITL reviewer | Studio UI HITL panel | Approves/rejects proposals before commit. |
-| WebXR client | Same React app over WebXR session | Inhabits 3D graph with 6-DoF controllers. |
+| Actor              | Surface                           | Interaction                                                |
+| ------------------ | --------------------------------- | ---------------------------------------------------------- |
+| Studio user        | React app (`frontend/src`)        | Opens "Synoptic Web" panel; interacts with 3D graph.       |
+| Studio code editor | Monaco instance inside Studio     | Emits AST symbol events over the existing IPC bus.         |
+| Benny backend      | `benny/graph/kg3d/*`              | Serves ontology, accepts ingest proposals, streams deltas. |
+| LLM ingest worker  | `benny/graph/kg3d/ingest.py`      | Parses documents, emits Text-to-Cypher proposals.          |
+| HITL reviewer      | Studio UI HITL panel              | Approves/rejects proposals before commit.                  |
+| WebXR client       | Same React app over WebXR session | Inhabits 3D graph with 6-DoF controllers.                  |
 
 ## 4. Data contracts (normative)
 
@@ -220,7 +220,7 @@ frontend suite.
 
 - **KG3D-F17** — A new Zustand slice
   `frontend/src/hooks/useKg3dStore.ts` exposes `{ nodes, edges, focus,
-  setFocus, mode, setMode }`. It is hydrated from `/api/kg3d/ontology`
+setFocus, mode, setMode }`. It is hydrated from `/api/kg3d/ontology`
   on mount.
 - **KG3D-F18** — The existing Monaco IPC bus emits a
   `{ kind: "symbol_detected", symbol: string }` event on AST matches.
@@ -267,31 +267,31 @@ Unless stated otherwise, targets apply on the reference device: Ryzen
 AI 9 HX 370, 32 GB RAM, integrated Radeon 890M, Windows 11, Chrome
 stable.
 
-| ID | Target | Measurement |
-|----|--------|-------------|
-| KG3D-NFR1 | ≥ 60 fps with 10 000 nodes in view | `renderer.info` sampled over 30 s median. |
-| KG3D-NFR2 | Cold load of default ontology ≤ 3.5 s | From click on panel to first stable frame. |
-| KG3D-NFR3 | Main-thread long-task count = 0 during layout | Performance Observer, 30 s window. |
-| KG3D-NFR4 | SSE ingest → UI delta latency ≤ 1 s p95 | E2E test with synthetic proposals. |
-| KG3D-NFR5 | Zero memory leaks across open/close cycles | 20 cycles, heap delta ≤ 5 MB. |
-| KG3D-NFR6 | Accessibility: keyboard-only navigation selects any node within 5 key presses via command palette | Playwright test. |
-| KG3D-NFR7 | No new direct network calls from tests | `tests/safety/test_kg3d_no_network.py`. |
-| KG3D-NFR8 | SR-1 ratchet does not regress | Existing safety test. |
-| KG3D-NFR9 | Bundle size increase ≤ 450 KB gzipped | `npm run build` diff vs. baseline. |
-| KG3D-NFR10 | Coverage: `benny/graph/kg3d/**` ≥ 92 %, frontend `Studio/kg3d/**` ≥ 85 % | Coverage.py + Vitest `--coverage`. |
+| ID         | Target                                                                                            | Measurement                                |
+| ---------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| KG3D-NFR1  | ≥ 60 fps with 10 000 nodes in view                                                                | `renderer.info` sampled over 30 s median.  |
+| KG3D-NFR2  | Cold load of default ontology ≤ 3.5 s                                                             | From click on panel to first stable frame. |
+| KG3D-NFR3  | Main-thread long-task count = 0 during layout                                                     | Performance Observer, 30 s window.         |
+| KG3D-NFR4  | SSE ingest → UI delta latency ≤ 1 s p95                                                           | E2E test with synthetic proposals.         |
+| KG3D-NFR5  | Zero memory leaks across open/close cycles                                                        | 20 cycles, heap delta ≤ 5 MB.              |
+| KG3D-NFR6  | Accessibility: keyboard-only navigation selects any node within 5 key presses via command palette | Playwright test.                           |
+| KG3D-NFR7  | No new direct network calls from tests                                                            | `tests/safety/test_kg3d_no_network.py`.    |
+| KG3D-NFR8  | SR-1 ratchet does not regress                                                                     | Existing safety test.                      |
+| KG3D-NFR9  | Bundle size increase ≤ 450 KB gzipped                                                             | `npm run build` diff vs. baseline.         |
+| KG3D-NFR10 | Coverage: `benny/graph/kg3d/**` ≥ 92 %, frontend `Studio/kg3d/**` ≥ 85 %                          | Coverage.py + Vitest `--coverage`.         |
 
 ## 7. Feature flags & configuration
 
 All flags live in existing `benny/core/config.py` and
 `frontend/src/constants.ts`. Names are fixed.
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `ui.kg3d_enabled` | `false` | Master switch for the Synoptic Web panel. |
-| `ui.kg3d.instance_threshold` | `2500` | Node count that forces InstancedMesh. |
-| `ui.kg3d.webxr_enabled` | `false` | Opt-in WebXR. |
-| `kg3d.ingest.enabled` | `false` | LLM ingestion pipeline. |
-| `kg3d.ingest.auto_approve` | `false` | **Must remain `false`**; reserved for future. |
+| Flag                         | Default | Purpose                                       |
+| ---------------------------- | ------- | --------------------------------------------- |
+| `ui.kg3d_enabled`            | `false` | Master switch for the Synoptic Web panel.     |
+| `ui.kg3d.instance_threshold` | `2500`  | Node count that forces InstancedMesh.         |
+| `ui.kg3d.webxr_enabled`      | `false` | Opt-in WebXR.                                 |
+| `kg3d.ingest.enabled`        | `false` | LLM ingestion pipeline.                       |
+| `kg3d.ingest.auto_approve`   | `false` | **Must remain `false`**; reserved for future. |
 
 `kg3d.ingest.auto_approve` being flipped to `true` is a hard block at
 release gate — see [acceptance_matrix.md](acceptance_matrix.md) ID
@@ -304,7 +304,7 @@ release gate — see [acceptance_matrix.md](acceptance_matrix.md) ID
   fixture directory.
 - **KG3D-SEC2** — CSP header injected into the SynopticWeb HTML:
   `default-src 'none'; script-src ${cspNonce}; style-src 'unsafe-inline';
-   img-src data: vscode-webview-resource:; connect-src ${serverUrl};`.
+ img-src data: vscode-webview-resource:; connect-src ${serverUrl};`.
 - **KG3D-SEC3** — LLM-proposed Cypher is **never** executed directly.
   Proposals are transformed into parameterised MERGE statements by
   `kg3d.ingest.to_cypher(proposal)`; string interpolation into Cypher
@@ -332,11 +332,11 @@ KG3D-F3).
 
 ## 11. Open questions (must be answered before Phase 1 merges)
 
-| OQ ID | Question | Owner | Default if unanswered |
-|-------|----------|-------|-----------------------|
-| OQ-1 | Is the fixture `ml_knowledge_graph_v1.json` re-distributable under our licence? | Legal | **Block Phase 0 until resolved.** |
-| OQ-2 | Which local LLM is approved for the ingest pipeline? | Platform | `qwen3-coder-30b` via lemonade. |
-| OQ-3 | Do we require WCAG 2.1 AA for the WebXR surface? | Design | Yes — mirrors KG3D-NFR6. |
+| OQ ID | Question                                                                        | Owner    | Default if unanswered             |
+| ----- | ------------------------------------------------------------------------------- | -------- | --------------------------------- | ----------------------------------- |
+| OQ-1  | Is the fixture `ml_knowledge_graph_v1.json` re-distributable under our licence? | Legal    | **Block Phase 0 until resolved.** | answer: not yet, still private code |
+| OQ-2  | Which local LLM is approved for the ingest pipeline?                            | Platform | `qwen3-tk-4k-FLM` via lemonade.   | answer: yes                         |
+| OQ-3  | Do we require WCAG 2.1 AA for the WebXR surface?                                | Design   | Yes — mirrors KG3D-NFR6.          | answer: yes                         |
 
 An agent encountering an unanswered OQ MUST pause and raise a HITL
 request; it MUST NOT invent an answer.

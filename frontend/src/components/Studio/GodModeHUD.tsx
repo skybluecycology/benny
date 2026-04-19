@@ -140,6 +140,9 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
     isLLMManagerOpen,
     setIsLLMManagerOpen,
     setWikiHubOpen,
+    isWikiHubOpen,
+    isManifestPanelOpen,
+    isRunsPanelOpen,
     toggleManifestPanel,
     toggleRunsPanel
   } = useWorkflowStore() as any;
@@ -237,7 +240,7 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           </button>
           <button 
             onClick={() => setWikiHubOpen(true)} 
-            className={`btn-pill hover:text-[#FF00FF] transition-all ${(useWorkflowStore((state: any) => state.isWikiHubOpen)) ? 'active' : ''}`}
+            className={`btn-pill hover:text-[#FF00FF] transition-all ${isWikiHubOpen ? 'active' : ''}`}
           >
             <BookOpen size={14} /> WIKI
           </button>
@@ -247,14 +250,14 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
           <div className="w-[1px] h-6 bg-white/10 mx-1" />
           <button
             onClick={() => toggleManifestPanel()}
-            className={`btn-pill hover:text-emerald-400 transition-all ${(useWorkflowStore((state: any) => state.isManifestPanelOpen)) ? 'active' : ''}`}
+            className={`btn-pill hover:text-emerald-400 transition-all ${isManifestPanelOpen ? 'active' : ''}`}
             title="Plan a new manifest"
           >
             <Sparkles size={14} /> PLAN
           </button>
           <button
             onClick={() => toggleRunsPanel()}
-            className={`btn-pill hover:text-blue-400 transition-all ${(useWorkflowStore((state: any) => state.isRunsPanelOpen)) ? 'active' : ''}`}
+            className={`btn-pill hover:text-blue-400 transition-all ${isRunsPanelOpen ? 'active' : ''}`}
             title="Run history"
           >
             <History size={14} /> RUNS
@@ -349,11 +352,7 @@ export function GodModeHUD({ onViewChange, currentView, onToggleChat, isChatOpen
       </DynamicOverlay>
  
       <AnimatePresence>
-        <WikiHub />
-      </AnimatePresence>
-
-      <AnimatePresence>
-        <WikiHub />
+        {isWikiHubOpen && <WikiHub />}
       </AnimatePresence>
      </div>
   );

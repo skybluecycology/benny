@@ -1,3 +1,4 @@
+console.log("BOOT: useWorkflowStore.ts");
 import { create } from 'zustand';
 import { createWorkflowSlice } from './slices/workflowSlice';
 import type { WorkflowSlice } from './slices/workflowSlice';

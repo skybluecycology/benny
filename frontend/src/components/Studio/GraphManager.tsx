@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { useLLMStatus } from '../../hooks/useLLMStatus';
 import { DynamicOverlay } from './DynamicOverlay';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -182,7 +183,7 @@ function ProvidersTab({ providers, loading, activeProvider, setActiveProvider, s
 export function GraphManager({ onClose }: { onClose: () => void }) {
   const { currentWorkspace } = useWorkspaceStore();
   const { activeLLMProvider, setActiveLLMProvider } = useWorkspaceStore() as any;
-  const { providers, loading: providersLoading, refresh: refreshProviders, startProvider, stopProvider } = (require('../../hooks/useLLMStatus').useLLMStatus(15000));
+  const { providers, loading: providersLoading, refresh: refreshProviders, startProvider, stopProvider } = useLLMStatus(15000);
   
   const [activeTab, setActiveTab] = useState<'overview' | 'sources' | 'history' | 'providers'>('overview');
   const [stats, setStats] = useState<any>({});

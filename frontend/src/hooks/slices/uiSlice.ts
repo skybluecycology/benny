@@ -39,6 +39,7 @@ export interface UISlice {
     neuralNebula: boolean;          // cluster particle clouds
     clusterRotation: boolean;       // galactic slow rotation
     agentOrbit: boolean;            // agents orbiting selection
+    synopticWeb: boolean;           // KG3D-001: 3D ML Knowledge Graph
     agenticPanels: boolean;         // declarative contextual overlays
     timeTravelOpen: boolean;        // scrubber visible
     sonification: boolean;          // WebAudio cues
@@ -49,6 +50,7 @@ export interface UISlice {
     particleDensity: number;        // 0..3
     timeScrubIndex: number;         // 0..snapshots-1
     timeCompression: number;        // 1..64x
+    focusedLayer: number | null;    // 1..5 for Synoptic Web
   };
 
   setAuditHubOpen: (isOpen: boolean) => void;
@@ -118,6 +120,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
     neuralNebula: true,
     clusterRotation: false,
     agentOrbit: false,
+    synopticWeb: false,
     agenticPanels: true,
     timeTravelOpen: false,
     sonification: false,
@@ -128,6 +131,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
     particleDensity: 1.0,
     timeScrubIndex: 0,
     timeCompression: 4,
+    focusedLayer: null,
   },
 
   setAuditHubOpen: (isOpen) => set({ isAuditHubOpen: isOpen }),

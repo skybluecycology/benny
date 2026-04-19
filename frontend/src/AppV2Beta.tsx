@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkflowStore } from './hooks/useWorkflowStore';
 import { GodModeHUD } from './components/Studio/GodModeHUD';
 import { SwarmCanvas3D } from './components/Studio/SwarmCanvas3D';
-import { SynopticWeb } from './components/Notebook/SynopticWeb';
+import { SynopticWeb } from './components/Studio/kg3d/SynopticWeb';
 import { MarketplaceV2 } from './components/MarketplaceV2';
 import { OmniDialog } from './components/Studio/OmniDialog';
 import { TemporalAudit } from './components/Studio/TemporalAudit';
@@ -21,16 +21,19 @@ import ManifestPlanner from './components/Studio/ManifestPlanner';
 import RunsPanel from './components/Studio/RunsPanel';
 
 export default function AppV2Beta() {
+  console.log("Rendering AppV2Beta...");
   const { 
     viewMode, 
     setViewMode, 
     uiVersion,
     isLLMManagerOpen,
     isGraphManagerOpen,
-    setIsGraphManagerOpen
+    setIsGraphManagerOpen,
+    cognitiveMesh
   } = useWorkflowStore() as any;
   const [isChatOpen, setIsChatOpen] = useState(false);
 
+  console.log("App Rendering, uiVersion:", uiVersion);
   if (uiVersion !== 'v2') return null;
 
   return (
@@ -49,7 +52,7 @@ export default function AppV2Beta() {
             className="w-full h-full"
           >
             {viewMode === 'swarm' && <SwarmCanvas3D />}
-            {viewMode === 'knowledge' && <SynopticWeb />}
+            {viewMode === 'knowledge' && <SynopticWeb enabled={cognitiveMesh.synopticWeb} focusedLayer={cognitiveMesh.focusedLayer} />}
             {viewMode === 'marketplace' && <MarketplaceV2 />}
             {viewMode === 'documents' && <DocumentManager />}
             {viewMode === 'graph' && <CodeGraphCanvas />}
