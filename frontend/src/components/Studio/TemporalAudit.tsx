@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { Clock, ChevronLeft, ChevronRight, Play, Pause, Zap, Activity } from 'lucide-react';
 import { useMemo } from 'react';

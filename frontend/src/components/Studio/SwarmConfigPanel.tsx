@@ -6,6 +6,7 @@ interface SwarmConfig {
   model: string;
   max_concurrency: number;
   workspace: string;
+  discovery_mode?: boolean;
 }
 
 interface SwarmConfigPanelProps {
@@ -17,7 +18,7 @@ export default function SwarmConfigPanel({ config, onChange }: SwarmConfigPanelP
   const { providers } = useLLMStatus(10000);
   const { activeLLMProvider, activeLLMModels } = useWorkspaceStore();
 
-  const handleChange = (key: keyof SwarmConfig, value: string | number) => {
+  const handleChange = (key: keyof SwarmConfig, value: string | number | boolean) => {
     onChange({ ...config, [key]: value });
   };
 
@@ -147,8 +148,8 @@ export default function SwarmConfigPanel({ config, onChange }: SwarmConfigPanelP
             <span style={{ fontSize: '13px', fontWeight: 500, color: '#fff' }}>Progressive Discovery</span>
             <input 
               type="checkbox" 
-              checked={(config as any).discovery_mode || false}
-              onChange={(e) => handleChange('discovery_mode' as any, e.target.checked)}
+              checked={config.discovery_mode || false}
+              onChange={(e) => handleChange('discovery_mode', e.target.checked)}
               style={{ width: '16px', height: '16px' }}
             />
           </label>

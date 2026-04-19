@@ -47,8 +47,8 @@ export const createWorkflowSlice = (set: any, get: any): WorkflowSlice => ({
       edges: addEdge({ 
         ...connection, 
         animated: true,
-        style: { stroke: 'var(--primary)' } // This might need Tailwind update later
-      }, get().edges) 
+        style: { stroke: 'var(--primary)' }
+      } as Edge, get().edges) 
     });
   },
 

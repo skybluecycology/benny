@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy, Brain, Target, Search, Lightbulb, ClipboardList } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Copy, Brain, Target, Lightbulb, ClipboardList } from 'lucide-react';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 import WaveTimeline from './WaveTimeline';
 

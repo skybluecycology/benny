@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -9,9 +9,9 @@ interface Props {
 }
 
 const AGENTS = [
-  { id: 'planner',  label: 'PLAN',  color: '#00FFFF' },
-  { id: 'critic',   label: 'CRIT',  color: '#FF00FF' },
-  { id: 'builder',  label: 'BUILD', color: '#39FF14' },
+  { id: 'planner',  label: 'PLAN',  color: '#00FFFF', speed: 0.6 },
+  { id: 'critic',   label: 'CRIT',  color: '#FF00FF', speed: 0.9 },
+  { id: 'builder',  label: 'BUILD', color: '#39FF14', speed: 1.2 },
 ];
 
 export function AgentOrbit({ selectedPos, enabled }: Props) {

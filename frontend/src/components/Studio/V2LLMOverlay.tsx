@@ -1,5 +1,3 @@
-import React from 'react';
-import { Cpu } from 'lucide-react';
 import LLMManager from '../LLMManager/LLMManager';
 import { DynamicOverlay } from './DynamicOverlay';
 

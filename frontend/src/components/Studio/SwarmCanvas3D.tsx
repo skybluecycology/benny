@@ -38,7 +38,7 @@ function DataShard({ position, name, isSelected, onClick }: { position: [number,
         position={[0, -0.8, 0]}
         fontSize={0.2}
         color={isSelected ? "#00FFFF" : "#ffffff"}
-        opacity={0.6}
+        fillOpacity={0.6}
         maxWidth={2}
         textAlign="center"
       >
@@ -181,7 +181,7 @@ export function SwarmCanvas3D() {
   const { nodes, executionStatus, selectedNode, setSelectedNode, playbackIndex, executionEvents } = useWorkflowStore();
   const { selectedDocuments, toggleSelectedDocument } = useWorkspaceStore();
   
-  const [lowPower, setLowPower] = useState(false);
+  const lowPower = false;
 
   // Temporal State Reconstruction
   const displayStatus = useMemo(() => {

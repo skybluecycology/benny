@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
-import { ChevronDown, Check, Database, Share2, Layers, RefreshCw, Clock } from 'lucide-react';
+import { ChevronDown, Database, Share2, Layers, RefreshCw, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function V2GraphSelector() {
