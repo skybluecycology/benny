@@ -19,6 +19,21 @@ interface WorkspaceState {
   // Spatial Navigation
   focusPath: string | null;
   setFocusPath: (path: string | null) => void;
+
+  // Additional state properties found in implementation
+  activeDocument: string | null;
+  setActiveDocument: (doc: string | null) => void;
+  selectedDocuments: string[];
+  toggleSelectedDocument: (name: string) => void;
+  synthesisResults: any | null;
+  setSynthesisResults: (results: any) => void;
+  synthesisHistory: any[];
+  fetchSynthesisHistory: () => Promise<void>;
+  deleteRun: (runId: string) => Promise<boolean>;
+  graphCatalog: any[];
+  activeGraphId: string;
+  setActiveGraphId: (id: string) => void;
+  fetchGraphCatalog: () => Promise<void>;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { ChevronDown, Check, Folder, Plus, CornerDownLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -56,7 +56,7 @@ export default function V2WorkspaceSelector() {
                 SELECT_CONTEXT_0x1F
               </div>
               <div className="max-h-60 overflow-y-auto custom-scrollbar">
-                {workspaces.map((ws) => {
+                {workspaces.map((ws: any) => {
                   const wsId = typeof ws === 'string' ? ws : (ws as any)?.id || '???';
                   const isActive = wsId === displayId;
                   

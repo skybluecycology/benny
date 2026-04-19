@@ -49,8 +49,8 @@
     ]
   },
   "config": {
-    "model": "gpt-4-turbo",
-    "max_concurrency": 4,
+    "model": "lemonade/qwen3-tk-4b-FLM",
+    "max_concurrency": 1,
     "max_depth": 3,
     "allow_swarm": true
   }

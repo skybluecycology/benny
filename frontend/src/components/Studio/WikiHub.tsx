@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { 
   BookOpen, 
   Search, 
@@ -7,10 +7,8 @@ import {
   ChevronRight, 
   Clock, 
   Zap, 
-  ExternalLink,
   Target,
   FileText,
-  CornerDownRight,
   RefreshCw
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';

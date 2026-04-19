@@ -1,3 +1,4 @@
+import React from 'react';
 import { motion } from 'framer-motion';
 import type { MeshAnalysis } from './CognitiveMeshEngine';
 
@@ -17,16 +18,13 @@ interface Props {
 
 export function buildWidgetForNode(node: any, analysis: MeshAnalysis | null): AgenticWidget {
   const degree = analysis?.degreeMap.get(node.id) ?? 0;
-  const inDeg = analysis?.inDegreeMap.get(node.id) ?? 0;
-  const outDeg = analysis?.outDegreeMap.get(node.id) ?? 0;
   return {
     kind: 'panel',
     title: node.name || node.id,
     fields: [
       { label: 'Type', value: String(node.type) },
-      { label: 'Degree', value: `${degree} (↓${inDeg} ↑${outDeg})` },
+      { label: 'Degree', value: String(degree) },
       { label: 'Community', value: String(node.metadata?.community_name || node.metadata?.community_id || '—') },
-      { label: 'Path', value: String(node.metadata?.path || node.path || '—').slice(0, 40) },
     ],
     actions: [
       { id: 'trace',  label: 'Trace',  color: '#00FFFF' },
@@ -42,13 +40,15 @@ export function AgenticPanel({ selectedNode, analysis, enabled, onAction }: Prop
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-      className="absolute top-[420px] right-4 z-40 w-64 rounded-2xl border border-[#00FFFF]/20 bg-black/60 backdrop-blur-xl p-4 shadow-[0_0_24px_rgba(0,255,255,0.08)] pointer-events-auto"
-      onClick={(e) => e.stopPropagation()}
+      initial={{ opacity: 0, scale: 0.9, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.9, y: 20 }}
+      className="absolute bottom-[120px] left-4 z-40 w-64 rounded-2xl border border-[#FF00FF]/20 bg-black/60 backdrop-blur-[40px] p-4 shadow-[0_0_24px_rgba(255,0,255,0.08)]"
     >
-      <div className="text-[8px] font-black text-[#00FFFF]/50 uppercase tracking-[0.2em] mb-2">A2UI_CONTEXT</div>
+      <div className="text-[8px] font-black text-[#FF00FF]/50 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+        <div className="w-1 h-1 rounded-full bg-[#FF00FF] animate-pulse" />
+        A2UI_CONTEXT
+      </div>
       <div className="text-[11px] font-black text-white tracking-wider truncate" title={widget.title}>{widget.title}</div>
       <div className="mt-3 space-y-1.5">
         {widget.fields.map(f => (

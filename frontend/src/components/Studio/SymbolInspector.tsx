@@ -1,23 +1,20 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { 
   Info, 
   FileCode, 
   Link, 
-  Hash, 
   MapPin, 
   Zap, 
   ArrowRight,
   Database,
-  Search,
   ChevronRight,
-  Clock,
-  ExternalLink,
   Target,
   Code as CodeIcon,
   X
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
+import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 
@@ -30,7 +27,7 @@ interface InspectorProps {
 }
 
 export function SymbolInspector({ selection, onClose }: InspectorProps) {
-  const { currentWorkspace, setFocusPath, setActiveDocument } = useWorkspaceStore();
+  const { currentWorkspace, setFocusPath } = useWorkspaceStore();
   const [showCode, setShowCode] = React.useState(false);
   const [codeContent, setCodeContent] = React.useState<string | null>(null);
   const [loadingCode, setLoadingCode] = React.useState(false);
