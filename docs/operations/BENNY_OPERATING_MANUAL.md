@@ -1,0 +1,362 @@
+# Benny Operating Manual
+
+**Audience:** operators of a shipped Benny install (PBR-001 Phases 0–8 complete).
+**Scope:** day-to-day run book — how to start, stop, diagnose, migrate, and recover the stack. Not a design doc, not a phase plan. Open this when something needs to happen *now*.
+
+> **Where you are in the lifecycle.** The platform is portable, local-first, Claude-orchestratable, and TDD-gated. Every command in this manual is implemented and covered by tests. If something here does not work, treat it as a defect (see §11).
+
+---
+
+## 1. First principles
+
+| Rule | Why it matters |
+|------|----------------|
+| Everything lives under **`$BENNY_HOME`** (e.g. `D:/optimus`). | One drive → one install → one backup. No files are left on `C:` except the Python interpreter and the optional `pip install -e .` shim. |
+| **Manifests are the contract**. CLI, API, MCP, and Studio all read/write the same `SwarmManifest` JSON. | If two surfaces disagree, the manifest wins. |
+| **Plan ≠ run**. `benny plan` builds and signs a manifest; `benny run` executes it. | You can audit, diff, and re-play plans. Cheap to plan, expensive to run. |
+| **Local-first.** `BENNY_OFFLINE=1` is a hard kill switch — any cloud model call raises `OfflineRefusal`. | Safe to hand the box to a customer or take it on a plane. |
+| **TDD floor.** The 6 release gates (G-COV, G-SR1, G-LAT, G-ERR, G-SIG, G-OFF) are tests, not a wiki page. | `pytest tests/release` is the final arbiter. |
+
+---
+
+## 2. Install & first boot
+
+```bash
+# 1. Clone and install the package (editable).
+git clone <repo> benny && cd benny
+pip install -e ".[dev,mcp]"
+
+# 2. Initialise the portable home on the target drive.
+benny init --home D:/optimus --profile app     # or --profile native
+
+# 3. Point the shell at it (persist for your user).
+setx BENNY_HOME D:\optimus                     # Windows
+# export BENNY_HOME=/mnt/ssd/optimus           # Linux/macOS
+```
+
+**What `init` creates** (PBR-001 §3, `benny/portable/home.py`):
+
+```
+$BENNY_HOME/
+├── bin/              # launcher shims (benny-neo4j, benny-llm, benny-ui)
+├── runtime/          # bundled binaries (profile=native only)
+├── workspaces/       # user data — survives uninstall --keep-data
+├── workflows/        # signed manifest JSONs
+├── runs/             # RunRecord history (SQLite)
+├── logs/             # per-service stdout/stderr (*.log), structured llm_calls.jsonl
+├── state/
+│   ├── pids/         # <service>.pid written by `benny up`
+│   └── profile-lock  # records app vs native profile
+├── models/           # local LLM weights (git-ignored, large)
+└── config.toml       # PortableConfig — ports, defaults
+```
+
+If `$BENNY_HOME` is missing, `.gitignored` state is corrupt, or ports collide, see §11.
+
+---
+
+## 3. Daily operations
+
+### 3.1 Start the stack
+
+```bash
+benny up --home $BENNY_HOME
+# → neo4j    healthy  pid=...  http 200
+# → lemonade healthy  pid=...  http 200
+# → api      healthy  pid=...  http 200
+# → ui       healthy  pid=...  http 200
+```
+
+- Bring up only one service: `benny up --home $BENNY_HOME --only api`
+- Skip the health-wait (CI/dev): `--no-wait`
+- Logs stream to `$BENNY_HOME/logs/<service>.log` — tail that file to debug a failed start.
+- Health probes are HTTP with a 30–60s timeout (see `benny/portable/services.py`).
+
+### 3.2 Status
+
+```bash
+benny status --home $BENNY_HOME
+# SERVICE     STATE    PID      DETAIL
+# neo4j       healthy  12456    http 200
+# lemonade    healthy  12457    http 200
+# api         healthy  12458    http 200
+# ui          healthy  12459    http 200
+```
+
+States: `healthy` (health probe passed), `alive` (process up, probe failing), `down` (no process).
+
+### 3.3 Stop the stack
+
+```bash
+benny down --home $BENNY_HOME              # all services
+benny down --home $BENNY_HOME --only ui    # one service
+```
+
+Graceful stop first (SIGTERM / Ctrl+Break on Windows), hard kill after 10s. PID files are removed; logs are kept for forensics.
+
+### 3.4 Health check: `benny doctor`
+
+```bash
+benny doctor --home $BENNY_HOME
+# ┏━━━━━━━━━━━━━━━━━━━━━ Benny System Health ━━━━━━━━━━━━━━━━━━━━━┓
+# ┃ Check          ┃ Status ┃ Message                             ┃
+# ┣━━━━━━━━━━━━━━━━┻━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+# ┃ BENNY_HOME     ┃ OK     ┃ Valid and writable: D:/optimus      ┃
+# ┃ Structure      ┃ OK     ┃ All required directories present    ┃
+# ┃ Hardware Clock ┃ OK     ┃ System time verified: 2026-04-19    ┃
+# ┃ Offline Policy ┃ OK     ┃ Offline mode disabled               ┃
+# ┃ Service: Lemonade ┃ OK  ┃ Responding (200 OK)                 ┃
+# ┃ Backend API    ┃ OK     ┃ Responding (200 OK)                 ┃
+# ┃ Manifest Schema┃ OK     ┃ v1.0                                ┃
+# ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+Exit codes: `0` = all OK · `2` = WARN only · `1` = ERROR present (stop and investigate).
+JSON form: `curl http://127.0.0.1:8005/api/ops/doctor`.
+
+---
+
+## 4. Planning and running workflows
+
+### 4.1 CLI
+
+```bash
+# Plan — no execution, produces a signed manifest.
+benny plan "Summarise every PDF in data_in/ into a single briefing" \
+    --workspace default \
+    --output briefing.md \
+    --word-count 2000 \
+    --out plans/briefing.manifest.json
+
+# Review → commit to git → share.
+
+# Run — executes the manifest.
+benny run plans/briefing.manifest.json --json
+
+# Inspect runs.
+benny runs ls --limit 10
+benny runs show <run_id>
+benny manifests ls
+```
+
+Key flags:
+- `--model` — override the manager-selected model. Omit to use the active model for the workspace.
+- `--max-concurrency N` — cap parallel executor fan-out.
+- `--max-depth N` — recursion limit for pillar-expansion planning (default 3).
+- `--no-save` — skip persistence to the run-store (ad-hoc plans).
+
+### 4.2 HTTP API
+
+All endpoints require `X-Benny-API-Key: benny-mesh-2026-auth` except the whitelist in `benny/api/server.py` (`/`, `/api/health`, `/docs`, SSE streams, `/.well-known/agent.json`).
+
+| Verb | Path | Purpose |
+|------|------|---------|
+| POST | `/api/workflows/plan` | Build and sign a manifest |
+| POST | `/api/workflows/execute/{manifest_id}` | Run; returns SSE event stream |
+| GET  | `/api/workflows/runs` | List run records |
+| GET  | `/api/rag/status?workspace=...` | Vector store state |
+| POST | `/api/rag/query` | Retrieval-only |
+| POST | `/api/rag/chat` | RAG chat (`mode=semantic|graph`) |
+| GET  | `/api/ops/doctor` | JSON version of §3.4 |
+| GET  | `/api/health` | Liveness |
+
+### 4.3 Claude via MCP
+
+```bash
+# Start the MCP server (stdio transport) from inside Claude Desktop/Claude Code.
+benny mcp --port 8005
+```
+
+The MCP server (`benny/mcp/server.py`) exposes `plan`, `run`, `list_runs`, `get_run`, and `doctor` as Claude tools. Tool authentication uses the same `X-Benny-API-Key` header the HTTP API does — the MCP wrapper reads it from `$BENNY_API_KEY` (falls back to the built-in dev key).
+
+---
+
+## 5. The LLM router (Phase 3 hardening)
+
+Knobs, in order of precedence:
+
+1. `executor_override=<model>` kwarg to `call_model()` — forces the exact executor for that call.
+2. `local_only=True` kwarg — refuses to dispatch to cloud providers.
+3. **Env `BENNY_OFFLINE=1`** — same as `local_only` but process-wide. Raises `OfflineRefusal` before any network I/O.
+4. Workspace manifest `default_model` (from `core/workspace.py`).
+
+**Check whether a model is local**:
+
+```python
+from benny.core.models import is_local_model, LOCAL_PROVIDERS
+is_local_model("lemonade/Llama-3.1-8B-Instruct")   # True
+is_local_model("openai/gpt-4")                     # False
+```
+
+The registered local providers (`LOCAL_PROVIDERS` in `benny/core/models.py`) are:
+`lemonade` (13305) · `ollama` (11434) · `lmstudio` (1234) · `fastflowlm` (52625) · `litert` (in-process).
+
+**If `BENNY_OFFLINE=1` is set and the active model is cloud**, `benny doctor` emits a `WARN`. Fix it by changing `default_model` in the workspace manifest or by starting a local provider.
+
+---
+
+## 6. Observability
+
+### 6.1 Structured LLM log
+
+`$BENNY_HOME/logs/llm_calls.jsonl` — one JSON object per call:
+
+```jsonl
+{"ts": "2026-04-19T14:29:15Z", "run_id": "run-abc", "model": "lemonade/Llama-3.1-8B", "ok": true, "provider": "lemonade", "duration_ms": 842}
+```
+
+This file is **git-ignored** (see `.gitignore`). Tail or grep it to answer "why did this run cost $X / take Y seconds?".
+
+### 6.2 Event Bus / SSE
+
+`/api/workflows/execute/{id}` is an SSE stream. Connect with curl:
+
+```bash
+curl -N -H "Accept: text/event-stream" \
+     http://127.0.0.1:8005/api/workflows/execute/<manifest_id>
+```
+
+Events: `plan_updated`, `wave_started`, `task_started`, `task_completed`, `run_finished`.
+
+### 6.3 Lineage
+
+Marquez integration is optional (set `MARQUEZ_URL`). Each run emits OpenLineage events via `benny/governance/lineage.py`. `RunRecord.governance_url` carries the Marquez URL.
+
+### 6.4 System health
+
+`/api/system/*` (see `benny/api/system_routes.py`) exposes Neo4j, disk, and workspace metrics.
+
+---
+
+## 7. Workspaces
+
+- A workspace is a folder under `$BENNY_HOME/workspaces/<name>/`.
+- Each workspace has a `manifest.json` (workspace-level, not to be confused with `SwarmManifest`) defining `default_model`, tools, and wiki config.
+- Switch the current workspace via `--workspace <name>` on any CLI verb or `?workspace=<name>` on the HTTP API.
+- `BENNY_WORKSPACE` env var sets the global default.
+
+Wiki articles live at `$BENNY_HOME/workspaces/<name>/.benny/wiki/*.md` and are served via `/api/rag/wiki/articles` and `/api/rag/wiki/article/{name}`.
+
+---
+
+## 8. Migration & relocation (Phase 8)
+
+Copy the whole `$BENNY_HOME` directory to a new drive and run:
+
+```bash
+benny migrate --from /old/benny_home --to $BENNY_HOME --dry-run
+# review the rewrite report
+benny migrate --from /old/benny_home --to $BENNY_HOME --apply
+```
+
+What `migrate` does (`benny/migrate/importer.py`):
+
+1. Walks the source tree, copies files into the new home.
+2. Rewrites absolute host paths in JSON / manifest / config files to `${BENNY_HOME}` tokens.
+3. **Re-signs** every manifest it rewrites (HMAC-SHA256 via `benny/core/manifest_hash.py`).
+4. Emits a report: `rewrites=N`, per-file actions, and any errors.
+
+Dry-run first. Always.
+
+---
+
+## 9. Uninstall
+
+```bash
+benny uninstall --home $BENNY_HOME                 # removes app, runtime, data
+benny uninstall --home $BENNY_HOME --keep-data     # keeps workspaces/, models/, config.toml, state/
+```
+
+The `--keep-data` path is the supported way to reinstall onto the same drive or upgrade across versions.
+
+---
+
+## 10. Release gates (the 6σ floor)
+
+`tests/release/test_release_gates.py` — run these before shipping:
+
+| Gate | What it asserts | Target |
+|------|-----------------|--------|
+| G-COV | Code coverage on `scope` modules | ≥ 85% |
+| G-SR1 | Absolute-path violations in the tree | ≤ 408 (ratchet baseline) |
+| G-LAT | Planning latency (platform overhead, LLM mocked) | < 300 ms median |
+| G-ERR | Soak test — stable-core run N× consecutively | 0 flakes |
+| G-SIG | Manifest signature integrity | `sign_manifest → verify_signature == True` |
+| G-OFF | Offline compliance flag | `BENNY_OFFLINE` honored |
+
+```bash
+pytest tests/release -q                 # all gates
+pytest tests/portability -q             # SR-1 auditor (regenerates baseline JSON)
+pytest tests/ -q                        # full suite (~200 tests, ~45s on a laptop)
+```
+
+Baseline for G-SR1 lives at the path in `docs/requirements/release_gates.yaml`. Never *raise* the threshold — only lower it as you fix violations.
+
+---
+
+## 11. Troubleshooting cookbook
+
+| Symptom | First check | Fix |
+|---------|-------------|-----|
+| `benny up` says `port X already in use` | `benny status`, then OS `netstat -ano` | Stop the stale process (`benny down` rarely leaves orphans; otherwise kill the PID reported) |
+| `benny up` says `alive` but never `healthy` | `tail -f $BENNY_HOME/logs/<service>.log` | Fix the service config (model path, neo4j creds) or increase `HealthCheck.timeout_seconds` |
+| Test `test_plan_from_requirement_success` flakes | `grep AsyncMock tests/graph/test_manifest_runner.py` | `wave_scheduler_node` is called **synchronously** — the fixture must be `MagicMock`, not `AsyncMock`. Planner IS awaited, keep it `AsyncMock`. |
+| `OfflineRefusal` on every call | `echo $BENNY_OFFLINE` | Either `unset BENNY_OFFLINE` or change the workspace `default_model` to a local one |
+| `AttributeError: module ... has no attribute 'get_active_model'` in rag_routes | Stale import | Already fixed on master — ensure you're on the latest tip; `get_active_model` is explicitly imported in `benny/api/rag_routes.py` |
+| `Governance violation: Invalid or missing X-Benny-API-Key` | curl without header | Add `-H "X-Benny-API-Key: benny-mesh-2026-auth"` or whitelist the path in `server.GOVERNANCE_WHITELIST` |
+| Merge conflict markers in `benny/api/server.py` | `grep -n '<<<<<<' benny/api/server.py` | Keep the "Updated upstream" side — it has the Phase 2+ routers (`manifest_router`, `workflow_endpoints_router`). |
+| `coverage.json` missing → G-COV fails | Run `pytest --cov=benny --cov-report=json:coverage.json` first | The gate test is permissive — it calls pytest itself, so check the subprocess stderr |
+| Dirty `logs/llm_calls.jsonl` in `git status` | The file is now git-ignored | `git rm --cached logs/llm_calls.jsonl` if it re-appears; the root cause is an old checkout |
+
+### 11.1 Reset to a known-good state
+
+```bash
+benny down --home $BENNY_HOME
+benny doctor --home $BENNY_HOME          # identify bad component
+# If still broken:
+benny uninstall --home $BENNY_HOME --keep-data
+benny init --home $BENNY_HOME --profile app
+benny up --home $BENNY_HOME
+```
+
+Your workspaces, models, and config survive this sequence.
+
+---
+
+## 12. Where the code lives (cheat sheet)
+
+| Concern | Module |
+|---------|--------|
+| CLI dispatch | `benny_cli.py` |
+| Portable home (init/uninstall/validate) | `benny/portable/home.py` |
+| Service specs (ports, commands) | `benny/portable/services.py` |
+| Process runner (`up`/`down`/`status`) | `benny/portable/runner.py` |
+| Config (TOML → ports) | `benny/portable/config.py` |
+| Manifest types | `benny/core/manifest.py` |
+| Manifest hash + signatures | `benny/core/manifest_hash.py` |
+| LLM router, LOCAL_PROVIDERS, offline | `benny/core/models.py` |
+| Local executor (LC-1..4 contract) | `benny/core/local_executor.py` |
+| Planner → manifest loop | `benny/graph/manifest_runner.py` |
+| Swarm graph (LangGraph) | `benny/graph/swarm.py` |
+| Doctor diagnostics | `benny/ops/doctor.py` |
+| Structured LLM log | `benny/ops/llm_logger.py` |
+| Migration / path rewriter | `benny/migrate/importer.py` |
+| MCP server for Claude | `benny/mcp/server.py` |
+| HTTP API surface | `benny/api/*.py` |
+| Governance middleware | `benny/api/server.py::GovHeaderMiddleware` |
+| Event Bus / SSE | `benny/core/event_bus.py` |
+| Release gates | `tests/release/test_release_gates.py` + `docs/requirements/release_gates.yaml` |
+
+---
+
+## 13. Golden rules
+
+1. **Never commit with `--no-verify`.** The pre-commit hooks enforce SR-1 and linting.
+2. **Never raise the SR-1 baseline.** If you must add an absolute path, add it behind `_materialise_argv` in `benny/portable/runner.py`.
+3. **Never call `completion()` directly.** Always go through `call_model()` in `benny/core/models.py` so offline, logging, and lineage all fire.
+4. **Never share an unsigned manifest.** `sign_manifest` populates `content_hash` and `signature`; `verify_signature` is the trust boundary.
+5. **Never skip `benny doctor` after a migration.** Path rewrites are heuristic — doctor is how you confirm they landed.
+
+---
+
+*Last updated: PBR-001 Phase 8 complete. See `docs/requirements/PBR-001_CONTINUATION_PLAN.md` for the phase-by-phase history.*

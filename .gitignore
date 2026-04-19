@@ -43,6 +43,8 @@ storage/
 
 # Logs
 *.log
+logs/
+!logs/.gitkeep
 
 # Large Data Artifacts
 architecture/RAW_AST_BENNY.json

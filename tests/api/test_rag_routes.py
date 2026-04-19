@@ -32,9 +32,14 @@ def mock_task_manager():
 
 @pytest.fixture
 def mock_workspace_path(tmp_path):
-    # Patch it at the source since rag_routes uses local imports
-    with patch("benny.core.workspace.get_workspace_path") as mock:
-        mock.return_value = tmp_path
+    # Some rag_routes handlers use a module-level import
+    # (`from ..core.workspace import get_workspace_path`) while the wiki
+    # handlers re-import it locally inside the function. Patching BOTH
+    # the module binding and the source covers every call site.
+    with patch("benny.api.rag_routes.get_workspace_path") as m1, \
+         patch("benny.core.workspace.get_workspace_path") as m2:
+        m1.return_value = tmp_path
+        m2.return_value = tmp_path
         yield tmp_path
 
 def test_get_rag_status_empty(mock_chroma):

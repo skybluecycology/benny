@@ -5,6 +5,7 @@ import os
 import time
 import subprocess
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 # Load config
 CONFIG_PATH = Path("docs/requirements/release_gates.yaml")

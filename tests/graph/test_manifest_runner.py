@@ -1,6 +1,6 @@
 import pytest
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # PREVENT PyO3/Tokenizers error by mocking swarm before it loads
 mock_swarm = MagicMock()
@@ -11,16 +11,24 @@ from benny.core.manifest import SwarmManifest, RunStatus
 
 @pytest.fixture
 def mock_planner():
+    # planner_node is awaited in manifest_runner — use AsyncMock so the
+    # mock returns a coroutine that resolves to the side_effect values.
+    mock_swarm.planner_node = AsyncMock()
     return mock_swarm.planner_node
 
 @pytest.fixture
 def mock_scheduler():
+    # wave_scheduler_node is called synchronously in manifest_runner
+    # (delta = wave_scheduler_node(state), no await) — use MagicMock so
+    # the return value is a dict rather than a coroutine.
+    mock_swarm.wave_scheduler_node = MagicMock()
     return mock_swarm.wave_scheduler_node
 
 @pytest.fixture
 def mock_graph():
     graph = MagicMock()
-    mock_swarm.build_swarm_graph.return_value = graph
+    graph.ainvoke = AsyncMock()
+    mock_swarm.build_swarm_graph = MagicMock(return_value=graph)
     return graph
 
 @pytest.mark.asyncio
@@ -46,12 +54,19 @@ async def test_execute_manifest_success(mock_graph):
         "status": "completed",
         "plan": [{"task_id": "t1", "status": "completed"}]
     }
-    
-    with patch("benny.persistence.run_store.save_run"):
-        with patch("benny.persistence.run_store.update_run_status") as mock_update:
-            mock_update.return_value = MagicMock()
-            await execute_manifest(manifest, run_id="run1")
-            assert mock_update.called
+
+    # RunRecord.governance_url is a required string; configure the mocked
+    # swarm module so the import inside execute_manifest resolves it to a
+    # concrete URL rather than a MagicMock (which fails Pydantic validation).
+    mock_swarm.get_governance_url = MagicMock(
+        return_value="http://localhost/governance/run1"
+    )
+
+    with patch("benny.persistence.run_store.save_run"), \
+         patch("benny.persistence.run_store.update_run_status") as mock_update:
+        mock_update.return_value = MagicMock()
+        await execute_manifest(manifest, run_id="run1")
+        assert mock_update.called
 
 def test_apply_delta_reducers():
     state = {"errors": ["e1"]}

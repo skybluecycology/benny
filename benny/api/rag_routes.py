@@ -14,7 +14,7 @@ import httpx
 from ..core.workspace import get_workspace_path
 from ..core.extraction import extract_structured_text
 from ..tools.knowledge import get_chromadb_client
-from ..core.models import LOCAL_PROVIDERS
+from ..core.models import LOCAL_PROVIDERS, get_active_model
 from ..core.task_manager import task_manager
 from ..governance.lineage import track_workflow_start, track_workflow_complete, track_aer, track_workflow_fail, track_llm_call
 from ..governance.permission_manifest import register_manifest, create_ephemeral_manifest

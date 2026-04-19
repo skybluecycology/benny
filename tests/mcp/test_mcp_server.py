@@ -19,7 +19,11 @@ async def test_plan_tool_registered():
 @pytest.mark.asyncio
 async def test_plan_tool_proxies_to_api():
     """Requirement 4.3.2: assert it POSTs to /api/workflows/plan."""
-    mock_response = httpx.Response(200, json={"id": "m-123", "status": "signed"})
+    # httpx.Response needs a Request attached for raise_for_status() to work.
+    mock_request = httpx.Request("POST", "http://test/api/workflows/plan")
+    mock_response = httpx.Response(
+        200, json={"id": "m-123", "status": "signed"}, request=mock_request
+    )
     
     with patch("benny.mcp.server.httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
