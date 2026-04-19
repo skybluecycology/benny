@@ -13,11 +13,11 @@ to re-read the session transcript to execute it. Read, follow, commit.
 | 1b    | Service lifecycle (up/down/status)       | ✅ shipped  |
 | 2     | Manifest schema + SSE transport          | ✅ shipped  |
 | 3     | LLM router (override/local_only/offline) | ✅ shipped  |
-| 4     | MCP server + thin SDK                    | ⏳ next     |
-| 5     | Local-LLM executor capabilities          | ⏳ pending  |
-| 6     | Observability + `benny doctor`           | ⏳ pending  |
-| 7     | 6σ release gates                         | ⏳ pending  |
-| 8     | `benny migrate` / legacy import          | ⏳ pending  |
+| 4     | MCP server + thin SDK                    | ✅ shipped  |
+| 5     | Local-LLM executor capabilities          | ✅ shipped  |
+| 6     | Observability + `benny doctor`           | ✅ shipped  |
+| 7     | 6σ release gates                         | ✅ shipped  |
+| 8     | `benny migrate` / legacy import          | ✅ shipped  |
 
 **Ground rules — do not deviate without asking the user:**
 

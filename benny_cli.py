@@ -11,6 +11,8 @@ Usage:
     benny runs ls [--manifest MANIFEST_ID]
     benny runs show RUN_ID
 
+    benny migrate --from <path> [--to $BENNY_HOME] [--apply]
+
 Design: this is the user's main interface to the plan-then-run loop. The
 same JSON that appears in `manifest.json` is what the UI canvas renders
 and what past runs reference. Share the file → share the workflow.
@@ -271,6 +273,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--stdio", action="store_true", default=True, help="Use stdio transport (default)")
     p_mcp.add_argument("--port", type=int, default=8000, help="Benny API port to proxy to")
 
+    # migrate (PBR-001 Phase 8)
+    p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")
+    p_mig.add_argument("--from-path", "--from", required=True, help="Source directory to migrate")
+    p_mig.add_argument("--to-home", "--to", default=None, help="Target $BENNY_HOME (defaults to current)")
+    p_mig.add_argument("--apply", action="store_true", help="Perform actual changes (default is dry-run)")
+    p_mig.add_argument("--dry-run", dest="apply", action="store_false")
+
     return p
 
 
@@ -304,6 +313,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_status(args)
     if args.cmd == "mcp":
         return cmd_mcp(args)
+    if args.cmd == "migrate":
+        return cmd_migrate(args)
 
     parser.print_help()
     return 1
@@ -323,28 +334,6 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"benny init failed: {exc}", file=sys.stderr)
         return 1
     print(f"initialised $BENNY_HOME at {bh.root} (profile={bh.profile})")
-    return 0
-
-
-def cmd_doctor(args: argparse.Namespace) -> int:
-    from benny.portable import config as cfg_mod
-    from benny.portable import home as home_mod
-
-    root = Path(args.home)
-    report = home_mod.validate(root)
-    if not report.ok:
-        print("benny doctor: layout problems", file=sys.stderr)
-        for p in report.problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
-
-    try:
-        cfg = cfg_mod.load(root)
-    except cfg_mod.PortableConfigError as exc:
-        print(f"benny doctor: config invalid: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"benny doctor: ok  profile={cfg.profile}  schema={cfg.schema_version}")
     return 0
 
 
@@ -457,6 +446,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     import asyncio
+    import os
     from rich.console import Console
     from rich.table import Table
     from benny.ops.doctor import run_doctor
@@ -485,6 +475,34 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         console.print("[bold red]× Diagnostic errors found.[/bold red]")
 
     return report.status_code
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    from benny.migrate.importer import MigrationEngine
+    import os
+
+    source = Path(args.from_path)
+    target = Path(args.to_home or os.environ.get("BENNY_HOME", ".")).absolute()
+    
+    engine = MigrationEngine(target)
+    print(f"[migrate] source={source}")
+    print(f"[migrate] target_home={target}")
+    print(f"[migrate] mode={'APPLY' if args.apply else 'DRY-RUN'}")
+    
+    report = engine.migrate_workspace(source, target, dry_run=not args.apply)
+    
+    for t in report.transforms:
+        print(f"  [{t['action']}] {t['file']} {t['details']}")
+    
+    if report.errors:
+        print("\n[migrate] errors:", file=sys.stderr)
+        for e in report.errors:
+            print(f"  - {e}", file=sys.stderr)
+            
+    print(f"\n[migrate] complete. rewrites={report.count_rewrites}")
+    if not args.apply:
+        print("[migrate] DRY-RUN complete. Use --apply to commit changes.")
+    return 0 if not report.errors else 1
 
 
 if __name__ == "__main__":
