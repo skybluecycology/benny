@@ -266,6 +266,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--home", required=True, help="Absolute path to $BENNY_HOME")
     p_status.add_argument("--only", action="append", default=[], help="Only report the named service (repeatable)")
 
+    # MCP server (PBR-001 Phase 4)
+    p_mcp = sub.add_parser("mcp", help="Start the Model Context Protocol (MCP) server")
+    p_mcp.add_argument("--stdio", action="store_true", default=True, help="Use stdio transport (default)")
+    p_mcp.add_argument("--port", type=int, default=8000, help="Benny API port to proxy to")
+
     return p
 
 
@@ -297,6 +302,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_down(args)
     if args.cmd == "status":
         return cmd_status(args)
+    if args.cmd == "mcp":
+        return cmd_mcp(args)
 
     parser.print_help()
     return 1
@@ -417,6 +424,34 @@ def cmd_status(args: argparse.Namespace) -> int:
         state = "healthy" if s.healthy else ("alive" if s.alive else "down")
         pid = str(s.pid) if s.pid else "-"
         print(f"{s.name:<12} {state:<8} {pid:<8} {s.health_detail}")
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    import subprocess
+    import os
+
+    # Implementation invokes python -m benny.mcp.server --stdio
+    cmd = [sys.executable, "-m", "benny.mcp.server"]
+    if args.stdio:
+        cmd.append("--stdio")
+    
+    # Forward the API port via environment if needed, though server.py 
+    # should probably handle config resolution itself.
+    env = os.environ.copy()
+    env["BENNY_API_PORT"] = str(args.port)
+
+    print(f"[mcp] starting server (stdio transport)...")
+    try:
+        # MCP server typically communicates over stdin/stdout, so we 
+        # replace the current process or use run. 
+        # Using subprocess.run so it waits for completion.
+        subprocess.run(cmd, env=env, check=True)
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"[mcp] failed: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

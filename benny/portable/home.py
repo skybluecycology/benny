@@ -141,6 +141,8 @@ _LAUNCHERS: tuple[tuple[str, str, bool], ...] = (
     ("benny-llm.cmd", _WINDOWS_LLM_LAUNCHER, False),
     ("benny-neo4j", _POSIX_NEO4J_LAUNCHER, True),
     ("benny-neo4j.cmd", _WINDOWS_NEO4J_LAUNCHER, False),
+    ("benny-mcp", _POSIX_LAUNCHER.replace('benny_cli "$@"', 'mcp.server --stdio'), True),
+    ("benny-mcp.cmd", _WINDOWS_LAUNCHER.replace('benny_cli %*', 'mcp.server --stdio'), False),
 )
 
 # Declarative compose manifest for the `app` profile (PBR-001 §4.3).

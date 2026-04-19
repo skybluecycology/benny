@@ -26,6 +26,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
 ]
+mcp = [
+    "mcp>=1.0",
+]
 
 [project.scripts]
 benny = "benny_cli:main"

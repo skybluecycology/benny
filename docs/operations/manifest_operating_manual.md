@@ -177,6 +177,21 @@ Commit the `*.json` to git. They run `benny run <file>` — same `id`, their run
 
 ---
 
+## Example Manifests
+
+The swarm can be driven by predefined JSON manifests for common workflows. You can find these in the `docs/operations/examples/` directory:
+
+- **[Codebase Audit](file:///c:/Users/nsdha/OneDrive/code/benny/docs/operations/examples/codebase_audit.json)**: Deep-dive security and architecture analysis.
+- **[Documentation Wiki](file:///c:/Users/nsdha/OneDrive/code/benny/docs/operations/examples/documentation_swarm.json)**: Automated generation of dev onboarding wikis.
+- **[Market Research](file:///c:/Users/nsdha/OneDrive/code/benny/docs/operations/examples/market_research.json)**: High-concurrency competitor analysis across multiple documents.
+
+To run an example:
+```bash
+benny run docs/operations/examples/codebase_audit.json
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom                                 | Check                                                                 |
