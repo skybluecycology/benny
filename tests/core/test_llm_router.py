@@ -16,6 +16,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from unittest.mock import AsyncMock
 import pytest
 
 from benny.core import models as llm
@@ -209,11 +210,12 @@ async def test_offline_env_allows_local_call(monkeypatch: pytest.MonkeyPatch) ->
     """Offline mode doesn't touch local models — they're the whole point."""
     monkeypatch.setenv("BENNY_OFFLINE", "1")
 
-    # Patch the actual completion call so we don't hit a live provider.
-    async def fake_run(*_a, **_kw):
-        return "ok"
-
-    monkeypatch.setattr("benny.core.models._run_completion", fake_run)
+    # Patch resolve_executor to return a mock executor
+    mock_executor = AsyncMock()
+    mock_executor.generate.return_value = "ok"
+    
+    monkeypatch.setattr("benny.core.models.resolve_executor", lambda _: mock_executor)
+    
     out = await llm.call_model(
         model="lemonade/openai/deepseek-r1-8b-FLM",
         messages=[{"role": "user", "content": "hello"}],

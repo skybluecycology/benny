@@ -11,6 +11,7 @@ from .litert_engine import LiteRTEngine
 from ..governance.lineage import track_llm_call
 from ..governance.operating_manual import build_system_prompt_augmentation
 from .event_bus import event_bus
+from .local_executor import resolve_executor
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -525,54 +526,31 @@ async def call_model(
         
         if not system_found:
             messages.insert(0, {"role": "system", "content": augmentation})
-
-    # Handle internal LiteRT (MediaPipe) inference
-    if model.startswith("litert/") or "/litert" in model or (isinstance(model, str) and "litert" in model.lower()):
-        # Extract model path if provided, else use default in initialize()
-        model_path = None
-        if "litert/" in model:
-            # model string like "litert/path/to/model.bin"
-            model_path = model.split("litert/", 1)[1]
+    
+    # PBR-001 Phase 5: Local Executor Short-Circuit
+    # If the model is local, we bypass LiteLLM entirely to ensure offline 
+    # reliability and performance.
+    if is_local_model(model):
+        executor = resolve_executor(model)
+        if executor:
+            # Extract system message from messages if present
+            system_msg = None
+            user_msg = ""
+            for msg in messages:
+                if msg.get("role") == "system":
+                    system_msg = msg.get("content")
+                elif msg.get("role") == "user":
+                    user_msg = msg.get("content", "")
             
-        try:
-            if not LiteRTEngine.is_available():
-                # Fallback to Lemonade (AMD NPU) if local MediaPipe is not supported
-                print(f"LiteRT engine unavailable. Redirecting {model} fallback to Lemonade NPU provider.")
-                
-                # Determine the best matching model ID on Lemonade
-                target_model = "openai/deepseek-r1-8b-FLM" # Default
-                if "gemma-4" in model.lower():
-                    target_model = "openai/Gemma-4-E4B-it-GGUF"
-                elif "deepseek" in model.lower():
-                    target_model = "openai/deepseek-r1-8b-FLM"
-                elif "llama" in model.lower():
-                    target_model = "openai/llama3.2-1b-FLM"
-
-                lemonade_config = LOCAL_PROVIDERS["lemonade"]
-                from litellm import completion
-                response = completion(
-                    model=target_model,
-                    messages=messages,
-                    api_base=lemonade_config["base_url"],
-                    api_key=lemonade_config["api_key"],
-                    temperature=temperature
-                )
-                
-                # Track fallback call
-                if run_id:
-                    track_llm_call(
-                        parent_run_id=run_id,
-                        model=target_model,
-                        provider="lemonade",
-                        usage=response.get("usage")
-                    )
-                return response.choices[0].message.content
-
-            return await LiteRTEngine.generate(prompt=messages[-1]["content"], model_path=model_path)
-        except Exception as e:
-            if not fallbacks:
-                raise e
-            print(f"LiteRT inference failed, trying fallbacks: {e}")
+            # Use generate/stream from executor
+            # For Phase 5, call_model is sync-wrapped or async; we use await.
+            return await executor.generate(
+                prompt=user_msg, 
+                system=system_msg, 
+                temperature=temperature, 
+                max_tokens=max_tokens,
+                run_id=run_id
+            )
 
     print(f"DEBUG: call_model(model='{model}', ...)")
     try:

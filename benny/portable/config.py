@@ -27,6 +27,7 @@ class PortableConfig:
     neo4j_http_port: int
     api_port: int
     ui_port: int
+    llm_timeout_seconds: int
     extra_data_dir: str | None
 
 
@@ -76,6 +77,7 @@ def load(root: Path) -> PortableConfig:
             neo4j_http_port=int(runtime.get("neo4j_http_port", 7474)),
             api_port=int(runtime.get("api_port", 8000)),
             ui_port=int(runtime.get("ui_port", 5173)),
+            llm_timeout_seconds=int(runtime.get("llm_timeout_seconds", 120)),
             extra_data_dir=data.get("extra_data_dir") or runtime.get("extra_data_dir"),
         )
     except KeyError as exc:
