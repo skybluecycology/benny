@@ -211,6 +211,13 @@ class SwarmManifest(BaseModel):
     # Runs are stored separately but referenced here for convenience
     latest_run: Optional[RunRecord] = None
 
+    # Reproducibility contract (PBR-001 Phase 2).
+    # `content_hash` is SHA-256 of the canonical JSON (sorted keys, volatile
+    # fields removed). `signature` is either `sha256:<hex>` or
+    # `hmac-sha256:<hex>`, see `benny.core.manifest_hash`.
+    content_hash: Optional[str] = None
+    signature: Optional[str] = None
+
     def touch(self) -> None:
         self.updated_at = datetime.utcnow().isoformat()
 
