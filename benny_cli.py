@@ -455,5 +455,37 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    import asyncio
+    from rich.console import Console
+    from rich.table import Table
+    from benny.ops.doctor import run_doctor
+
+    console = Console()
+    with console.status("[bold green]Running diagnostics..."):
+        if args.home:
+            os.environ["BENNY_HOME"] = os.path.abspath(args.home)
+        report = asyncio.run(run_doctor())
+
+    table = Table(title="Benny System Health (Phase 6)")
+    table.add_column("Check", style="cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Message")
+
+    for c in report.checks:
+        color = "green" if c.status == "OK" else ("yellow" if c.status == "WARN" else "red")
+        table.add_row(c.name, f"[{color}]{c.status}[/{color}]", c.message)
+
+    console.print(table)
+    if report.status_code == 0:
+        console.print("[bold green]✓ All systems optimal.[/bold green]")
+    elif report.status_code == 2:
+        console.print("[bold yellow]! System operational with warnings.[/bold yellow]")
+    else:
+        console.print("[bold red]× Diagnostic errors found.[/bold red]")
+
+    return report.status_code
+
+
 if __name__ == "__main__":
     sys.exit(main())

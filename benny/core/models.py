@@ -10,9 +10,10 @@ import logging
 from .litert_engine import LiteRTEngine
 from ..governance.lineage import track_llm_call
 from ..governance.operating_manual import build_system_prompt_augmentation
+import datetime
 from .event_bus import event_bus
 from .local_executor import resolve_executor
-from datetime import datetime
+from ..ops.llm_logger import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -493,6 +494,14 @@ async def call_model(
         OfflineRefusal: when ``BENNY_OFFLINE`` is engaged and ``model`` is
             not a local model. The check happens BEFORE any network I/O.
     """
+    start_ts = datetime.datetime.now()
+    log_data = {
+        "ts": start_ts.isoformat(),
+        "run_id": run_id,
+        "model": model,
+        "ok": False
+    }
+
     # PBR-001 Phase 3: offline kill-switch. Must be the first thing we do
     # — before system-prompt augmentation, before LiteRT routing — so a
     # misconfigured task can't leak data to the cloud on the way in.
@@ -544,13 +553,33 @@ async def call_model(
             
             # Use generate/stream from executor
             # For Phase 5, call_model is sync-wrapped or async; we use await.
-            return await executor.generate(
-                prompt=user_msg, 
-                system=system_msg, 
-                temperature=temperature, 
-                max_tokens=max_tokens,
-                run_id=run_id
-            )
+            try:
+                content = await executor.generate(
+                    prompt=user_msg, 
+                    system=system_msg, 
+                    temperature=temperature, 
+                    max_tokens=max_tokens,
+                    run_id=run_id
+                )
+                
+                # Update log data (Phase 6)
+                log_data["ok"] = True
+                log_data["provider"] = f"local/{executor.provider_name}"
+                log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
+                # Token counts from executor
+                try:
+                    log_data["tokens_in"] = executor.count_tokens(user_msg + (system_msg or ""))
+                    log_data["tokens_out"] = executor.count_tokens(content)
+                except Exception:
+                    pass
+                log_llm_call(log_data)
+                
+                return content
+            except Exception as e:
+                log_data["error"] = str(e)
+                log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
+                log_llm_call(log_data)
+                raise
 
     print(f"DEBUG: call_model(model='{model}', ...)")
     try:
@@ -596,9 +625,15 @@ async def call_model(
         # If the seam returned a plain string (typical for stubs or a
         # future typed local executor), that is the completion content.
         if isinstance(response, str):
+            # Update log data for Phase 6 (usually test mocks)
+            log_data["ok"] = True
+            log_data["provider"] = provider
+            log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
+            log_llm_call(log_data)
             return response
         
         # Emit Resource Usage for UI
+        content = response.choices[0].message.content
         try:
              usage = response.get("usage", {})
              duration_ms = response.get("response_ms", 0) # litellm sometimes provides this
@@ -611,14 +646,27 @@ async def call_model(
                  "provider": provider,
                  "usage": usage_data,
                  "duration_ms": duration_ms,
-                 "timestamp": datetime.now().isoformat()
+                 "timestamp": datetime.datetime.now().isoformat()
              })
+             
+             # Update log data for Phase 6
+             log_data["ok"] = True
+             log_data["provider"] = provider
+             log_data["tokens_in"] = usage_data.get("prompt_tokens", 0)
+             log_data["tokens_out"] = usage_data.get("completion_tokens", 0)
+             log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
+             log_llm_call(log_data)
         except Exception as e:
-             logging.debug(f"Failed to emit resource_usage: {e}")
+             logging.debug(f"Failed to emit/log resource_usage: {e}")
 
-        return response.choices[0].message.content
+        return content
     except Exception as e:
         print(f"DEBUG: call_model failed: {e}")
+        # Log failure for Phase 6
+        log_data["error"] = str(e)
+        log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
+        log_llm_call(log_data)
+        
         if fallbacks and len(fallbacks) > 0:
             print(f"DEBUG: Primary model failed, trying fallbacks: {fallbacks}")
             for fallback in fallbacks:

@@ -44,6 +44,7 @@ from .live_routes import router as live_router
 from .manifest_routes import router as manifest_router
 from .workflow_endpoints import router as workflow_endpoints_router
 from .audio_routes import router as audio_router
+from .ops_endpoints import router as ops_router
 
 
 @asynccontextmanager
@@ -97,6 +98,7 @@ async def lifespan(app):
 GOVERNANCE_WHITELIST = [
     "/",
     "/api/health",
+    "/api/ops/doctor",
     "/docs",
     "/openapi.json",
     "/redoc",
@@ -173,6 +175,7 @@ app.include_router(manifest_router, prefix="/api", tags=["Manifests"])
 app.include_router(workflow_endpoints_router, prefix="/api", tags=["Workflows (PBR-001)"])
 app.include_router(audio_router, prefix="/api/audio", tags=["Audio Interaction"])
 app.include_router(a2a_router, prefix="/a2a", tags=["Agent2Agent"])
+app.include_router(ops_router)
 
 
 @app.get("/api/heartbeat")

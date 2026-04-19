@@ -14,9 +14,8 @@ Four contracts (PBR-001 §5, Phase 3):
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
-
-from unittest.mock import AsyncMock
+from typing import Any, List
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from benny.core import models as llm
@@ -213,6 +212,9 @@ async def test_offline_env_allows_local_call(monkeypatch: pytest.MonkeyPatch) ->
     # Patch resolve_executor to return a mock executor
     mock_executor = AsyncMock()
     mock_executor.generate.return_value = "ok"
+    # Ensure count_tokens is treated as a normal method, not a coroutine
+    mock_executor.count_tokens = MagicMock(return_value=10)
+    mock_executor.provider_name = "test-provider"
     
     monkeypatch.setattr("benny.core.models.resolve_executor", lambda _: mock_executor)
     

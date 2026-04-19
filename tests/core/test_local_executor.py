@@ -81,6 +81,10 @@ async def test_offline_still_blocks_before_executor(monkeypatch):
     
     # IMPORTANT: Patch where it's used (benny.core.models)
     with patch("benny.core.models.resolve_executor", return_value=mock_executor):
+        # Ensure count_tokens and provider_name are present for the logger
+        mock_executor.count_tokens = MagicMock(return_value=1)
+        mock_executor.provider_name = "test"
+        
         # Patch _run_completion to ensure it's NEVER called
         with patch("benny.core.models._run_completion") as mock_litellm:
             result = await call_model("lemonade/model", [{"role": "user", "content": "hi"}])
@@ -95,6 +99,10 @@ async def test_call_model_uses_executor_for_local_model():
     
     # IMPORTANT: Patch where it's used (benny.core.models)
     with patch("benny.core.models.resolve_executor", return_value=mock_executor):
+        # Ensure count_tokens and provider_name are present for the logger
+        mock_executor.count_tokens = MagicMock(return_value=1)
+        mock_executor.provider_name = "test"
+        
         with patch("benny.core.models._run_completion") as mock_litellm:
             result = await call_model("ollama/llama3", [{"role": "user", "content": "hi"}])
             assert result == "direct hit"
