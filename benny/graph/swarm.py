@@ -180,6 +180,27 @@ def discover_skills(workspace_id: str = "default") -> List[Dict[str, Any]]:
 
 
 
+def normalize_model_string(model_id: str) -> str:
+    """Normalize model string for LiteLLM targeting local providers."""
+    if not model_id:
+        return model_id
+    
+    # Prefix mapping for LiteLLM to use its OpenAI-compatible client
+    local_mapping = ["lemonade", "fastflowlm", "lmstudio", "ollama"]
+    
+    # Parse provider from LiteLLM style string 'provider/model'
+    if "/" in model_id and not model_id.startswith("openai/"):
+        provider = model_id.split("/")[0].lower()
+        if provider in local_mapping:
+            core_model = "/".join(model_id.split("/")[1:])
+            # Lemonade is strict and doesn't want the prefix in the JSON body,
+            # but LiteLLM needs it in the 'model' string for routing.
+            # FastFlowLM and Ollama usually accept openai/ prefix.
+            return f"openai/{core_model}"
+            
+    return model_id
+
+
 # =============================================================================
 # NODE: PLANNER (Bricoleur)
 # =============================================================================
@@ -243,6 +264,15 @@ async def planner_node(state: SwarmState) -> Dict[str, Any]:
         )
         mode = "MACRO_STRATEGY"
         user_prompt = f"Generate a high-level strategic plan for:\n\n{request}"
+
+    # Optimization: Bypass Macro Strategy if plan is already present and approved (PBR-001 §1.2)
+    if mode == "MACRO_STRATEGY" and state.get("plan_approved") and state.get("plan"):
+        logger.info(f"Planner: Bypassing macro strategy, plan already approved for {execution_id}")
+        return {
+            "status": "scheduled", 
+            "active_task_pool": state["plan"],
+            "target_pillar_id": None
+        }
 
     available_skills = discover_skills(workspace_id)
     skills_context = "\n".join([f"- {s['id']}: {s.get('description', 'No description')}" for s in available_skills])
@@ -572,12 +602,16 @@ async def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # NEW: Least Skills Security
         assigned_skills = task.get("assigned_skills", [])
-        manifest = create_ephemeral_manifest(task_id, assigned_skills)
+        manifest = create_ephemeral_manifest(execution_id, assigned_skills)
         register_manifest(manifest)
         
         execution_id = state.get("execution_id")
         
         # Build tool schemas for LLM
+        assigned_skills = list(task.get("assigned_skills", []))
+        if skill_hint and skill_hint not in assigned_skills:
+            assigned_skills.append(skill_hint)
+            
         tools = None
         if assigned_skills:
             # We map assigned_skills (Markdown skill stems) to tools
@@ -610,6 +644,9 @@ Do this sparingly and only for significant knowledge gaps."""
             handover_summary = "\n".join([f"- {k}: {v}" for k, v in context_handover.items()])
             system_prompt += f"\n\nCONTEXT FROM PREVIOUS WAVES:\n{handover_summary}"
 
+        # Standardized workspace reference for Operating Manual augmentation
+        system_prompt += f"\n\nRef: workspace:{workspace_id}"
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Execute this task:\n\n{description}"}
@@ -632,7 +669,8 @@ Do this sparingly and only for significant knowledge gaps."""
                 model=model,
                 messages=messages,
                 temperature=0.7,
-                run_id=execution_id
+                run_id=execution_id,
+                authorized_tools=assigned_skills
             )
             
             # Extract content and thinking
@@ -660,8 +698,10 @@ Do this sparingly and only for significant knowledge gaps."""
             # but ensure we track it manually.
             
             model_cfg = get_model_config(model)
+            litellm_model = normalize_model_string(model)
+            
             raw_payload = {
-                "model": model_cfg["model"],
+                "model": litellm_model,
                 "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 3000
@@ -674,7 +714,22 @@ Do this sparingly and only for significant knowledge gaps."""
                 raw_payload["tools"] = tools
 
             response = await acompletion(**raw_payload)
-            message = response.choices[0].message
+            
+            # Robust content/message extraction
+            if hasattr(response, "choices") and len(response.choices) > 0:
+                message = response.choices[0].message
+            elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
+                choice = response["choices"][0]
+                if isinstance(choice, dict):
+                    message = choice.get("message")
+                else:
+                    message = choice.message
+            else:
+                logger.warning(f"Swarm executor: Response missing 'choices' block from {model}")
+                # Fallback to creating a dummy message from the raw response
+                from langchain_core.messages import AIMessage
+                message = AIMessage(content=str(response))
+
             messages.append(message)
 
             if hasattr(message, "tool_calls") and message.tool_calls:
@@ -687,10 +742,10 @@ Do this sparingly and only for significant knowledge gaps."""
                         args = {}
                     
                     # Execute skill with Least Skill agent_id
-                    result_str = registry.execute_skill(
+                    result_str = await registry.execute_skill(
                         func_name, 
                         workspace_id,
-                        agent_id=f"task_{task_id}",
+                        agent_id=execution_id,
                         **args
                     )
                     executed_tools.append({"name": func_name, "args": args})

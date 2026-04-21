@@ -475,7 +475,8 @@ async def call_model(
     max_tokens: int = 1000,
     fallbacks: Optional[List[str]] = None,
     timeout: Optional[float] = None,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
+    authorized_tools: Optional[List[str]] = None
 ) -> str:
     """
     Call LLM with fallback support.
@@ -523,7 +524,7 @@ async def call_model(
                 workspace_id = match.group(1)
                 break
     
-    augmentation = build_system_prompt_augmentation(workspace_id)
+    augmentation = build_system_prompt_augmentation(workspace_id, tools=authorized_tools)
     if augmentation:
         # Find the system prompt and prepend to it, or create one if missing
         system_found = False
@@ -633,10 +634,39 @@ async def call_model(
             return response
         
         # Emit Resource Usage for UI
-        content = response.choices[0].message.content
+        content = ""
+        print(f"DEBUG: call_model response type: {type(response)}")
         try:
-             usage = response.get("usage", {})
-             duration_ms = response.get("response_ms", 0) # litellm sometimes provides this
+            if hasattr(response, "choices") and len(response.choices) > 0:
+                print(f"DEBUG: Found choices attribute with length {len(response.choices)}")
+                content = response.choices[0].message.content
+            elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
+                print(f"DEBUG: Found choices key in dict with length {len(response['choices'])}")
+                choice = response["choices"][0]
+                if isinstance(choice, dict):
+                    content = choice.get("message", {}).get("content", "")
+                else:
+                    content = getattr(choice, "message", choice).content
+            elif isinstance(response, str):
+                print("DEBUG: Response is a plain string")
+                content = response
+            else:
+                # Fallback for structured logs or error dicts
+                logger.warning(f"Response missing 'choices' block. Response type: {type(response)}")
+                print(f"DEBUG: Response missing choices. Raw: {str(response)[:200]}")
+                content = str(response)
+        except Exception as ce:
+            print(f"DEBUG: EXCEPTION during content extraction: {ce}")
+            content = str(response)
+
+        try:
+             # Safe usage extraction
+             if hasattr(response, "get"):
+                 usage = response.get("usage", {})
+                 duration_ms = response.get("response_ms", 0)
+             else:
+                 usage = getattr(response, "usage", {})
+                 duration_ms = getattr(response, "response_ms", 0)
              
              # Convert LiteLLM Usage object to dict for JSON serialization
              usage_data = usage if isinstance(usage, dict) else (usage.model_dump() if hasattr(usage, 'model_dump') else dict(usage))

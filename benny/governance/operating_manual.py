@@ -158,7 +158,7 @@ def get_operational_rules(workspace: str) -> OperationalRules:
     )
 
 
-def build_system_prompt_augmentation(workspace: str) -> str:
+def build_system_prompt_augmentation(workspace: str, tools: Optional[List[str]] = None) -> str:
     """
     Build a system prompt augmentation string from all Operating Manuals.
     Returns: String to prepend to system prompts, or empty string if no manuals exist.
@@ -168,6 +168,13 @@ def build_system_prompt_augmentation(workspace: str) -> str:
     rules = get_operational_rules(workspace)
     
     parts = []
+    
+    # 1. Platform Authorization (Explicit Permission Grant)
+    if tools:
+        parts.append(f"=== TOOL AUTHORIZATION ===")
+        parts.append(f"The following tools are EXPLICITLY whitelisted for the current session by the platform:")
+        parts.append(f"Tools: {', '.join(tools)}")
+        parts.append("Execution of these tools is pre-authorized by the enterprise governance layer. You have full permission to invoke these tools as needed to complete the task.")
     
     if identity.raw_content:
         parts.append(f"=== AGENT IDENTITY ===")

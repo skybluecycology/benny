@@ -129,7 +129,7 @@ async def ingest_files(request: IngestRequest):
                 
                 # Emit AER for extraction
                 try:
-                    track_aer(run_id, "rag_ingest", f"Extracting {file_path.name}", "Docling engine started")
+                    track_aer(run_id, "rag_ingest", request.workspace, f"Extracting {file_path.name}", "Docling engine started")
                 except Exception:
                     pass
                 text = extract_structured_text(file_path)
@@ -164,7 +164,7 @@ async def ingest_files(request: IngestRequest):
                             "indexed_count": i + len(batch_chunks)
                         })
                         try:
-                            track_aer(run_id, "rag_ingest", f"Committing chunks for {file_path.name}", f"Committed {i+len(batch_chunks)}/{len(chunks)} chunks ({perc:.0f}%)")
+                            track_aer(run_id, "rag_ingest", request.workspace, f"Committing chunks for {file_path.name}", f"Committed {i+len(batch_chunks)}/{len(chunks)} chunks ({perc:.0f}%)")
                         except Exception:
                             pass
                 
@@ -174,11 +174,11 @@ async def ingest_files(request: IngestRequest):
                         from ..synthesis.engine import extract_triples
                         from ..graph.triples import save_knowledge_triples
                         
-                        track_aer(run_id, "rag_ingest", f"Deep Synthesis for {file_path.name}", "Extracting triples via LLM Engine")
+                        track_aer(run_id, "rag_ingest", request.workspace, f"Deep Synthesis for {file_path.name}", "Extracting triples via LLM Engine")
                         task_manager.update_task(run_id, metadata={"stage": "SYNTHESIZING", "current_file": file_path.name})
                         
-                        # Process text in batches if very large, but for now we'll take top 10k chars
-                        sample_text = text[:10000] 
+                        # Process text in batches if very large, but for now we'll take top 30k chars
+                        sample_text = text[:30000] 
                         triples = await extract_triples(
                             sample_text, 
                             source_name=file_path.name, 
@@ -189,7 +189,7 @@ async def ingest_files(request: IngestRequest):
                         
                         if triples:
                             await save_knowledge_triples(request.workspace, triples, file_path.name)
-                            track_aer(run_id, "rag_ingest", f"Synthesis complete for {file_path.name}", f"Extracted {len(triples)} triples")
+                            track_aer(run_id, "rag_ingest", request.workspace, f"Synthesis complete for {file_path.name}", f"Extracted {len(triples)} triples")
                             
                             # 3b. Generate Librarian Wiki Article (Karpathy-style)
                             try:
@@ -207,12 +207,12 @@ async def ingest_files(request: IngestRequest):
                                     relationships=[t.model_dump() for t in triples[:10]],
                                     source_files=[file_path.name]
                                 )
-                                track_aer(run_id, "rag_ingest", f"Wiki Generated", f"Saved Rationale Hub to {primary_concept}.md")
+                                track_aer(run_id, "rag_ingest", request.workspace, f"Wiki Generated", f"Saved Rationale Hub to {primary_concept}.md")
                             except Exception as wiki_e:
                                 logger.error(f"Wiki generation error: {wiki_e}")
                     except Exception as synth_e:
                         logger.error(f"Deep Synthesis error: {synth_e}")
-                        track_aer(run_id, "rag_ingest", f"Synthesis failed for {file_path.name}", str(synth_e))
+                        track_aer(run_id, "rag_ingest", request.workspace, f"Synthesis failed for {file_path.name}", str(synth_e))
 
                 ingested.append({"file": file_path.name, "chunks": len(chunks)})
                 task_manager.update_task(run_id, progress=10 + int(80 * (idx+1) / len(file_paths)))
@@ -227,15 +227,15 @@ async def ingest_files(request: IngestRequest):
                 from ..graph.clustering_service import ClusteringService
                 from ..synthesis.correlation import run_full_correlation_suite
                 
-                track_aer(run_id, "rag_ingest", "Running Topological Clustering", "Community detection started (LPA)")
+                track_aer(run_id, "rag_ingest", request.workspace, "Running Topological Clustering", "Community detection started (LPA)")
                 task_manager.update_task(run_id, metadata={"stage": "CLUSTERING"})
-                cluster_results = ClusteringService.run_lpa_on_workspace(request.workspace)
+                cluster_results = await ClusteringService.run_lpa_on_workspace(request.workspace)
                 
-                track_aer(run_id, "rag_ingest", "Running Knowledge-to-Code Correlation", "Cross-linking Concepts and Symbols")
+                track_aer(run_id, "rag_ingest", request.workspace, "Running Knowledge-to-Code Correlation", "Cross-linking Concepts and Symbols")
                 task_manager.update_task(run_id, metadata={"stage": "CORRELATING"})
                 correlation_results = await run_full_correlation_suite(request.workspace, threshold=request.correlation_threshold)
                 
-                track_aer(run_id, "rag_ingest", "Deep Processing complete", 
+                track_aer(run_id, "rag_ingest", request.workspace, "Deep Processing complete", 
                           f"Clusters: {cluster_results.get('communities_found', 0)}, " 
                           f"Safe Links: {correlation_results.get('safe_links', 0)}, "
                           f"Aggressive Links: {correlation_results.get('aggressive_links', 0)}")

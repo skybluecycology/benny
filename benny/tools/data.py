@@ -2,7 +2,7 @@
 Data Processing Tools - PDF extraction and CSV querying
 """
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from pathlib import Path
 import pandas as pd
 

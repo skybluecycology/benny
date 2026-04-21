@@ -16,9 +16,9 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     """
     driver = get_driver()
     
-    # 1. Create the Source Document node if it doesn't exist
+    # 1. Create the Source document node if it doesn't exist
     source_query = """
-    MERGE (d:Document {name: $name, workspace: $workspace})
+    MERGE (d:Source {name: $name, workspace: $workspace})
     ON CREATE SET d.created_at = timestamp()
     ON MATCH SET  d.updated_at = timestamp()
     RETURN d
@@ -27,7 +27,7 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     # 2. Add each triple
     # Note: We use MERGE for concepts to deduplicate them by name+workspace
     triple_query = """
-    MATCH (d:Document {name: $source, workspace: $workspace})
+    MATCH (d:Source {name: $source, workspace: $workspace})
 
     MERGE (s:Concept {name: $subject, workspace: $workspace})
     ON CREATE SET s.type = $subject_type, s.created_at = timestamp()
@@ -58,8 +58,8 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
         r.doc_fragment_id = $doc_fragment_id,
         r.updated_at     = timestamp()
 
-    MERGE (d)-[:CONTAINS]->(s)
-    MERGE (d)-[:CONTAINS]->(o)
+    MERGE (s)-[:SOURCED_FROM]->(d)
+    MERGE (o)-[:SOURCED_FROM]->(d)
     """
 
     with driver.session() as session:

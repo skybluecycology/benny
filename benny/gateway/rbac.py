@@ -140,6 +140,16 @@ def _create_default_policy() -> RBACPolicy:
                 allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
                 allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
             ),
+            ToolPermission(
+                tool_id="rag_ingest",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="kg3d_ingest",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
         ],
         rate_limits={
             AgentRole.VIEWER: 30,

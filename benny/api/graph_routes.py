@@ -6,10 +6,12 @@ real-time graph data for the 3D visualization, and SSE progress streaming.
 """
 
 import asyncio
+import anyio
 import hashlib
 import json
 import logging
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
@@ -540,19 +542,24 @@ async def generate_code_graph(request: CodeGraphGenerateRequest, background_task
     manifest = load_manifest(request.workspace)
     deep_scan = getattr(manifest, "deep_scan", True)
 
-    def _run_analyzer():
+    async def _run_analyzer():
         try:
             # We use the actual workspace path
             ws_path = get_workspace_path(request.workspace)
-            analyzer = CodeGraphAnalyzer(str(ws_path))
-            analyzer.analyze_workspace(request.root_dir, deep_scan=deep_scan)
-            # Save as a distinct snapshot
-            analyzer.save_to_neo4j(request.workspace, run_id, name=request.name)
+            
+            # Offload CPU-bound analyzer to a thread
+            def _analyze():
+                analyzer = CodeGraphAnalyzer(str(ws_path))
+                analyzer.analyze_workspace(request.root_dir, deep_scan=deep_scan)
+                # Save as a distinct snapshot
+                analyzer.save_to_neo4j(request.workspace, run_id, name=request.name)
+            
+            await anyio.to_thread.run_sync(_analyze)
             
             # --- PHASE 3: TOPOLOGICAL LOGIC (LPA Clustering) ---
             try:
                 from ..graph.clustering_service import ClusteringService
-                ClusteringService.run_lpa_on_workspace(request.workspace)
+                await ClusteringService.run_lpa_on_workspace(request.workspace)
                 logger.info(f"Clustering complete for {request.workspace}")
             except Exception as ce:
                 logger.error(f"Clustering failed: {ce}")
@@ -814,27 +821,61 @@ async def _background_ingest_files(
 
     try:
         data_in_path = get_workspace_path(workspace, "data_in")
-
-        for file_idx, filename in enumerate(files):
-            # Sanitize filename to prevent path traversal
-            safe_filename = re.sub(r'[^\w\-._]', '_', filename)
-            file_path = data_in_path / filename
-            if not file_path.exists():
-                logger.warning("File not found: %s", filename)
+        staging_path = get_workspace_path(workspace, "staging")
+        
+        # Step 0: Expand directories and resolve paths
+        to_process = []
+        workspace_root = get_workspace_path(workspace)
+        for f in files:
+            # Check path relative to workspace root first
+            p = workspace_root / f
+            if not p.exists():
+                # Fallback to subdirectories if f is just a filename
+                p = data_in_path / f
+                if not p.exists():
+                    p = staging_path / f
+            
+            if not p.exists():
+                logger.warning("File or directory not found: %s", f)
                 continue
+            
+            if p.is_dir():
+                logger.info("Expanding directory: %s", f)
+                for item in p.rglob("*"):
+                    if item.is_file() and item.suffix.lower() in ['.md', '.txt', '.pdf']:
+                        to_process.append(item)
+            else:
+                to_process.append(p)
+
+        if not to_process:
+            logger.warning("No eligible files found for ingestion.")
+            await event_callback(IngestionEvent(
+                event=IngestionEventType.COMPLETED,
+                run_id=run_id,
+                message="Ingestion complete: 0 file(s) processed (no eligible files found)",
+                data={"files_processed": 0}
+            ))
+            return
+
+        for file_idx, file_path in enumerate(to_process):
+            filename = file_path.name
+            
+            # Determine if this file is in the staging area
+            is_staged = staging_path in file_path.parents
 
             # Step 1: Extract structured text via Docling
+            # content = extract_structured_text(file_path) # Wait, it was duplicated in original
             text = extract_structured_text(file_path)
 
-            content = extract_structured_text(file_path)
-
-            if not content.strip():
+            if not text.strip():
                 logger.warning("No content extracted from %s", filename)
                 continue
 
             # Step 2: Process to graph
+            # We use the filename as source_name. 
+            # Note: We align the DB with the final data_in location by using the filename
             file_result = await _process_content_to_graph(
-                text=content,
+                text=text,
                 source_name=filename,
                 workspace=workspace,
                 provider=provider,
@@ -848,6 +889,21 @@ async def _background_ingest_files(
                 event_callback=_emit_event,
                 name=name
             )
+            
+            # Step 3: Lifecycle Management - Move from staging to data_in on success
+            if file_result.get("status") == "ingested" and is_staged:
+                try:
+                    dest_path = data_in_path / filename
+                    # Ensure we don't overwrite if it somehow exists (or we do?)
+                    if dest_path.exists():
+                        import time
+                        dest_path = data_in_path / f"{int(time.time())}_{filename}"
+                    
+                    shutil.move(str(file_path), str(dest_path))
+                    logger.info("Successfully moved %s to data_in", filename)
+                except Exception as move_err:
+                    logger.error("Failed to move %s to data_in: %s", filename, move_err)
+
             results.append({
                 "file": filename,
                 "status": file_result.get("status"),
@@ -855,7 +911,7 @@ async def _background_ingest_files(
             })
             
             # Update TaskManager Progress
-            progress = int((file_idx + 1) / len(files) * 100)
+            progress = int((file_idx + 1) / len(to_process) * 100)
             task_manager.update_task(run_id, progress=progress, message=f"Processed {file_idx+1}/{len(files)}: {filename}")
 
         await event_callback(IngestionEvent(
@@ -877,6 +933,7 @@ async def _background_ingest_files(
             0,
             outputs=[f"graph_run_{run_id}"]
         )
+        return results
 
     except Exception as e:
         logger.error("Background ingestion failed: %s", e, exc_info=True)

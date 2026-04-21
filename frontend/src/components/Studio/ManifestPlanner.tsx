@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Sparkles, FileText, Play, Download, Loader } from 'lucide-react';
+import { X, Sparkles, FileText, Play, Download, Loader, Upload } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import ManifestCanvas from './ManifestCanvas';
 import type { OutputFormat } from '../../types/manifest';
@@ -26,7 +26,11 @@ export default function ManifestPlanner() {
     isPlanning,
     isRunning,
     planError,
+    setCurrentManifest,
+    saveManifest,
   } = useWorkflowStore();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [requirement, setRequirement] = useState('');
   const [name, setName] = useState('');
@@ -78,6 +82,37 @@ export default function ManifestPlanner() {
     URL.revokeObjectURL(url);
   };
 
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string);
+        
+        // Basic validation: does it look like a manifest?
+        if (!data.id || !data.plan) {
+          alert('Invalid manifest: Must contain "id" and "plan" fields.');
+          return;
+        }
+
+        // Set in state (designer will react)
+        setCurrentManifest(data);
+        
+        // Optionally save to backend so it persists
+        await saveManifest(data);
+        
+        alert('Manifest imported to designer.');
+      } catch (error) {
+        alert('Failed to parse manifest. Please ensure it is valid JSON.');
+        console.error('Import error:', error);
+      }
+    };
+    reader.readAsText(file);
+    if (event.target) event.target.value = '';
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -92,18 +127,35 @@ export default function ManifestPlanner() {
           <h2 className="text-sm font-medium text-white">Manifest Planner</h2>
           <span className="text-xs text-white/40">plan → approve → run</span>
         </div>
-        <button
-          onClick={() => setManifestPanelOpen(false)}
-          className="rounded p-1 text-white/50 hover:bg-white/10 hover:text-white"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setManifestPanelOpen(false)}
+            className="rounded p-1 text-white/50 hover:bg-white/10 hover:text-white"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
         {/* LEFT: planner form */}
         <div className="w-[380px] border-r border-white/10 p-5 overflow-y-auto">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="mb-5 flex w-full items-center justify-center gap-2 rounded border border-white/15 bg-white/5 py-2.5 text-xs font-bold text-[#00FFFF] shadow-[0_0_10px_rgba(0,255,255,0.1)] hover:bg-[#00FFFF]/10 hover:shadow-[0_0_20px_rgba(0,255,255,0.2)] transition-all uppercase tracking-widest"
+          >
+            <Upload size={14} />
+            Import Manifest JSON
+          </button>
+
           <label className="block text-xs font-medium text-white/70 mb-1">Requirement</label>
           <textarea
             value={requirement}

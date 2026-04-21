@@ -78,7 +78,7 @@ class RemixServer:
         """Get OpenAI function-calling schemas for available tools."""
         return [s.to_openai_tool_schema() for s in self.available_skills]
     
-    def execute(
+    async def execute(
         self,
         tool_id: str,
         workspace: str,
@@ -135,7 +135,7 @@ class RemixServer:
         # Execute the tool
         self._call_count += 1
         try:
-            output = registry.execute_skill(tool_id, workspace, **kwargs)
+            output = await registry.execute_skill(tool_id, workspace, **kwargs)
             return RemixExecutionResult(
                 success=True,
                 tool_id=tool_id,

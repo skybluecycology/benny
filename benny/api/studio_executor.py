@@ -442,7 +442,7 @@ async def execute_llm_node(node: StudioNode, context: Dict, workspace: str, run_
                         tool_args = {}
 
                     # Execute the skill with Nexus scoping
-                    result_str = registry.execute_skill(
+                    result_str = await registry.execute_skill(
                         skill_id=func_name, 
                         workspace=workspace,
                         agent_role="executor", 

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { FileText, Plus, Trash2, Loader, Zap, History, PlayCircle, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { FileText, Plus, Trash2, Loader, Zap, History, PlayCircle, CheckCircle2, XCircle, Clock, Upload } from 'lucide-react';
 import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
@@ -116,10 +116,66 @@ export default function WorkflowList({ mode: initialMode = 'flows' }: WorkflowLi
     }
   }
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string);
+        
+        // Ensure it has an ID
+        if (!data.id) {
+          data.id = `imported_${Date.now()}`;
+        }
+        if (!data.name) {
+          data.name = file.name.replace('.json', '');
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/workflows`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(GOVERNANCE_HEADERS as any)
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          alert('Manifest imported successfully!');
+          fetchWorkflows();
+        } else {
+          try {
+            const errorData = await response.json();
+            alert(`Failed to import: ${errorData.detail || 'Unknown error'}`);
+          } catch {
+            alert('Failed to import manifest. Server returned an error.');
+          }
+        }
+      } catch (error) {
+        alert('Failed to parse file. Please ensure it is valid JSON.');
+        console.error('Import error:', error);
+      }
+    };
+    reader.readAsText(file);
+    if (event.target) event.target.value = '';
+  };
+
   return (
     <div className="workflow-sidebar-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Sub-tabs for the sidebar section */}
-      <div style={{ display: 'flex', padding: '8px 16px', gap: '4px', borderBottom: '1px solid var(--border-color)' }}>
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleImport}
+        style={{ display: 'none' }}
+      />
+      {/* Sub-tabs for the sidebar section (Pinned) */}
+      <div style={{ display: 'flex', padding: '8px 16px', gap: '4px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-panel-v2)', zIndex: 20 }}>
         <button 
           className={`tab-btn ${mode === 'flows' ? 'active' : ''}`}
           onClick={() => setMode('flows')}
@@ -144,8 +200,9 @@ export default function WorkflowList({ mode: initialMode = 'flows' }: WorkflowLi
         </button>
       </div>
 
-      <div className="workflow-list-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1 }}>
-        {mode !== 'runs' && (
+      {/* Main Action Buttons (Pinned) */}
+      {mode !== 'runs' && (
+        <div style={{ padding: '16px 16px 8px 16px', display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-panel-v2)', zIndex: 10 }}>
           <button
             className="btn btn-gradient"
             onClick={() => { setSelectedId(null); setNodes([]); setEdges([]); }}
@@ -154,7 +211,19 @@ export default function WorkflowList({ mode: initialMode = 'flows' }: WorkflowLi
             <Plus size={16} />
             {mode === 'agents' ? 'Create New Agent' : 'New Workflow'}
           </button>
-        )}
+          <button
+            className="btn btn-outline"
+            onClick={() => fileInputRef.current?.click()}
+            style={{ width: '100%', gap: '8px' }}
+          >
+            <Upload size={16} />
+            Import {mode === 'agents' ? 'Agent' : 'Manifest'}
+          </button>
+        </div>
+      )}
+
+      <div className="workflow-list-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1 }}>
+
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {loading ? (

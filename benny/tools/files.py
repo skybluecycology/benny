@@ -2,7 +2,7 @@
 File Tools - Read/write files with workspace scoping
 """
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from pathlib import Path
 from typing import List
 

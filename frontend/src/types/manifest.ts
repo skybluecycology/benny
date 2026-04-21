@@ -136,35 +136,60 @@ export function manifestToCanvas(
   manifest: SwarmManifest,
   runOverlay?: RunRecord | null,
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  // Resilience: handle tasks as either an array or an object
+  const rawTasks = manifest.plan?.tasks || [];
+  const taskList: ManifestTask[] = Array.isArray(rawTasks)
+    ? rawTasks
+    : Object.entries(rawTasks).map(([id, t]: [string, any]) => ({
+        ...t,
+        id: t.id || id,
+      }));
+
+  // Resilience: Derive wave index from plan.waves if not explicitly on the task
   const waveOf: Record<string, number> = {};
-  manifest.plan.tasks.forEach((t) => {
-    waveOf[t.id] = t.wave ?? 0;
+  if (manifest.plan && Array.isArray(manifest.plan.waves)) {
+    manifest.plan.waves.forEach((waveTasks, waveIdx) => {
+      if (Array.isArray(waveTasks)) {
+        waveTasks.forEach((id) => {
+          waveOf[id] = waveIdx;
+        });
+      }
+    });
+  }
+  
+  // Fallback for tasks not in plan.waves
+  taskList.forEach((t) => {
+    if (waveOf[t.id] === undefined) {
+      waveOf[t.id] = t.wave ?? 0;
+    }
   });
 
   // Count tasks per wave so we can stack them vertically.
   const perWave: Record<number, number> = {};
   const yIndex: Record<string, number> = {};
-  manifest.plan.tasks.forEach((t) => {
+  taskList.forEach((t) => {
     const w = waveOf[t.id] ?? 0;
     yIndex[t.id] = perWave[w] ?? 0;
     perWave[w] = (perWave[w] ?? 0) + 1;
   });
 
-  const nodes: CanvasNode[] = manifest.plan.tasks.map((t) => {
+  const nodes: CanvasNode[] = taskList.map((t) => {
     const overlayStatus = runOverlay?.node_states?.[t.id];
     const status = overlayStatus ?? t.status ?? 'pending';
+    const wave = waveOf[t.id] ?? 0;
+
     return {
       id: t.id,
       type: nodeTypeForTask(t),
       position:
         t.position ?? {
-          x: (waveOf[t.id] ?? 0) * WAVE_WIDTH,
+          x: wave * WAVE_WIDTH,
           y: (yIndex[t.id] ?? 0) * ROW_HEIGHT,
         },
       data: {
         label: t.description || t.id,
         task_id: t.id,
-        wave: t.wave,
+        wave,
         depth: t.depth,
         is_pillar: t.is_pillar,
         skill_hint: t.skill_hint,
@@ -179,13 +204,20 @@ export function manifestToCanvas(
     };
   });
 
-  const edges: CanvasEdge[] = manifest.plan.edges.map((e, i) => ({
-    id: e.id ?? `e_${e.source}_${e.target}_${i}`,
-    source: e.source,
-    target: e.target,
-    animated: e.animated ?? true,
-    label: e.label ?? undefined,
-  }));
+  // Resilience: handle edges as objects {source, target} or arrays [source, target]
+  const edges: CanvasEdge[] = (manifest.plan.edges || []).map((e: any, i: number) => {
+    const isArr = Array.isArray(e);
+    const source = isArr ? e[0] : (e.source || '');
+    const target = isArr ? e[1] : (e.target || '');
+    
+    return {
+      id: (e as any).id ?? `e_${source}_${target}_${i}`,
+      source,
+      target,
+      animated: (e as any).animated ?? true,
+      label: (e as any).label ?? undefined,
+    };
+  });
 
   return { nodes, edges };
 }

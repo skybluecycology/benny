@@ -2,12 +2,13 @@
 Knowledge Tools - ChromaDB-based semantic search capabilities
 """
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from typing import Optional, List
 import chromadb
 from chromadb.config import Settings
 
 from ..core.workspace import get_workspace_path, smart_output
+from ..core.embeddings import LocalEmbeddingFunction
 
 
 def get_chromadb_client(workspace_id: str = "default") -> chromadb.PersistentClient:
@@ -40,7 +41,8 @@ def search_knowledge_workspace(
     """
     try:
         client = get_chromadb_client(workspace)
-        collection = client.get_or_create_collection("knowledge")
+        embedding_function = LocalEmbeddingFunction()
+        collection = client.get_or_create_collection("knowledge", embedding_function=embedding_function)
         
         if collection.count() == 0:
             return "📭 Knowledge base is empty. Ingest documents first."
@@ -89,7 +91,8 @@ def list_available_documents(workspace: str = "default") -> str:
     """
     try:
         client = get_chromadb_client(workspace)
-        collection = client.get_or_create_collection("knowledge")
+        embedding_function = LocalEmbeddingFunction()
+        collection = client.get_or_create_collection("knowledge", embedding_function=embedding_function)
         
         if collection.count() == 0:
             return "📭 No documents in knowledge base."
@@ -126,7 +129,8 @@ def read_full_document(document_name: str, workspace: str = "default") -> str:
     """
     try:
         client = get_chromadb_client(workspace)
-        collection = client.get_or_create_collection("knowledge")
+        embedding_function = LocalEmbeddingFunction()
+        collection = client.get_or_create_collection("knowledge", embedding_function=embedding_function)
         
         # Get all chunks for this document
         all_data = collection.get(

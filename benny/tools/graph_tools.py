@@ -5,7 +5,7 @@ These tools allow autonomous Benny agents in LangGraph workflows to
 read from and write to the structural long-term memory.
 """
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from typing import Optional, List
 import json
 

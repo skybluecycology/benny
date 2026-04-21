@@ -137,6 +137,11 @@ async def plan_from_requirement(
         manifest.name = name
     if output_spec:
         manifest.outputs = output_spec
+    
+    # Mark as planned and approved so execute_manifest can bypass macro-planner
+    manifest.metadata["execution_status"] = "planned"
+    manifest.metadata["plan_approved"] = True
+    
     manifest.touch()
 
     return manifest
@@ -177,12 +182,23 @@ async def execute_manifest(
         max_depth=manifest.config.max_depth,
         handover_summary_limit=manifest.config.handover_summary_limit,
     )
+    
+    # NEW: Register with TaskManager so aero/telemetry works
+    from ..core.task_manager import task_manager
+    task_manager.create_task(
+        workspace=manifest.workspace,
+        task_type="swarm_workflow",
+        task_id=run_id
+    )
+
     # Overlay the manifest's pre-built plan/dep_graph/waves so the planner
     # doesn't re-generate them.
     state["plan"] = seed["plan"]
     state["active_task_pool"] = list(seed["plan"])
     state["dependency_graph"] = seed["dependency_graph"]
     state["waves"] = seed["waves"]
+    state["plan_approved"] = manifest.metadata.get("plan_approved", True)
+    state["status"] = manifest.metadata.get("execution_status", "planning")
 
     # Persist pending run record before we start.
     from ..persistence.run_store import save_run, update_run_status
@@ -205,7 +221,10 @@ async def execute_manifest(
     }
 
     try:
-        result = await graph.ainvoke(state, thread_config)
+        # Increase recursion limit to support deep synthesis (PBR-001 §5.2)
+        config = thread_config.copy()
+        config["recursion_limit"] = 100
+        result = await graph.ainvoke(state, config)
     except Exception as e:
         logger.exception("execute_manifest: run %s failed", run_id)
         update_run_status(run_id, RunStatus.FAILED, errors=[str(e)])

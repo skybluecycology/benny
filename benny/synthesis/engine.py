@@ -295,7 +295,10 @@ async def call_llm(
                 )
                 await asyncio.sleep(delay)
             else:
-                logger.error("LLM call failed after %d attempts: %s", cfg.max_retries, e)
+                logger.error("LLM call failed after %d attempts for role '%s': %s", cfg.max_retries, role, last_error)
+                if run_id:
+                     from ..core.task_manager import task_manager
+                     task_manager.add_aer_entry(run_id, intent=f"LLM Call ({role})", observation="Final retry failed", inference=str(last_error))
 
     raise last_error
 
@@ -311,13 +314,18 @@ def _parse_json_from_llm(text: str) -> Tuple[Any, str]:
     Now returns (parsed_data, thinking_string).
     """
     thinking = ""
-    # Extract think blocks (common in DeepSeek-R1 and similar reasoning models)
-    think_match = re.search(r'<think>(.*?)(?:</think>|$)', text, re.DOTALL)
-    if think_match:
-        thinking = think_match.group(1).strip()
-    
-    # Strip think blocks for JSON cleaning
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    # Extract and strip all think blocks (handles multiple or nested blocks better)
+    cleaned = text
+    think_blocks = re.findall(r'<think>(.*?)</think>', cleaned, re.DOTALL)
+    if think_blocks:
+        thinking = "\n---\n".join([t.strip() for t in think_blocks])
+        cleaned = re.sub(r'<think>.*?</think>', '', cleaned, flags=re.DOTALL).strip()
+    else:
+        # Fallback for unclosed think block
+        think_match = re.search(r'<think>(.*)', cleaned, re.DOTALL)
+        if think_match:
+            thinking = think_match.group(1).strip()
+            cleaned = re.sub(r'<think>.*', '', cleaned, flags=re.DOTALL).strip()
 
     # Strip markdown code fences
     if cleaned.startswith("```"):
@@ -459,7 +467,7 @@ async def extract_triples(
     cfg = config or SynthesisConfig()
     
     # Choose prompt
-    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=text[:10000]) # Adaptive limit for safety
+    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=text[:40000]) # Increased limit for deeper synthesis
 
     try:
         # Resolve model_id to track provenance
@@ -469,13 +477,13 @@ async def extract_triples(
         # Pass workspace and role to ensure manifest-level model selection
         raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg, role="graph_synthesis")
         
-        # Simple extraction of JSON block from LLM output
-        json_match = re.search(r'\[.*\]', raw, re.DOTALL)
-        if not json_match:
-            logger.warning(f"No JSON array found in LLM response for {source_name}")
-            return []
-            
-        triples_data = json.loads(json_match.group(0))
+        # Robustly parse JSON and capture any reasoning/thinking blocks
+        triples_data, thinking = _parse_json_from_llm(raw)
+        
+        if thinking and run_id:
+             from ..core.task_manager import task_manager
+             task_manager.add_aer_entry(run_id, intent=f"Synthesis extraction for {source_name}", observation="Reasoning detected", inference=thinking)
+
         return _validate_and_convert_triples(
             triples_data, 
             section_title=source_name, 
@@ -579,10 +587,13 @@ async def parallel_extract_triples(
     direction: str = "",
     provider: str = "lemonade",
     model: str = None,
+    parallel_limit: Optional[int] = None,
+    inference_delay: float = 0.5,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     event_callback: Optional[Any] = None,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
+    **kwargs  # Handle any unexpected arguments from stale callers
 ) -> List[KnowledgeTriple]:
     """
     Process multiple document sections in parallel for high-performance ingestion.
@@ -757,7 +768,13 @@ async def cross_domain_analogy(
 # B. CONCEPTUAL CLUSTER - Dual-Model Embedding
 # =============================================================================
 
-async def get_embedding(text: str, provider: str = "local", model: str = None) -> List[float]:
+async def get_embedding(
+    text: str, 
+    provider: str = "local", 
+    model: str = None,
+    workspace: Optional[str] = None,
+    role: str = "graph_synthesis"
+) -> List[float]:
     """
     Get a vector embedding for text using either a local or cloud provider.
     
@@ -767,7 +784,20 @@ async def get_embedding(text: str, provider: str = "local", model: str = None) -
     """
     if provider == "openai":
         return await _get_openai_embedding(text, model or "text-embedding-3-small")
-    elif provider == "ollama" or provider == "local":
+    
+    # Resolve 'local' to the actual active provider if possible
+    if provider == "local":
+        try:
+            from ..core.models import get_active_model
+            active_id = await get_active_model(workspace_id=workspace or "default", role="graph_synthesis")
+            if "/" in active_id:
+                provider = active_id.split("/")[0]
+            else:
+                provider = "lemonade" # Default fallback for local
+        except Exception as e:
+            provider = "ollama" # Final fallback
+
+    if provider == "ollama":
         return await _get_ollama_embedding(text, model or "nomic-embed-text")
     else:
         # For 'lemonade', 'fastflowlm', or other OpenAI-compatible local endpoints
@@ -838,29 +868,21 @@ async def batch_embed_concepts(
         nonlocal completed
         async with semaphore:
             try:
-                emb = await get_embedding(concept, provider=provider, model=model)
-                results[concept] = emb
-            except Exception as e:
-                logger.warning("Embedding failed for '%s': %s", concept, str(e)[:100])
-            finally:
+                embedding = await get_embedding(concept, provider=provider, model=model)
+                results[concept] = embedding
                 completed += 1
-                if event_callback and completed % 10 == 0:
+                if event_callback:
                     await event_callback(IngestionEvent(
-                        event=IngestionEventType.EMBEDDING_PROGRESS,
+                        event=IngestionEventType.SECTION_PROGRESS,
                         message=f"Embedded {completed}/{total} concepts",
-                        data={"completed": completed, "total": total}
+                        data={"current": completed, "total": total}
                     ))
+            except Exception as e:
+                logger.error(f"Failed to embed concept '{concept}': {e}")
+                results[concept] = [] # Fallback empty embedding
 
-    tasks = [embed_one(concept) for concept in concepts]
+    tasks = [embed_one(c) for c in concepts]
     await asyncio.gather(*tasks)
-
-    if event_callback:
-        await event_callback(IngestionEvent(
-            event=IngestionEventType.EMBEDDING_PROGRESS,
-            message=f"Embedding complete: {len(results)}/{total} concepts",
-            data={"completed": len(results), "total": total}
-        ))
-
     return results
 
 

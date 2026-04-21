@@ -516,7 +516,7 @@ class BennyLineageClient:
         job_name: str,
         workspace: str,
         intent: str,
-        observation: str,
+        observation: str = "",
         inference: str = "",
         plan: str = ""
     ) -> None:
@@ -718,7 +718,7 @@ def track_aer(
     job_name: str,
     workspace: str,
     intent: str,
-    observation: str,
+    observation: str = "",
     inference: str = "",
     plan: str = ""
 ) -> None:

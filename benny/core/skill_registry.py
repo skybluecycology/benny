@@ -172,6 +172,27 @@ BUILTIN_SKILLS: List[Skill] = [
             SkillParameter("query", "string", "The Cypher query to execute"),
         ],
     ),
+    Skill(
+        id="rag_ingest",
+        name="RAG Ingest & Index",
+        description="Ingest files from workspace, perform deep synthesis (triple extraction), and index into ChromaDB.",
+        category="knowledge",
+        parameters=[
+            SkillParameter("files", "string", "JSON list of filenames or relative directory paths (e.g., 'staging/')"),
+            SkillParameter("strategy", "string", "Ingestion strategy (safe, aggressive, comprehensive)", required=False, default="comprehensive"),
+            SkillParameter("deep_synthesis", "boolean", "Whether to extract knowledge triples into Neo4j", required=False, default=True),
+            SkillParameter("correlation_threshold", "number", "Threshold for linking concepts", required=False, default=0.7),
+        ],
+    ),
+    Skill(
+        id="kg3d_ingest",
+        name="KG3D Graph Correlation",
+        description="Finalize graph by performing topological correlation and clustering between code and knowledge concepts.",
+        category="knowledge",
+        parameters=[
+            SkillParameter("threshold", "number", "Threshold for correlation links (0.0-1.0)", required=False, default=0.75),
+        ],
+    ),
 ]
 
 
@@ -179,73 +200,73 @@ BUILTIN_SKILLS: List[Skill] = [
 # SKILL EXECUTION HANDLERS
 # =============================================================================
 
-def _execute_search_kb(workspace: str, **kwargs) -> str:
+async def _execute_search_kb(workspace: str, **kwargs) -> str:
     """Execute search_kb skill."""
     from ..tools.knowledge import search_knowledge_workspace
-    return search_knowledge_workspace.invoke({
+    return await search_knowledge_workspace.ainvoke({
         "query": kwargs.get("query", ""),
         "workspace": workspace,
         "top_k": kwargs.get("top_k", 20),
     })
 
 
-def _execute_list_documents(workspace: str, **kwargs) -> str:
+async def _execute_list_documents(workspace: str, **kwargs) -> str:
     from ..tools.knowledge import list_available_documents
-    return list_available_documents.invoke({"workspace": workspace})
+    return await list_available_documents.ainvoke({"workspace": workspace})
 
 
-def _execute_read_document(workspace: str, **kwargs) -> str:
+async def _execute_read_document(workspace: str, **kwargs) -> str:
     from ..tools.knowledge import read_full_document
-    return read_full_document.invoke({
+    return await read_full_document.ainvoke({
         "document_name": kwargs.get("document_name", ""),
         "workspace": workspace,
     })
 
 
-def _execute_read_file(workspace: str, **kwargs) -> str:
+async def _execute_read_file(workspace: str, **kwargs) -> str:
     from ..tools.files import read_file
-    return read_file.invoke({
+    return await read_file.ainvoke({
         "filename": kwargs.get("filename", ""),
         "workspace": workspace,
         "subdir": kwargs.get("subdir", "data_in"),
     })
 
 
-def _execute_write_file(workspace: str, **kwargs) -> str:
+async def _execute_write_file(workspace: str, **kwargs) -> str:
     from ..tools.files import write_file
-    return write_file.invoke({
+    return await write_file.ainvoke({
         "filename": kwargs.get("filename", ""),
         "content": kwargs.get("content", ""),
         "workspace": workspace,
     })
 
 
-def _execute_list_files(workspace: str, **kwargs) -> str:
+async def _execute_list_files(workspace: str, **kwargs) -> str:
     from ..tools.files import list_files
-    return list_files.invoke({
+    return await list_files.ainvoke({
         "workspace": workspace,
         "subdir": kwargs.get("subdir", "data_out"),
     })
 
 
-def _execute_extract_pdf(workspace: str, **kwargs) -> str:
+async def _execute_extract_pdf(workspace: str, **kwargs) -> str:
     from ..tools.data import extract_pdf_text
-    return extract_pdf_text.invoke({
+    return await extract_pdf_text.ainvoke({
         "pdf_path": kwargs.get("pdf_path", ""),
         "workspace": workspace,
     })
 
 
-def _execute_query_csv(workspace: str, **kwargs) -> str:
+async def _execute_query_csv(workspace: str, **kwargs) -> str:
     from ..tools.data import query_csv
-    return query_csv.invoke({
+    return await query_csv.ainvoke({
         "csv_path": kwargs.get("csv_path", ""),
         "query": kwargs.get("query", ""),
         "workspace": workspace,
     })
 
 
-def _execute_query_graph(workspace: str, **kwargs) -> str:
+async def _execute_query_graph(workspace: str, **kwargs) -> str:
     from ..core.graph_db import run_cypher, scope_cypher_query
     
     query = kwargs.get("query", "")
@@ -267,6 +288,64 @@ def _execute_query_graph(workspace: str, **kwargs) -> str:
     return json.dumps(results, indent=2, default=str)
 
 
+async def _execute_rag_ingest(workspace: str, **kwargs) -> str:
+    """Execute rag_ingest skill - awaits background ingestion."""
+    import uuid
+    import asyncio
+    from ..api.graph_routes import _background_ingest_files
+    
+    run_id = str(uuid.uuid4())
+    files_raw = kwargs.get("files", "[]")
+    
+    try:
+        if isinstance(files_raw, str):
+            files = json.loads(files_raw)
+        elif isinstance(files_raw, list):
+            files = files_raw
+        else:
+            files = [str(files_raw)]
+    except:
+        files = [files_raw]
+
+    # Block until ingestion is finished to preserve wave ordering
+    results = await _background_ingest_files(
+        run_id=run_id,
+        files=files,
+        workspace=workspace,
+        provider=kwargs.get("provider", "lemonade"),
+        model=kwargs.get("model"),
+        embed=True,
+        embedding_provider=kwargs.get("embedding_provider", "local"),
+        embedding_model=kwargs.get("embedding_model"),
+        direction=kwargs.get("direction", ""),
+        inference_delay=kwargs.get("inference_delay", 2.0),
+        name=kwargs.get("name")
+    )
+    
+    count = len(results) if results else 0
+    return json.dumps({
+        "status": "completed",
+        "run_id": run_id,
+        "message": f"Ingestion completed for {count} item(s)."
+    })
+
+
+async def _execute_kg3d_ingest(workspace: str, **kwargs) -> str:
+    """Execute kg3d_ingest skill - runs topological correlation and clustering."""
+    from ..synthesis.correlation import run_full_correlation_suite
+    from ..graph.clustering_service import ClusteringService
+    
+    threshold = float(kwargs.get("threshold") or kwargs.get("correlation_threshold") or 0.75)
+    
+    # 1. Run community detection
+    await ClusteringService.run_lpa_on_workspace(workspace)
+    
+    # 2. Run correlation suite (links concepts to code)
+    await run_full_correlation_suite(workspace, threshold=threshold)
+    
+    return "✅ Knowledge Graph synthesis and community detection complete."
+
+
 # Map skill IDs to their handler functions
 SKILL_HANDLERS: Dict[str, Callable] = {
     "search_kb": _execute_search_kb,
@@ -278,6 +357,8 @@ SKILL_HANDLERS: Dict[str, Callable] = {
     "extract_pdf": _execute_extract_pdf,
     "query_csv": _execute_query_csv,
     "query_graph": _execute_query_graph,
+    "rag_ingest": _execute_rag_ingest,
+    "kg3d_ingest": _execute_kg3d_ingest,
 }
 
 
@@ -392,7 +473,7 @@ class SkillRegistry:
         skills = self.get_skills_by_ids(skill_ids, workspace)
         return [s.to_openai_tool_schema() for s in skills]
 
-    def execute_skill(self, skill_id: str, workspace: str, agent_role: str = "executor", agent_id: str = "default", active_nexus_id: Optional[str] = None, **kwargs) -> str:
+    async def execute_skill(self, skill_id: str, workspace: str, agent_role: str = "executor", agent_id: str = "default", active_nexus_id: Optional[str] = None, **kwargs) -> str:
         """Execute a skill by ID with RBAC enforcement and optional Nexus scoping."""
         from ..gateway.rbac import check_permission, AgentRole, ToolOperation
         
@@ -422,7 +503,7 @@ class SkillRegistry:
         if not handler:
             return f"❌ Unknown skill: {skill_id}"
         try:
-            result = handler(workspace=workspace, active_nexus_id=active_nexus_id, **kwargs)
+            result = await handler(workspace=workspace, active_nexus_id=active_nexus_id, **kwargs)
             
             # Context Guard: Protect against massive tool outputs
             from .context_guard import guard_tool_output

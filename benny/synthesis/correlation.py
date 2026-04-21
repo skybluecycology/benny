@@ -132,17 +132,23 @@ async def run_aggressive_correlation(workspace: str, threshold: float = 0.70) ->
     )
 
     # 3. Compute embeddings
-    import numpy as np
+    from .engine import batch_embed_concepts
+    
+    concept_names = [c["name"] for c in concepts]
+    concept_embeddings_kv = await batch_embed_concepts(concept_names, provider="local", batch_size=10)
+    
+    symbol_texts = [f"{s['name']}: {s.get('summary', '')}" for s in symbols]
+    symbol_embeddings_kv = await batch_embed_concepts(symbol_texts, provider="local", batch_size=10)
 
+    # Re-map results to IDs for the correlation loop
     concept_embeddings: Dict[int, Any] = {}
     for c in concepts:
-        concept_embeddings[c["id"]] = await get_embedding(c["name"])
+        concept_embeddings[c["id"]] = concept_embeddings_kv.get(c["name"], [])
 
     symbol_embeddings: Dict[int, Any] = {}
     symbol_meta: Dict[int, dict] = {}
-    for s in symbols:
-        text = f"{s['name']}: {s.get('summary', '')}"
-        symbol_embeddings[s["id"]] = await get_embedding(text)
+    for i, s in enumerate(symbols):
+        symbol_embeddings[s["id"]] = symbol_embeddings_kv.get(symbol_texts[i], [])
         symbol_meta[s["id"]] = s
 
     # 4. Pairwise cosine similarity → link if above threshold
