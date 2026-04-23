@@ -511,35 +511,73 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     async def _run_task(tid: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=360.0) as client:
             if tid == "pdf_extract":
-                # Check staging/ (raw docs) and data_in/ (already-converted Markdown)
+                # ── 1. Flat check: staging/ (raw) and data_in/ (markdown) ──────
                 r = await client.get(f"{API_BASE}/api/files", headers=_H,
                                      params={"workspace": args.workspace})
                 r.raise_for_status()
                 data    = r.json()
                 staging = data.get("staging", [])
                 data_in = data.get("data_in", [])
+
                 if staging:
-                    # Raw docs present — convert via Docling
+                    # Raw docs in staging/ → convert via Docling
                     return {
                         "staging_files": len(staging),
                         "files": [f.get("name", str(f)) for f in staging[:5]],
                         "status": "converted",
                     }
-                elif data_in:
-                    # Already converted to Markdown in data_in/ — nothing to do here
-                    md_files = [f for f in data_in
-                                if str(f.get("name", f)).endswith(".md")]
+
+                md_files = [f for f in data_in
+                            if str(f.get("name", f)).endswith(".md")]
+                if md_files:
                     return {
                         "staging_files": 0,
                         "data_in_files": len(data_in),
                         "md_files":      len(md_files),
                         "status":        "already_converted",
                     }
-                else:
-                    raise RuntimeError(
-                        "No files in staging/ or data_in/ — "
-                        "upload architecture docs first (Studio → Notebook → Upload)."
+
+                # ── 2. ChromaDB already has chunks → docs were previously ingested ──
+                try:
+                    rs = await client.get(
+                        f"{API_BASE}/api/rag/status", headers=_H,
+                        params={"workspace": args.workspace}, timeout=10.0,
                     )
+                    if rs.status_code == 200:
+                        chunks = rs.json().get("total_chunks", 0)
+                        if chunks > 0:
+                            return {
+                                "status":     "already_ingested",
+                                "rag_chunks": chunks,
+                            }
+                except Exception:
+                    pass
+
+                # ── 3. Recursive scan — PDFs may be nested in data_in/staging/ ──
+                try:
+                    rr = await client.get(
+                        f"{API_BASE}/api/files/recursive-scan", headers=_H,
+                        params={"workspace": args.workspace}, timeout=30.0,
+                    )
+                    if rr.status_code == 200:
+                        all_files = rr.json().get("files", [])
+                        pdfs = [
+                            f for f in all_files
+                            if f.get("type", "").lower() in ("pdf", "docx", "doc")
+                        ]
+                        if pdfs:
+                            return {
+                                "status":    "pdfs_in_subdirs",
+                                "pdf_count": len(pdfs),
+                                "paths":     [f.get("path") for f in pdfs[:3]],
+                            }
+                except Exception:
+                    pass
+
+                raise RuntimeError(
+                    "No docs in staging/, data_in/, or ChromaDB — "
+                    "upload architecture docs first (Studio → Notebook → Upload)."
+                )
 
             elif tid == "code_scan":
                 # Start the background Tree-Sitter scan (returns immediately)
@@ -756,11 +794,12 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                             ("staging_files",        "{v} staging files"),
                             ("data_in_files",        "{v} data_in files"),
                             ("md_files",             "{v} md files"),
+                            ("rag_chunks",           "{v} rag chunks"),
+                            ("pdf_count",            "{v} PDFs found"),
                             ("code_nodes",           "{v} code nodes"),
                             ("correlates_with_count", "{v} corr. edges"),
                             ("corr_count",            "{v} corr. edges"),
                             ("concept_count",         "{v} concepts"),
-                            ("md_files",              "{v} md files"),
                             ("report_path",           "report written"),
                         ]:
                             if key in result:
