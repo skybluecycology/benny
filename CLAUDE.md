@@ -23,6 +23,16 @@ A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangG
 | **MCP server for Claude** | `benny/mcp/server.py` |
 | **Docker services** | `docker-compose.yml` (Neo4j, Marquez, Phoenix, N8N) |
 
+## Key CLI commands
+
+```bash
+benny plan "<requirement>" --workspace <ws> --save   # LLM-generate manifest
+benny run <manifest.json> --json                      # execute manifest
+benny runs ls --limit 10                              # run history
+benny enrich --workspace c5_test --src src/dangpy --run   # knowledge enrichment pipeline
+benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
+```
+
 ## Documentation (read these first)
 
 - **[docs/README.md](docs/README.md)** — navigation hub for all docs

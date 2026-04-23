@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "id": "knowledge-enrichment-pipeline-v1",
+  "name": "Knowledge Enrichment Pipeline",
+  "description": "Full pipeline: convert docs → ingest → synthesise triples → scan code → correlate concepts to code symbols. Produces CORRELATES_WITH edges in Neo4j so the Studio ENRICH toggle has data.",
+  "requirement": "Build the knowledge enrichment overlay: extract knowledge triples from architecture documents and link them to source code symbols via semantic correlation.",
+  "workspace": "c5_test",
+  "inputs": {
+    "files": ["staging/", "src/"],
+    "context": {
+      "src_path": "src/",
+      "correlation_threshold": 0.70,
+      "correlation_strategy": "aggressive"
+    }
+  },
+  "outputs": {
+    "files": ["data_out/enrichment_report.md"],
+    "format": "md",
+    "spec": "Summary of concepts extracted, code entities mapped, CORRELATES_WITH edges created, and confidence distribution."
+  },
+  "config": {
+    "model": "lemonade/qwen3-tk-4b-FLM",
+    "max_concurrency": 2,
+    "max_depth": 3,
+    "skills_allowed": ["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "semantic_correlate", "validate_enrichment"]
+  },
+  "plan": {
+    "tasks": [
+      {
+        "id": "pdf_extract",
+        "description": "[DETERMINISTIC] Convert PDF/DOCX/image files in staging/ to Markdown using Docling. Output to data_out/extracted/.",
+        "skill_hint": "extract_pdf",
+        "wave": 0,
+        "complexity": "medium",
+        "node_type": "task",
+        "files_touched": ["staging/"]
+      },
+      {
+        "id": "code_scan",
+        "description": "[DETERMINISTIC] Run Tree-Sitter recursive analysis on src/ to populate the code graph (File, Class, Function, Interface nodes + DEFINES/DEPENDS_ON/INHERITS edges) in Neo4j.",
+        "skill_hint": "code_scan",
+        "wave": 0,
+        "complexity": "high",
+        "node_type": "task",
+        "files_touched": ["src/"]
+      },
+      {
+        "id": "rag_ingest",
+        "description": "[DETERMINISTIC] Chunk and embed extracted Markdown into ChromaDB. Uses nomic-embed-text-v1-GGUF for dense embeddings.",
+        "skill_hint": "rag_ingest",
+        "dependencies": ["pdf_extract"],
+        "wave": 1,
+        "complexity": "medium",
+        "node_type": "task"
+      },
+      {
+        "id": "deep_synthesis",
+        "description": "[AGENTIC] Extract knowledge triples (Concept --[predicate]--> Concept) from the indexed corpus and persist them to Neo4j as REL edges with confidence scores and source citations.",
+        "skill_hint": "rag_ingest",
+        "assigned_model": "lemonade/qwen3-tk-4b-FLM",
+        "dependencies": ["rag_ingest"],
+        "wave": 2,
+        "complexity": "high",
+        "node_type": "task"
+      },
+      {
+        "id": "semantic_correlate",
+        "description": "[DETERMINISTIC] Run the semantic correlation suite (Neural Spark) to create CORRELATES_WITH edges linking Concept nodes to matching CodeEntity nodes. Threshold: 0.70. Strategy: aggressive.",
+        "skill_hint": "semantic_correlate",
+        "dependencies": ["code_scan", "deep_synthesis"],
+        "wave": 3,
+        "complexity": "medium",
+        "node_type": "task"
+      },
+      {
+        "id": "validate_enrichment",
+        "description": "[DETERMINISTIC] Verify CORRELATES_WITH edges exist in Neo4j by querying the LOD endpoint. Fail the task if zero enrichment edges are found.",
+        "skill_hint": "validate_enrichment",
+        "dependencies": ["semantic_correlate"],
+        "wave": 4,
+        "complexity": "low",
+        "node_type": "task"
+      },
+      {
+        "id": "generate_report",
+        "description": "[AGENTIC] Query Neo4j for enrichment statistics (concept count, code entity count, CORRELATES_WITH edge count, confidence distribution) and write a structured enrichment report to data_out/enrichment_report.md.",
+        "skill_hint": "rag_ingest",
+        "assigned_model": "lemonade/qwen3-tk-4b-FLM",
+        "dependencies": ["validate_enrichment"],
+        "wave": 4,
+        "complexity": "medium",
+        "node_type": "output",
+        "files_touched": ["data_out/enrichment_report.md"]
+      }
+    ],
+    "edges": [
+      { "id": "e_pdf_rag",       "source": "pdf_extract",       "target": "rag_ingest",          "label": "extracted markdown",  "animated": true },
+      { "id": "e_rag_synth",     "source": "rag_ingest",        "target": "deep_synthesis",       "label": "indexed corpus",      "animated": true },
+      { "id": "e_code_corr",     "source": "code_scan",         "target": "semantic_correlate",   "label": "code entities",       "animated": true },
+      { "id": "e_synth_corr",    "source": "deep_synthesis",    "target": "semantic_correlate",   "label": "knowledge triples",   "animated": true },
+      { "id": "e_corr_val",      "source": "semantic_correlate","target": "validate_enrichment",  "label": "CORRELATES_WITH",     "animated": true },
+      { "id": "e_val_report",    "source": "validate_enrichment","target": "generate_report",     "label": "validated",           "animated": true }
+    ],
+    "waves": [
+      ["pdf_extract", "code_scan"],
+      ["rag_ingest"],
+      ["deep_synthesis"],
+      ["semantic_correlate"],
+      ["validate_enrichment", "generate_report"]
+    ],
+    "ascii_dag": "pdf_extract ─┐\n             ├─→ rag_ingest → deep_synthesis ─┐\n             │                               ├─→ semantic_correlate → validate_enrichment → generate_report\ncode_scan ───┘───────────────────────────────┘"
+  },
+  "tags": ["enrichment", "code-analysis", "knowledge-graph", "template"],
+  "metadata": {
+    "template": true,
+    "generated_by": "benny enrich",
+    "notes": "Copy to workspace manifests/ and edit 'workspace', 'inputs.context.src_path', and 'config.model' before running."
+  }
+}

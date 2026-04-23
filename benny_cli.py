@@ -166,6 +166,206 @@ def cmd_manifests_ls(args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_enrich(args: argparse.Namespace) -> int:
+    """Build (and optionally run) the knowledge enrichment pipeline manifest.
+
+    The pipeline is deterministic — no LLM planning. It always produces the
+    same DAG: pdf_extract + code_scan → rag_ingest → deep_synthesis →
+    semantic_correlate → validate_enrichment → generate_report.
+
+    Usage:
+        benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json
+        benny enrich --workspace c5_test --src src/dangpy --run
+        benny enrich --workspace c5_test --src src/dangpy --json
+    """
+    import uuid
+    from datetime import datetime
+
+    from benny.core.manifest import (
+        ManifestEdge,
+        ManifestPlan,
+        ManifestTask,
+    )
+    from benny.core.manifest_hash import sign_manifest
+
+    run_it = args.run_after or args.json
+
+    model = args.model
+    if not model:
+        try:
+            from benny.core.models import get_active_model
+            model = await get_active_model(args.workspace)
+        except Exception:
+            model = "lemonade/qwen3-tk-4b-FLM"
+
+    manifest_id = f"enrich-{args.workspace}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    src_path = args.src.rstrip("/")
+
+    tasks = [
+        ManifestTask(
+            id="pdf_extract",
+            description=f"[DETERMINISTIC] Convert PDFs and documents in staging/ to Markdown using Docling.",
+            skill_hint="extract_pdf",
+            wave=0,
+            complexity="medium",
+            node_type="task",
+            files_touched=["staging/"],
+        ),
+        ManifestTask(
+            id="code_scan",
+            description=f"[DETERMINISTIC] Tree-Sitter recursive analysis of {src_path}/ → Neo4j code graph.",
+            skill_hint="code_scan",
+            wave=0,
+            complexity="high",
+            node_type="task",
+            files_touched=[f"{src_path}/"],
+        ),
+        ManifestTask(
+            id="rag_ingest",
+            description="[DETERMINISTIC] Chunk and embed extracted Markdown into ChromaDB.",
+            skill_hint="rag_ingest",
+            dependencies=["pdf_extract"],
+            wave=1,
+            complexity="medium",
+            node_type="task",
+        ),
+        ManifestTask(
+            id="deep_synthesis",
+            description="[AGENTIC] Extract knowledge triples (Concept → Concept) and persist as REL edges with citations.",
+            skill_hint="rag_ingest",
+            assigned_model=model,
+            dependencies=["rag_ingest"],
+            wave=2,
+            complexity="high",
+            node_type="task",
+        ),
+        ManifestTask(
+            id="semantic_correlate",
+            description=(
+                f"[DETERMINISTIC] Semantic correlation suite (Neural Spark): create CORRELATES_WITH edges "
+                f"linking Concepts to CodeEntities. threshold={args.threshold} strategy={args.strategy}."
+            ),
+            skill_hint="semantic_correlate",
+            dependencies=["code_scan", "deep_synthesis"],
+            wave=3,
+            complexity="medium",
+            node_type="task",
+        ),
+        ManifestTask(
+            id="validate_enrichment",
+            description="[DETERMINISTIC] Verify CORRELATES_WITH edges exist in Neo4j. Fail if zero found.",
+            skill_hint="validate_enrichment",
+            dependencies=["semantic_correlate"],
+            wave=4,
+            complexity="low",
+            node_type="task",
+        ),
+        ManifestTask(
+            id="generate_report",
+            description="[AGENTIC] Write enrichment statistics and concept-to-code mapping to data_out/enrichment_report.md.",
+            skill_hint="rag_ingest",
+            assigned_model=model,
+            dependencies=["validate_enrichment"],
+            wave=4,
+            complexity="medium",
+            node_type="output",
+            files_touched=["data_out/enrichment_report.md"],
+        ),
+    ]
+
+    edges = [
+        ManifestEdge(id="e_pdf_rag",    source="pdf_extract",        target="rag_ingest",         label="extracted markdown", animated=True),
+        ManifestEdge(id="e_rag_synth",  source="rag_ingest",         target="deep_synthesis",      label="indexed corpus",     animated=True),
+        ManifestEdge(id="e_code_corr",  source="code_scan",          target="semantic_correlate",  label="code entities",      animated=True),
+        ManifestEdge(id="e_synth_corr", source="deep_synthesis",     target="semantic_correlate",  label="knowledge triples",  animated=True),
+        ManifestEdge(id="e_corr_val",   source="semantic_correlate", target="validate_enrichment", label="CORRELATES_WITH",    animated=True),
+        ManifestEdge(id="e_val_report", source="validate_enrichment",target="generate_report",     label="validated",          animated=True),
+    ]
+
+    plan = ManifestPlan(
+        tasks=tasks,
+        edges=edges,
+        waves=[
+            ["pdf_extract", "code_scan"],
+            ["rag_ingest"],
+            ["deep_synthesis"],
+            ["semantic_correlate"],
+            ["validate_enrichment", "generate_report"],
+        ],
+    )
+
+    manifest = SwarmManifest(
+        id=manifest_id,
+        name=f"Knowledge Enrichment — {args.workspace}",
+        description="Knowledge enrichment pipeline: extract → ingest → synthesise → correlate → validate → report.",
+        requirement=(
+            "Build the knowledge enrichment overlay for the Studio ENRICH toggle: "
+            f"scan source code in {src_path}/, extract knowledge triples from ingested documents, "
+            f"and create CORRELATES_WITH edges linking concepts to code symbols."
+        ),
+        workspace=args.workspace,
+        inputs=InputSpec(
+            files=["staging/", f"{src_path}/"],
+            context={"src_path": src_path, "correlation_threshold": args.threshold, "correlation_strategy": args.strategy},
+        ),
+        outputs=OutputSpec(
+            files=["data_out/enrichment_report.md"],
+            format=OutputFormat.MARKDOWN,
+            spec="Enrichment summary: concept count, code entity count, CORRELATES_WITH edges, confidence distribution.",
+        ),
+        plan=plan,
+        config=ManifestConfig(
+            model=model,
+            max_concurrency=2,
+            max_depth=3,
+            skills_allowed=["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "semantic_correlate", "validate_enrichment"],
+        ),
+        tags=["enrichment", "code-analysis", "knowledge-graph"],
+        metadata={"src_path": src_path, "correlation_threshold": args.threshold, "correlation_strategy": args.strategy},
+    )
+
+    sign_manifest(manifest)
+
+    print(f"[enrich] workspace={args.workspace}  src={src_path}  model={model}")
+    print(f"[enrich] tasks={len(tasks)}  waves=5  manifest_id={manifest_id}")
+
+    rendered = manifest.model_dump_json(indent=2)
+
+    out_path = Path(args.out) if args.out else None
+    if out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rendered, encoding="utf-8")
+        print(f"[enrich] manifest → {out_path}")
+
+    if not run_it:
+        if not out_path:
+            print(rendered)
+        print("[enrich] pass --run to execute, or: benny run <manifest.json>")
+        return 0
+
+    from benny.graph.manifest_runner import execute_manifest
+    from benny.persistence import run_store
+
+    run_store.save_manifest(manifest)
+    print(f"[enrich] executing manifest_id={manifest_id} ...")
+    record = await execute_manifest(manifest)
+
+    print(f"[enrich] run_id={record.run_id}  status={record.status.value}")
+    if record.duration_ms:
+        print(f"[enrich] duration={record.duration_ms}ms")
+    if record.errors:
+        print(f"[enrich] errors: {record.errors}", file=sys.stderr)
+    if record.artifact_paths:
+        print(f"[enrich] artifacts: {record.artifact_paths}")
+    if record.governance_url:
+        print(f"[enrich] lineage: {record.governance_url}")
+
+    if args.json:
+        print(record.model_dump_json(indent=2))
+
+    return 0 if record.status.value in ("completed", "partial_success") else 1
+
+
 # =============================================================================
 # UTILS
 # =============================================================================
@@ -273,6 +473,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--stdio", action="store_true", default=True, help="Use stdio transport (default)")
     p_mcp.add_argument("--port", type=int, default=8000, help="Benny API port to proxy to")
 
+    # enrich — knowledge enrichment pipeline
+    p_enrich = sub.add_parser(
+        "enrich",
+        help="Build and optionally run the knowledge enrichment pipeline (code scan → synthesis → correlate)",
+    )
+    p_enrich.add_argument("--workspace", default="c5_test", help="Target workspace (default: c5_test)")
+    p_enrich.add_argument("--src", default="src/", help="Source path to scan with Tree-Sitter (relative to workspace, default: src/)")
+    p_enrich.add_argument("--model", default=None, help="LLM model ID (defaults to active manager selection)")
+    p_enrich.add_argument("--threshold", type=float, default=0.70, help="Semantic correlation confidence threshold (default: 0.70)")
+    p_enrich.add_argument("--strategy", choices=["safe", "aggressive"], default="aggressive", help="Correlation strategy (default: aggressive)")
+    p_enrich.add_argument("--out", default=None, help="Write manifest JSON to this path (skips execution)")
+    p_enrich.add_argument("--run", dest="run_after", action="store_true", default=False, help="Execute the manifest immediately after building it")
+    p_enrich.add_argument("--json", action="store_true", help="Emit the final RunRecord as JSON (implies --run)")
+
     # migrate (PBR-001 Phase 8)
     p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")
     p_mig.add_argument("--from-path", "--from", required=True, help="Source directory to migrate")
@@ -315,6 +529,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_mcp(args)
     if args.cmd == "migrate":
         return cmd_migrate(args)
+    if args.cmd == "enrich":
+        return asyncio.run(cmd_enrich(args))
 
     parser.print_help()
     return 1
