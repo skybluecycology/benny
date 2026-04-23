@@ -19,6 +19,7 @@ New to Benny? Read in this order:
 | Document | Description |
 |----------|-------------|
 | [BENNY_OPERATING_MANUAL.md](operations/BENNY_OPERATING_MANUAL.md) | **Primary run book** — init, up, down, plan, run, doctor, migrate, uninstall, release gates, troubleshooting |
+| [KNOWLEDGE_ENRICHMENT_WORKFLOW.md](operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md) | `benny enrich` pipeline — extract docs → synthesise triples → correlate to code → enable Studio ENRICH toggle |
 | [LOG_AND_LINEAGE_GUIDE.md](operations/LOG_AND_LINEAGE_GUIDE.md) | All log files, SSE events, Marquez lineage, Phoenix tracing, AER audit records, end-to-end process trace |
 | [manifest_operating_manual.md](operations/manifest_operating_manual.md) | Manifest execution and planning detail |
 | [local_llm_setup.md](operations/local_llm_setup.md) | Configuring Lemonade, Ollama, LMStudio, LiteRT |
@@ -59,6 +60,11 @@ benny plan "Summarise PDFs in data_in/" --workspace c4_test --save
 benny run manifests/latest.manifest.json --json
 benny runs ls --limit 10
 benny down --home $BENNY_HOME
+
+# Knowledge enrichment (Studio ENRICH toggle)
+benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json  # build manifest
+benny enrich --workspace c5_test --src src/dangpy --run                    # build + run
+benny enrich --help                                                         # full options
 
 # Observe a run in real time
 curl -N -H "Accept: text/event-stream" \
