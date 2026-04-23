@@ -45,6 +45,7 @@ export interface UISlice {
     sonification: boolean;          // WebAudio cues
     ambientHeartbeat: boolean;      // continuous ambient tone
     foveatedLOD: boolean;           // simplify peripheral nodes
+    knowledgeEnrichment: boolean;   // overlay CORRELATES_WITH edges from knowledge graph onto code graph
     bloomIntensity: number;         // 0..2 emissive multiplier
     pruneThreshold: number;         // 0..1 importance cutoff
     particleDensity: number;        // 0..3
@@ -126,6 +127,7 @@ export const createUISlice = (set: any, get: any): UISlice => ({
     sonification: false,
     ambientHeartbeat: false,
     foveatedLOD: true,
+    knowledgeEnrichment: false,
     bloomIntensity: 1.0,
     pruneThreshold: 0.2,
     particleDensity: 1.0,
