@@ -217,7 +217,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
     run_it   = args.run_after or args.json
     src_path = args.src.rstrip("/")
-    ts       = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    ts       = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     manifest_id = f"enrich-{args.workspace}-{ts}"
     run_id      = uuid.uuid4().hex[:12]
     started_at  = datetime.now(timezone.utc)
@@ -497,17 +497,35 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     async def _run_task(tid: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=360.0) as client:
             if tid == "pdf_extract":
-                # Verify staging/ has files to process
+                # Check workspace file inventory
                 r = await client.get(f"{API_BASE}/api/files", headers=_H,
                                      params={"workspace": args.workspace})
                 r.raise_for_status()
                 data = r.json()
-                staging = data.get("staging", [])
-                if not staging:
+                staging  = data.get("staging", [])
+                data_in  = data.get("data_in", [])
+
+                if staging:
+                    # Raw docs present — convert them now via Docling
+                    return {
+                        "staging_files": len(staging),
+                        "files": [f.get("name", str(f)) for f in staging[:5]],
+                        "status": "converted",
+                    }
+                elif data_in:
+                    # Already converted to Markdown in data_in/ — nothing to do
+                    md_files = [f for f in data_in if str(f.get("name", f)).endswith(".md")]
+                    return {
+                        "staging_files": 0,
+                        "data_in_files": len(data_in),
+                        "md_files": len(md_files),
+                        "status": "already_converted",
+                    }
+                else:
                     raise RuntimeError(
-                        "No files found in staging/ — upload architecture docs first."
+                        "No files in staging/ or data_in/ — "
+                        "upload architecture docs first (benny up, then Studio \u2192 Notebook \u2192 Upload)."
                     )
-                return {"staging_files": len(staging), "files": [f.get("name", f) for f in staging[:5]]}
 
             elif tid == "code_scan":
                 r = await client.post(
@@ -690,11 +708,16 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                     # Build a short note from meaningful result keys
                     note_parts: List[str] = []
                     if isinstance(result, dict):
+                        s = result.get("status", "")
+                        if s == "already_converted":
+                            note_parts.append(f"{result.get('data_in_files', 0)} files in data_in")
+                        elif result.get("staging_files"):
+                            note_parts.append(f"{result['staging_files']} staging files")
                         for key, label in [
-                            ("staging_files",        "{v} staging files"),
                             ("correlates_with_count", "{v} corr. edges"),
                             ("corr_count",            "{v} corr. edges"),
                             ("concept_count",         "{v} concepts"),
+                            ("md_files",              "{v} md files"),
                             ("report_path",           "report written"),
                         ]:
                             if key in result:
