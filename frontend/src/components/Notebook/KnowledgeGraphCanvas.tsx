@@ -3,6 +3,7 @@ import ForceGraph3D from '3d-force-graph';
 import { Share2, Zap, Clock, AlertTriangle, RefreshCw, Maximize2, Minimize2, Search, Download, ChevronRight, Layers, Eye } from 'lucide-react';
 import { API_BASE_URL, GOVERNANCE_HEADERS } from '../../constants';
 import { useWorkspaceStore } from '../../hooks/useWorkspaceStore';
+import { useWorkflowStore } from '../../hooks/useWorkflowStore';
 
 interface GraphNode {
   id: string;
@@ -86,6 +87,13 @@ const PERFORMANCE_NODE_THRESHOLD = 500;
 
 export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'default', refreshTrigger }: KnowledgeGraphCanvasProps) {
   const { activeGraphId } = useWorkspaceStore() as any;
+  const { 
+    synthesisMode, 
+    cognitiveMesh, 
+    visibleTypes, 
+    visibleEdgeTypes,
+    showClusters 
+  } = useWorkflowStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] });
@@ -248,7 +256,7 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       .linkColor(graphRef.current.linkColor())
       .nodeOpacity(graphRef.current.nodeOpacity())
       .linkOpacity(graphRef.current.linkOpacity());
-  }, [debouncedSearch, selectedNode, graphData]);
+  }, [debouncedSearch, selectedNode, graphData, synthesisMode, cognitiveMesh, visibleTypes, visibleEdgeTypes, showClusters]);
 
   // Node detail sidebar — compute connected edges when a node is selected for detail
   useEffect(() => {
@@ -277,19 +285,31 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
     const graph = (ForceGraph3D_Lib)()(containerRef.current)
       .backgroundColor('rgba(0,0,0,0)')
       
-      // Node Coloring with Entity Typing
+      // Node Coloring with Entity Typing & Mode Overlay
       .nodeColor((node: any) => {
         if (focusRef.current.search && !node.name.toLowerCase().includes(focusRef.current.search)) return '#1f2937';
         if (focusRef.current.node && !focusRef.current.neighbors.has(node.id)) return '#1f2937';
         
         const typeLabel = node.node_type || (node.labels || [])[0] || 'Concept';
+        
+        // Mode-based dimming
+        if (synthesisMode === 'structural' && !['Folder', 'File'].includes(typeLabel)) return '#1f2937';
+        if (synthesisMode === 'neural' && ['Folder', 'File'].includes(typeLabel)) return '#111827';
+
         return NODE_COLORS[typeLabel] || NODE_COLORS['Concept'];
       })
       
       // Node Opacity & Highlighting
       .nodeOpacity((node: any) => {
-         if (focusRef.current.search && !node.name.toLowerCase().includes(focusRef.current.search)) return 0.1;
+         if (focusRef.current.search && !node.name.toLowerCase().includes(focusRef.current.search)) return 0.05;
          if (focusRef.current.node && !focusRef.current.neighbors.has(node.id)) return 0.1;
+         
+         const typeLabel = node.node_type || (node.labels || [])[0] || 'Concept';
+         
+         // Synthesis Mode Alpha Blending
+         if (synthesisMode === 'structural' && !['Folder', 'File'].includes(typeLabel)) return 0.2;
+         if (synthesisMode === 'neural' && ['Folder', 'File'].includes(typeLabel)) return 0.1;
+
          return 0.95;
       })
       
@@ -301,27 +321,56 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
         </div>`;
       })
       .nodeVal((node: any) => {
-        const baseSize = (node.labels || [])[0] === 'Source' ? 4 : 6;
+        const typeLabel = node.node_type || (node.labels || [])[0] || 'Concept';
+        
+        // Scale nodes based on hierarchy or degree
+        let baseSize = 6;
+        if (typeLabel === 'Folder') baseSize = 12;
+        if (typeLabel === 'File') baseSize = 8;
+        if (typeLabel === 'Source' || typeLabel === 'Document') baseSize = 4;
+        
         const centralityBonus = node.centrality ? Math.log10(node.centrality + 1) * 8 : 0;
-        const degreeBonus = node.degree ? Math.log1p(node.degree) * 3 : 0;
+        const degreeBonus = (cognitiveMesh.degreeSizing && node.degree) ? Math.log1p(node.degree) * 4 : 0;
+        
         return baseSize + centralityBonus + degreeBonus;
       })
       
-      // Organic Link Curvature (MindNode style)
-      .linkCurvature(0.25)
+      // Organic Link Curvature (Structural Backbone vs Semantic Cloud)
+      .linkCurvature((link: any) => {
+        if (synthesisMode === 'architectural') {
+          // Hierarchy is straight, semantics are curved
+          if (['CONTAINS', 'DEFINES'].includes(link.type)) return 0;
+          return 0.35;
+        }
+        return 0.25;
+      })
       .linkCurveRotation(Math.PI / 4)
       
       // Edge Style Logic & Confidence Dampening
       .linkColor((link: any) => {
          if (focusRef.current.node && !focusRef.current.links.has(link)) return '#1f2937';
+         
+         // Myelination Effect (Glow for high-confidence/important links)
+         if (cognitiveMesh.myelination && link.confidence > 0.8) {
+           return '#ffffff'; // Emissive white
+         }
+
          return EDGE_COLORS[link.type] || '#4a5568';
       })
       .linkOpacity((link: any) => {
          if (focusRef.current.node && !focusRef.current.links.has(link)) return 0.05;
+         
+         // Synthesis Mode Edge Masking
+         if (synthesisMode === 'structural' && !['CONTAINS', 'DEFINES'].includes(link.type)) return 0.05;
+         
          const baseOpacity = link.confidence !== undefined ? Math.max(0.2, link.confidence) : 0.6;
          return baseOpacity;
       })
-      .linkWidth((link: any) => (focusRef.current.links.has(link) ? 2.5 : 1.2))
+      .linkWidth((link: any) => {
+        let width = focusRef.current.links.has(link) ? 2.5 : 1.2;
+        if (['CONTAINS', 'DEFINES'].includes(link.type)) width *= 1.5; // Thicker structural lines
+        return width;
+      })
       .linkDirectionalArrowLength((link: any) => (focusRef.current.node && !focusRef.current.links.has(link) ? 0 : 4))
       .linkDirectionalArrowRelPos(1)
       
@@ -363,16 +412,25 @@ export default function KnowledgeGraphCanvas({ onConceptClick, workspace = 'defa
       .width(containerRef.current.clientWidth)
       .height(containerRef.current.clientHeight);
 
-    // Performance guards: disable particles and reduce resolution for large graphs
-    if (isLargeGraph) {
+    // Performance guards & Cognitive Mesh: Dynamic Particle Flow
+    if (isLargeGraph && !cognitiveMesh.dataFlowParticles) {
       graph
         .linkDirectionalParticles(0)
         .nodeResolution(6);  // Lower polygon count
     } else {
       graph
-        .linkDirectionalParticles((link: any) => (focusRef.current.links.has(link) ? 4 : 0))
-        .linkDirectionalParticleSpeed(0.01)
-        .nodeResolution(12);
+        .linkDirectionalParticles((link: any) => {
+          if (focusRef.current.links.has(link)) return 4;
+          if (!cognitiveMesh.dataFlowParticles) return 0;
+          
+          // Show particles for high-confidence semantic links in Architectural mode
+          if (synthesisMode === 'architectural' && !['CONTAINS', 'DEFINES'].includes(link.type)) {
+            return Math.ceil(cognitiveMesh.particleDensity * 2);
+          }
+          return 0;
+        })
+        .linkDirectionalParticleSpeed(0.01 * cognitiveMesh.particleDensity)
+        .nodeResolution(isLargeGraph ? 8 : 12);
     }
 
     // Map Mode: Flatten Z-axis for the "Atlas" feel

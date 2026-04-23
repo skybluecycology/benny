@@ -164,7 +164,7 @@ def parse_json_safe(text: str) -> Tuple[Dict[str, Any], str]:
         raise e
 
 MAX_CONCURRENCY = int(os.getenv("SWARM_MAX_CONCURRENCY", "1"))
-MARQUEZ_WEB_URL = os.getenv("MARQUEZ_WEB_URL", "http://localhost:3001")
+MARQUEZ_WEB_URL = os.getenv("MARQUEZ_WEB_URL", "http://localhost:3000")
 
 
 def get_governance_url(execution_id: str, workflow_name: str = "swarm") -> str:
@@ -425,7 +425,7 @@ def wave_scheduler_node(state: SwarmState) -> Dict[str, Any]:
         ascii_dag = generate_ascii_dag(updated_plan, dependency_graph, waves)
         
         # Step 5: Assign models based on task complexity and keywords
-        model_assignments = assign_models(updated_plan, MODEL_REGISTRY)
+        model_assignments = assign_models(updated_plan, MODEL_REGISTRY, state.get("model"))
         for task in updated_plan:
             if task["task_id"] in model_assignments:
                 task["assigned_model"] = model_assignments[task["task_id"]]
@@ -657,112 +657,116 @@ Do this sparingly and only for significant knowledge gaps."""
         current_step = 0
         executed_tools = []
         final_content = ""
-
-        while current_step < max_steps:
+        while current_step < max_steps:
             current_step += 1
-            
-            # Use call_model for standardized execution, auditing, and NPU routing
-            # call_model now handles the Operating Manual and lineage tracking
-            # But here we need to handle multi-step tools if tools are enabled
-            
-            response_text = await call_model(
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                run_id=execution_id,
-                authorized_tools=assigned_skills
-            )
-            
-            # Extract content and thinking
-            final_content, thinking = parse_json_safe(f'{{"content": {json.dumps(response_text)}}}')
-            # Wait, response_text is usually a string from call_model, but if it's JSON from a tool call...
-            # Actually, call_model for executor usually returns the completion text.
-            
-            # Let's handle thinking block extraction directly if it's text
-            # Extract and strip reasoning/think blocks
-            final_content, thinking = extract_reasoning(response_text)
-            
-            if thinking:
-                task_manager.add_aer_entry(
-                    execution_id,
-                    intent=f"Executing task: {task_id}",
-                    observation="Reasoning step detected during execution",
-                    inference=thinking,
-                    nodeId="executor"
+
+            # LOCAL-FIRST DISPATCH: check if this is a local model and short-circuit
+            # to avoid LiteLLM (which requires API keys for cloud providers).
+            from benny.core.local_executor import resolve_executor as _resolve_executor
+            _local_exec = _resolve_executor(model)
+
+            if _local_exec:
+                # Local model path: call executor directly, wrap result as a fake response object
+                _sys_msg = None
+                _user_msg = ""
+                for _m in messages:
+                    if isinstance(_m, dict):
+                        if _m.get("role") == "system":
+                            _sys_msg = _m.get("content")
+                        elif _m.get("role") == "user":
+                            _user_msg = _m.get("content", "")
+                    else:
+                        # LangChain message object
+                        if getattr(_m, "type", None) == "system":
+                            _sys_msg = _m.content
+                        elif getattr(_m, "type", None) in ("human", "user"):
+                            _user_msg = _m.content
+
+                _raw_text = await _local_exec.generate(
+                    prompt=_user_msg,
+                    system=_sys_msg,
+                    temperature=0.7,
+                    max_tokens=3000,
+                    run_id=execution_id,
                 )
 
-            # Note: call_model returns text. If we want tool calling, 
-            # we currently bypass call_model's text-only return for the raw interaction
-            # OR we update call_model to support tool calls.
-            # For now, let's use acompletion directly for tool calls to maintain the loop logic,
-            # but ensure we track it manually.
-            
-            model_cfg = get_model_config(model)
-            litellm_model = normalize_model_string(model)
-            
-            raw_payload = {
-                "model": litellm_model,
-                "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 3000
-            }
-            if "base_url" in model_cfg:
-                raw_payload["api_base"] = model_cfg["base_url"]
-            if "api_key" in model_cfg:
-                raw_payload["api_key"] = model_cfg["api_key"]
-            if tools:
-                raw_payload["tools"] = tools
-
-            response = await acompletion(**raw_payload)
-            
-            # Robust content/message extraction
-            if hasattr(response, "choices") and len(response.choices) > 0:
-                message = response.choices[0].message
-            elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
-                choice = response["choices"][0]
-                if isinstance(choice, dict):
-                    message = choice.get("message")
-                else:
-                    message = choice.message
-            else:
-                logger.warning(f"Swarm executor: Response missing 'choices' block from {model}")
-                # Fallback to creating a dummy message from the raw response
-                from langchain_core.messages import AIMessage
-                message = AIMessage(content=str(response))
-
-            messages.append(message)
-
-            if hasattr(message, "tool_calls") and message.tool_calls:
-                for tc in message.tool_calls:
-                    func_name = tc.function.name
-                    call_id = tc.id
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except:
-                        args = {}
-                    
-                    # Execute skill with Least Skill agent_id
-                    result_str = await registry.execute_skill(
-                        func_name, 
-                        workspace_id,
-                        agent_id=execution_id,
-                        **args
+                # Extract reasoning if present
+                final_content, thinking = extract_reasoning(_raw_text)
+                if thinking:
+                    task_manager.add_aer_entry(
+                        execution_id,
+                        intent=f"Executing task: {task_id}",
+                        observation="Reasoning step detected during execution",
+                        inference=thinking,
+                        nodeId="executor",
                     )
-                    executed_tools.append({"name": func_name, "args": args})
-                    
-                    # Log tool usage to UI
-                    task_manager.add_tool_event(execution_id, func_name, args, result_str, nodeId="executor")
-                    
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "name": func_name,
-                        "content": result_str
-                    })
-                continue
-            else:
-                final_content = message.content or ""
+
+                # Local models don't support tool_calls in this path; break the loop
                 break
+
+            else:
+                # Cloud / LiteLLM path
+                model_cfg = get_model_config(model)
+                litellm_model = normalize_model_string(model)
+
+                raw_payload = {
+                    "model": litellm_model,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 3000
+                }
+                if "base_url" in model_cfg:
+                    raw_payload["api_base"] = model_cfg["base_url"]
+                if "api_key" in model_cfg:
+                    raw_payload["api_key"] = model_cfg["api_key"]
+                if tools:
+                    raw_payload["tools"] = tools
+
+                response = await acompletion(**raw_payload)
+
+                # Robust content/message extraction (cloud/LiteLLM path)
+                if hasattr(response, "choices") and len(response.choices) > 0:
+                    message = response.choices[0].message
+                elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
+                    choice = response["choices"][0]
+                    if isinstance(choice, dict):
+                        message = choice.get("message")
+                    else:
+                        message = choice.message
+                else:
+                    logger.warning(f"Swarm executor: Response missing 'choices' block from {model}")
+                    from langchain_core.messages import AIMessage
+                    message = AIMessage(content=str(response))
+
+                messages.append(message)
+
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    for tc in message.tool_calls:
+                        func_name = tc.function.name
+                        call_id = tc.id
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except Exception:
+                            args = {}
+
+                        result_str = await registry.execute_skill(
+                            func_name,
+                            workspace_id,
+                            agent_id=execution_id,
+                            **args
+                        )
+                        executed_tools.append({"name": func_name, "args": args})
+                        task_manager.add_tool_event(execution_id, func_name, args, result_str, nodeId="executor")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": func_name,
+                            "content": result_str
+                        })
+                    continue
+                else:
+                    final_content = message.content or ""
+                    break
 
         execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
         

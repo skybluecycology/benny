@@ -60,7 +60,7 @@ MODEL_REGISTRY = {
         "model": "openai/deepseek-r1-8b-FLM",
         "provider": "lemonade",
         "cost_per_1k": 0.0,
-        "use_for": ["offline", "sensitive_data", "testing"]
+        "use_for": ["offline", "sensitive_data", "testing", "reasoning", "content_generation"]
     },
     "local_ollama": {
         "model": "ollama/llama3",
@@ -108,7 +108,16 @@ _LOCAL_PREFIXES: tuple[str, ...] = tuple(f"{name}/" for name in LOCAL_PROVIDERS.
 
 def is_local_model(model_name: str) -> bool:
     """Return True if ``model_name`` is served by a local provider."""
-    return model_name.startswith(_LOCAL_PREFIXES) or model_name.startswith("litert/")
+    if model_name.startswith(_LOCAL_PREFIXES) or model_name.startswith("litert/"):
+        return True
+    
+    # Check if it's a registry key pointing to a local provider
+    if model_name in MODEL_REGISTRY:
+        provider = MODEL_REGISTRY[model_name].get("provider", "").lower()
+        if provider in LOCAL_PROVIDERS or provider == "litert":
+            return True
+            
+    return False
 
 
 def _offline_enabled() -> bool:
@@ -131,11 +140,15 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
     # Handle direct provider/model strings
     if "/" in model_id:
         provider, model = model_id.split("/", 1)
-        return {
+        config = {
             "provider": provider,
             "model": model,
             "cost_per_1k": 0.0
         }
+        # Inject base_url for local providers if not in registry
+        if provider in LOCAL_PROVIDERS:
+            config["base_url"] = LOCAL_PROVIDERS[provider]["base_url"]
+        return config
     
     return {
         "provider": "openai",
@@ -213,6 +226,7 @@ async def call_model(
     run_id: Optional[str] = None,
     authorized_tools: Optional[List[str]] = None
 ) -> str:
+    print(f"DEBUG: call_model(model='{model}', run_id='{run_id}')")
     """
     Main entry point for LLM inference.
     Handles LiteRT (local), LiteLLM (cloud/local), and system prompt augmentation.
@@ -241,7 +255,7 @@ async def call_model(
                 workspace_id = match.group(1)
                 break
     
-    from .workspace import build_system_prompt_augmentation
+    from ..governance.operating_manual import build_system_prompt_augmentation
     augmentation = build_system_prompt_augmentation(workspace_id, tools=authorized_tools)
     if augmentation:
         system_found = False
@@ -286,7 +300,17 @@ async def call_model(
     # 5. LOCAL EXECUTOR SHORT-CIRCUIT (PBR-001 Phase 5)
     # If the model is local, we bypass LiteLLM to ensure reliability
     if is_local_model(model):
-        executor = resolve_executor(model)
+        # Resolve to a specific provider/model string if it's a registry key
+        config = get_model_config(model)
+        provider = config.get("provider", "").lower()
+        model_id = config.get("model", "")
+        
+        lookup_str = model
+        if "/" not in model and provider:
+            lookup_str = f"{provider}/{model_id}"
+            
+        executor = resolve_executor(lookup_str)
+        print(f"DEBUG: is_local_model=True, lookup='{lookup_str}', executor={executor}")
         if executor:
             system_msg = None
             user_msg = ""
@@ -343,10 +367,20 @@ async def call_model(
         
         if "base_url" in config and config["base_url"]:
             kwargs["api_base"] = config["base_url"]
+            kwargs["base_url"] = config["base_url"] # Double-bagging for OpenAI v1
+            kwargs["custom_llm_provider"] = "openai" # Force OpenAI-compatible mode
+        
+        # Ensure api_key is set for local providers (LiteLLM requirement for openai/ prefix)
         if "api_key" in config and config["api_key"]:
             kwargs["api_key"] = config["api_key"]
+        elif provider in local_mapping or "api_base" in kwargs:
+            kwargs["api_key"] = "not-needed"
+
         if actual_timeout:
             kwargs["timeout"] = actual_timeout
+
+        # DEBUG
+        print(f"DEBUG: Calling model={model} via LiteLLM as {litellm_model} @ {kwargs.get('api_base')}")
 
         response = await _await_if_needed(_run_completion(**kwargs))
 

@@ -193,6 +193,16 @@ BUILTIN_SKILLS: List[Skill] = [
             SkillParameter("threshold", "number", "Threshold for correlation links (0.0-1.0)", required=False, default=0.75),
         ],
     ),
+    Skill(
+        id="code_scan",
+        name="Neural Code Scan",
+        description="Trigger a recursive tree-sitter scan of the workspace to build the structural graph (folders, files, classes, functions).",
+        category="knowledge",
+        parameters=[
+            SkillParameter("root_dir", "string", "Optional subdirectory to limit the scan (relative to workspace root)", required=False, default=""),
+            SkillParameter("deep_scan", "boolean", "Whether to perform deep AST analysis", required=False, default=True),
+        ],
+    ),
 ]
 
 
@@ -346,6 +356,33 @@ async def _execute_kg3d_ingest(workspace: str, **kwargs) -> str:
     return "✅ Knowledge Graph synthesis and community detection complete."
 
 
+async def _execute_code_scan(workspace: str, **kwargs) -> str:
+    """Execute code_scan skill - triggers background tree-sitter scan."""
+    import uuid
+    from .workspace import get_workspace_path
+    from ..graph.code_analyzer import CodeGraphAnalyzer
+    from ..graph.clustering_service import ClusteringService
+    
+    run_id = str(uuid.uuid4())
+    ws_path = get_workspace_path(workspace)
+    root_dir = kwargs.get("root_dir", "")
+    deep_scan = bool(kwargs.get("deep_scan", True))
+    
+    # Run analyzer
+    analyzer = CodeGraphAnalyzer(str(ws_path))
+    analyzer.analyze_workspace(root_dir, deep_scan=deep_scan)
+    analyzer.save_to_neo4j(workspace, run_id, name=kwargs.get("name") or "Swarm Code Scan")
+    
+    # Run clustering
+    await ClusteringService.run_lpa_on_workspace(workspace)
+    
+    return json.dumps({
+        "status": "completed",
+        "run_id": run_id,
+        "message": f"Code scan and clustering completed for {workspace}."
+    })
+
+
 # Map skill IDs to their handler functions
 SKILL_HANDLERS: Dict[str, Callable] = {
     "search_kb": _execute_search_kb,
@@ -359,6 +396,7 @@ SKILL_HANDLERS: Dict[str, Callable] = {
     "query_graph": _execute_query_graph,
     "rag_ingest": _execute_rag_ingest,
     "kg3d_ingest": _execute_kg3d_ingest,
+    "code_scan": _execute_code_scan,
 }
 
 

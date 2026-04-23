@@ -248,11 +248,12 @@ def generate_ascii_dag(
 
 def assign_models(
     tasks: List[Dict[str, Any]],
-    model_registry: Dict[str, Dict[str, Any]]
+    model_registry: Dict[str, Dict[str, Any]],
+    default_model: Optional[str] = None
 ) -> Dict[str, str]:
     """
     Assign optimal models to tasks based on their role/complexity and keywords.
-    Prefers local NPU-accelerated models if they match the desired capability.
+    If default_model is provided, it is used unless a more specific override is found.
     """
     assignment: Dict[str, str] = {}
     
@@ -266,20 +267,28 @@ def assign_models(
     local_fast = next((k for k, v in model_registry.items() if "simple_tasks" in v.get("use_for", []) and v.get("cost_per_1k", 1.0) == 0), None)
 
     for task in tasks:
+        # 1. Explicit task-level override
+        if task.get("assigned_model"):
+            assignment[task["task_id"]] = task["assigned_model"]
+            continue
+            
+        # 2. Use manifest-level default if it's specific
+        if default_model and default_model not in ("default", "active"):
+             assignment[task["task_id"]] = default_model
+             continue
+
         desc_lower = task.get("description", "").lower()
         words = set(desc_lower.split())
         complexity = task.get("complexity", "medium")
         
-        # Determine the "functional type" of the task
+        # 3. Heuristic assignment
         if complexity == "high" or (words & reasoning_keywords):
-            # Prefer local reasoning (e.g. DeepSeek-R1-FLM) if available
             assignment[task["task_id"]] = local_reasoning or model_registry.get("reasoning", {}).get("model", "gpt-4-turbo")
         elif words & writing_keywords:
             assignment[task["task_id"]] = local_writing or model_registry.get("writing", {}).get("model", "claude-3-sonnet-20240229")
         elif words & fast_keywords:
             assignment[task["task_id"]] = local_fast or model_registry.get("fast", {}).get("model", "gpt-3.5-turbo")
         else:
-            # Default to the task's pre-assigned model or a safe local fallback
-            assignment[task["task_id"]] = task.get("assigned_model") or local_fast or "local_ollama"
+            assignment[task["task_id"]] = local_fast or "local_lemonade"
     
     return assignment
