@@ -508,36 +508,74 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
         return tbl
 
     # ─── 8. Per-task API executor ────────────────────────────────────────────
+    # Shared state used to pass discovered artefacts between tasks
+    # (e.g. pdf_extract finds nested PDFs; rag_ingest uses them)
+    task_results: Dict[str, Any] = {}
+
     async def _run_task(tid: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=360.0) as client:
             if tid == "pdf_extract":
-                # ── 1. Flat check: staging/ (raw) and data_in/ (markdown) ──────
-                r = await client.get(f"{API_BASE}/api/files", headers=_H,
-                                     params={"workspace": args.workspace})
-                r.raise_for_status()
-                data    = r.json()
-                staging = data.get("staging", [])
-                data_in = data.get("data_in", [])
+                # Recursive scan finds files at ANY depth (handles data_in/staging/*.pdf)
+                rr = await client.get(
+                    f"{API_BASE}/api/files/recursive-scan", headers=_H,
+                    params={"workspace": args.workspace}, timeout=30.0,
+                )
+                rr.raise_for_status()
+                all_files = rr.json().get("files", [])
 
-                if staging:
-                    # Raw docs in staging/ → convert via Docling
+                def _rel_to(prefix: str, p: str) -> Optional[str]:
+                    """If path starts with prefix (Windows or POSIX), return it stripped."""
+                    for sep in ("\\", "/"):
+                        head = f"{prefix}{sep}"
+                        if p.startswith(head):
+                            return p[len(head):].replace("\\", "/")
+                    return None
+
+                # Collect ingestible docs already under data_in/ (any depth)
+                data_in_ingestible: List[str] = []       # relative to data_in/
+                data_in_md:         List[str] = []
+                staging_top:        List[str] = []       # top-level staging/
+                for f in all_files:
+                    path = f.get("path", "") or ""
+                    name = f.get("name", "") or ""
+                    ext  = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+                    rel = _rel_to("data_in", path)
+                    if rel is not None:
+                        if ext in ("pdf", "docx", "pptx", "txt", "html"):
+                            data_in_ingestible.append(rel)
+                        if ext == "md":
+                            data_in_md.append(rel)
+                    elif _rel_to("staging", path) is not None:
+                        if ext in ("pdf", "docx", "pptx", "txt", "html", "md"):
+                            staging_top.append(_rel_to("staging", path) or name)
+
+                # Case A: top-level staging/ has raw docs → flag for later handling
+                if staging_top:
+                    task_results["staging_files"] = staging_top
                     return {
-                        "staging_files": len(staging),
-                        "files": [f.get("name", str(f)) for f in staging[:5]],
-                        "status": "converted",
+                        "staging_files": len(staging_top),
+                        "files":         staging_top[:5],
+                        "status":        "converted",
                     }
 
-                md_files = [f for f in data_in
-                            if str(f.get("name", f)).endswith(".md")]
-                if md_files:
+                # Case B: markdown already in data_in/ (any depth) → nothing to do
+                if data_in_md and not data_in_ingestible:
                     return {
-                        "staging_files": 0,
-                        "data_in_files": len(data_in),
-                        "md_files":      len(md_files),
-                        "status":        "already_converted",
+                        "md_files": len(data_in_md),
+                        "status":   "already_converted",
                     }
 
-                # ── 2. ChromaDB already has chunks → docs were previously ingested ──
+                # Case C: ingestible docs in data_in/ (pdfs in staging/ subdir, etc.)
+                # Hand them to rag_ingest via shared task_results
+                if data_in_ingestible:
+                    task_results["pdf_files"] = data_in_ingestible
+                    return {
+                        "pdf_count": len(data_in_ingestible),
+                        "paths":     data_in_ingestible[:3],
+                        "status":    "pdfs_found",
+                    }
+
+                # Case D: ChromaDB already has chunks from a previous run
                 try:
                     rs = await client.get(
                         f"{API_BASE}/api/rag/status", headers=_H,
@@ -553,30 +591,10 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                 except Exception:
                     pass
 
-                # ── 3. Recursive scan — PDFs may be nested in data_in/staging/ ──
-                try:
-                    rr = await client.get(
-                        f"{API_BASE}/api/files/recursive-scan", headers=_H,
-                        params={"workspace": args.workspace}, timeout=30.0,
-                    )
-                    if rr.status_code == 200:
-                        all_files = rr.json().get("files", [])
-                        pdfs = [
-                            f for f in all_files
-                            if f.get("type", "").lower() in ("pdf", "docx", "doc")
-                        ]
-                        if pdfs:
-                            return {
-                                "status":    "pdfs_in_subdirs",
-                                "pdf_count": len(pdfs),
-                                "paths":     [f.get("path") for f in pdfs[:3]],
-                            }
-                except Exception:
-                    pass
-
                 raise RuntimeError(
-                    "No docs in staging/, data_in/, or ChromaDB — "
-                    "upload architecture docs first (Studio → Notebook → Upload)."
+                    "No ingestible docs found anywhere under the workspace and "
+                    "ChromaDB is empty — upload architecture docs first "
+                    "(Studio → Notebook → Upload)."
                 )
 
             elif tid == "code_scan":
@@ -612,10 +630,17 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                 return {"status": "scan_started", "run_id": scan_run_id}
 
             elif tid == "rag_ingest":
+                # If pdf_extract found nested docs, pass their explicit paths
+                # (otherwise /api/rag/ingest only scans data_in/*.* at top level)
+                pdf_files = task_results.get("pdf_files")
+                body: Dict[str, Any] = {
+                    "workspace":      args.workspace,
+                    "deep_synthesis": False,
+                }
+                if pdf_files:
+                    body["files"] = pdf_files
                 r = await client.post(
-                    f"{API_BASE}/api/rag/ingest", headers=_HJ,
-                    json={"workspace": args.workspace, "deep_synthesis": False,
-                          "strategy": args.strategy},
+                    f"{API_BASE}/api/rag/ingest", headers=_HJ, json=body,
                 )
                 r.raise_for_status()
                 return r.json()
