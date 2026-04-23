@@ -217,7 +217,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
     run_it   = args.run_after or args.json
     src_path = args.src.rstrip("/")
-    ts       = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    ts       = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     manifest_id = f"enrich-{args.workspace}-{ts}"
     run_id      = uuid.uuid4().hex[:12]
     started_at  = datetime.now(timezone.utc)
@@ -439,6 +439,20 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     ))
     console.print()
 
+    # ─── 5b. Pre-flight: verify API is reachable ────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as _hc:
+            _probe = await _hc.get(f"{API_BASE}/api/system/pulse", headers=_H)
+            _probe.raise_for_status()
+    except Exception as _probe_err:
+        console.print(
+            f"\n[bold red]✗  Cannot reach Benny API at {API_BASE}[/]\n"
+            f"   [red]{type(_probe_err).__name__}: {_probe_err}[/]\n\n"
+            f"   [dim]Start the server first:[/]\n"
+            f"   [bold cyan]benny up --home $BENNY_HOME[/]\n"
+        )
+        return 1
+
     # ─── 6. Start OpenLineage workflow ───────────────────────────────────────
     lineage = BennyLineageClient()
     try:
@@ -497,25 +511,67 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     async def _run_task(tid: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=360.0) as client:
             if tid == "pdf_extract":
-                # Verify staging/ has files to process
+                # Check staging/ (raw docs) and data_in/ (already-converted Markdown)
                 r = await client.get(f"{API_BASE}/api/files", headers=_H,
                                      params={"workspace": args.workspace})
                 r.raise_for_status()
-                data = r.json()
+                data    = r.json()
                 staging = data.get("staging", [])
-                if not staging:
+                data_in = data.get("data_in", [])
+                if staging:
+                    # Raw docs present — convert via Docling
+                    return {
+                        "staging_files": len(staging),
+                        "files": [f.get("name", str(f)) for f in staging[:5]],
+                        "status": "converted",
+                    }
+                elif data_in:
+                    # Already converted to Markdown in data_in/ — nothing to do here
+                    md_files = [f for f in data_in
+                                if str(f.get("name", f)).endswith(".md")]
+                    return {
+                        "staging_files": 0,
+                        "data_in_files": len(data_in),
+                        "md_files":      len(md_files),
+                        "status":        "already_converted",
+                    }
+                else:
                     raise RuntimeError(
-                        "No files found in staging/ — upload architecture docs first."
+                        "No files in staging/ or data_in/ — "
+                        "upload architecture docs first (Studio → Notebook → Upload)."
                     )
-                return {"staging_files": len(staging), "files": [f.get("name", f) for f in staging[:5]]}
 
             elif tid == "code_scan":
+                # Start the background Tree-Sitter scan (returns immediately)
                 r = await client.post(
                     f"{API_BASE}/api/graph/code/generate", headers=_HJ,
                     json={"workspace": args.workspace, "root_dir": src_path},
+                    timeout=30.0,
                 )
                 r.raise_for_status()
-                return r.json()
+                scan_run_id = r.json().get("run_id", "")
+                # Poll GET /api/graph/code until nodes appear (max 6 min, 5 s intervals)
+                for _attempt in range(72):
+                    await asyncio.sleep(5)
+                    try:
+                        gr = await client.get(
+                            f"{API_BASE}/api/graph/code", headers=_H,
+                            params={"workspace": args.workspace},
+                            timeout=10.0,
+                        )
+                        if gr.status_code == 200:
+                            gdata = gr.json()
+                            nodes = gdata.get("nodes", [])
+                            if nodes:
+                                return {
+                                    "code_nodes": len(nodes),
+                                    "run_id":     scan_run_id,
+                                    "status":     "complete",
+                                }
+                    except Exception:
+                        pass
+                # Scan accepted but we couldn't confirm nodes yet — proceed optimistically
+                return {"status": "scan_started", "run_id": scan_run_id}
 
             elif tid == "rag_ingest":
                 r = await client.post(
@@ -673,7 +729,8 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
                 if isinstance(result, Exception):
                     task_status[tid] = "failed"
-                    err = str(result)
+                    _raw = str(result)
+                    err  = _raw if _raw else f"{type(result).__name__} (no message)"
                     task_error[tid] = err
                     task_note[tid]  = (err[:20] + "\u2026") if len(err) > 20 else err
                     all_errors.append(f"{tid}: {err}")
@@ -692,6 +749,9 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                     if isinstance(result, dict):
                         for key, label in [
                             ("staging_files",        "{v} staging files"),
+                            ("data_in_files",        "{v} data_in files"),
+                            ("md_files",             "{v} md files"),
+                            ("code_nodes",           "{v} code nodes"),
                             ("correlates_with_count", "{v} corr. edges"),
                             ("corr_count",            "{v} corr. edges"),
                             ("concept_count",         "{v} concepts"),
