@@ -197,6 +197,8 @@ The registered local providers (`LOCAL_PROVIDERS` in `benny/core/models.py`) are
 
 ## 6. Observability
 
+> **Full details**: [docs/operations/LOG_AND_LINEAGE_GUIDE.md](LOG_AND_LINEAGE_GUIDE.md) — covers every log file, SSE events, Marquez lineage queries, Phoenix tracing, AER records, and a full end-to-end process trace.
+
 ### 6.1 Structured LLM log
 
 `$BENNY_HOME/logs/llm_calls.jsonl` — one JSON object per call:
@@ -205,37 +207,76 @@ The registered local providers (`LOCAL_PROVIDERS` in `benny/core/models.py`) are
 {"ts": "2026-04-19T14:29:15Z", "run_id": "run-abc", "model": "lemonade/Llama-3.1-8B", "ok": true, "provider": "lemonade", "duration_ms": 842}
 ```
 
-This file is **git-ignored** (see `.gitignore`). Tail or grep it to answer "why did this run cost $X / take Y seconds?".
+This file is **git-ignored**. Tail or grep it to answer "why did this run cost $X / take Y seconds?".
+
+```bash
+# Show failed calls
+grep '"ok": false' $BENNY_HOME/logs/llm_calls.jsonl | jq '{ts, model, run_id}'
+
+# Follow the API log
+tail -f $BENNY_HOME/logs/api.log
+```
 
 ### 6.2 Event Bus / SSE
 
-`/api/workflows/execute/{id}` is an SSE stream. Connect with curl:
+`/api/workflows/execute/{id}` is an SSE stream. Connect with curl to watch live:
 
 ```bash
 curl -N -H "Accept: text/event-stream" \
+     -H "X-Benny-API-Key: benny-mesh-2026-auth" \
      http://127.0.0.1:8005/api/workflows/execute/<manifest_id>
 ```
 
 Events: `plan_updated`, `wave_started`, `task_started`, `task_completed`, `run_finished`.
 
-### 6.3 Lineage
+### 6.3 Lineage (Marquez)
 
-Marquez integration is optional (set `MARQUEZ_URL`). Each run emits OpenLineage events via `benny/governance/lineage.py`. `RunRecord.governance_url` carries the Marquez URL.
+Marquez integration is optional. Set `MARQUEZ_URL=http://localhost:5000` to enable. Each run emits OpenLineage events via `benny/governance/lineage.py`. Browse lineage at **http://localhost:3010**.
 
-### 6.4 System health
+```bash
+docker compose up -d marquez-db marquez-api marquez-web
+export MARQUEZ_URL=http://localhost:5000
+```
+
+`RunRecord.governance_url` carries the direct Marquez job-run URL for a completed run.
+
+### 6.4 Distributed Tracing (Phoenix)
+
+Phoenix captures LLM spans (prompts, completions, token counts). Set `PHOENIX_ENDPOINT=http://localhost:4317`. Browse traces at **http://localhost:6006**.
+
+```bash
+docker compose up -d phoenix
+export PHOENIX_ENDPOINT=http://localhost:4317
+```
+
+### 6.5 System health endpoint
 
 `/api/system/*` (see `benny/api/system_routes.py`) exposes Neo4j, disk, and workspace metrics.
+
+```bash
+curl -H "X-Benny-API-Key: benny-mesh-2026-auth" \
+     http://127.0.0.1:8005/api/system/metrics | jq .
+```
 
 ---
 
 ## 7. Workspaces
 
+> **Full details**: [architecture/WORKSPACE_GUIDE.md](../../architecture/WORKSPACE_GUIDE.md) — covers workspace anatomy, the c4_test and c5_test workspaces, graph visualisation surfaces, and how to create a new workspace.
+
 - A workspace is a folder under `$BENNY_HOME/workspaces/<name>/`.
-- Each workspace has a `manifest.json` (workspace-level, not to be confused with `SwarmManifest`) defining `default_model`, tools, and wiki config.
-- Switch the current workspace via `--workspace <name>` on any CLI verb or `?workspace=<name>` on the HTTP API.
+- Each workspace has a `manifest.yaml` defining `default_model`, tools, and wiki config.
+- Switch via `--workspace <name>` on any CLI verb or `?workspace=<name>` on the HTTP API.
 - `BENNY_WORKSPACE` env var sets the global default.
 
-Wiki articles live at `$BENNY_HOME/workspaces/<name>/.benny/wiki/*.md` and are served via `/api/rag/wiki/articles` and `/api/rag/wiki/article/{name}`.
+**Active test workspaces:**
+
+| Workspace | Purpose | Graph types |
+|-----------|---------|-------------|
+| `c4_test` | RAG / retrieval test (H.G. Wells texts ingested) | Knowledge graph |
+| `c5_test` | Code analysis + architecture mapping (UML/PDF ingested; `src/dangpy` for code graph) | Knowledge + Code graph (enrichment pending) |
+
+Wiki articles live at `$BENNY_HOME/workspaces/<name>/.benny/wiki/*.md` and are served via `/api/rag/wiki/articles`.
 
 ---
 
