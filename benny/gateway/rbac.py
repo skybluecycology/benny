@@ -150,6 +150,47 @@ def _create_default_policy() -> RBACPolicy:
                 allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
                 allowed_operations=[ToolOperation.EXECUTE],
             ),
+            ToolPermission(
+                tool_id="extract_pdf",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="code_scan",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="validate_enrichment",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="query_csv",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="list_files",
+                allowed_roles=[AgentRole.VIEWER, AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.REVIEWER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
+            ),
+            # Graph Traversal tools
+            ToolPermission(
+                tool_id="get_concept_neighbors",
+                allowed_roles=[AgentRole.VIEWER, AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.REVIEWER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="search_similar_concepts",
+                allowed_roles=[AgentRole.VIEWER, AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.REVIEWER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.READ, ToolOperation.EXECUTE],
+            ),
+            ToolPermission(
+                tool_id="add_knowledge_triple",
+                allowed_roles=[AgentRole.EXECUTOR, AgentRole.PLANNER, AgentRole.ADMIN],
+                allowed_operations=[ToolOperation.WRITE, ToolOperation.EXECUTE],
+            ),
         ],
         rate_limits={
             AgentRole.VIEWER: 30,

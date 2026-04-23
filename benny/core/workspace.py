@@ -527,4 +527,4 @@ def smart_output(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding='utf-8')
     
-    return f"📥 Content saved: {server_url}/api/files/{workspace_id}/{filename}"
+    return f"[SAVED] Content saved: {server_url}/api/files/{workspace_id}/{filename}"

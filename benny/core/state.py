@@ -63,6 +63,8 @@ class TaskItem(TypedDict):
     complexity: Optional[str]          # high, medium, low
     is_pillar: bool                    # True if this is a high-level bucket needing expansion
     is_expanded: bool                  # True if this pillar has already been decomposed
+    deterministic: bool                # True to bypass LLM — run skill_hint directly with skill_args
+    skill_args: Dict[str, Any]         # Pre-defined arguments passed to the skill for deterministic tasks
 
 
 class PartialResult(TypedDict):

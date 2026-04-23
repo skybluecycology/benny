@@ -15,7 +15,7 @@ Usage:
 
 Design: this is the user's main interface to the plan-then-run loop. The
 same JSON that appears in `manifest.json` is what the UI canvas renders
-and what past runs reference. Share the file → share the workflow.
+and what past runs reference. Share the file -> share the workflow.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ async def cmd_plan(args: argparse.Namespace) -> int:
     if args.input:
         print(f"[plan] inputs: {args.input}")
     if output_spec.word_count_target:
-        print(f"[plan] target: {output_spec.word_count_target} words → {output_spec.format.value}")
+        print(f"[plan] target: {output_spec.word_count_target} words -> {output_spec.format.value}")
 
     manifest = await plan_from_requirement(
         requirement=args.requirement,
@@ -85,7 +85,7 @@ async def cmd_plan(args: argparse.Namespace) -> int:
     rendered = manifest.model_dump_json(indent=2)
     if out_path:
         out_path.write_text(rendered, encoding="utf-8")
-        print(f"[plan] wrote manifest → {out_path}")
+        print(f"[plan] wrote manifest -> {out_path}")
     else:
         print(rendered)
 
@@ -170,8 +170,8 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
     """Build (and optionally run) the knowledge enrichment pipeline manifest.
 
     The pipeline is deterministic — no LLM planning. It always produces the
-    same DAG: pdf_extract + code_scan → rag_ingest → deep_synthesis →
-    semantic_correlate → validate_enrichment → generate_report.
+    same DAG: pdf_extract + code_scan -> rag_ingest -> deep_synthesis ->
+    semantic_correlate -> validate_enrichment -> generate_report.
 
     Usage:
         benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json
@@ -206,6 +206,8 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
             id="pdf_extract",
             description=f"[DETERMINISTIC] Convert PDFs and documents in staging/ to Markdown using Docling.",
             skill_hint="extract_pdf",
+            deterministic=True,
+            skill_args={"pdf_path": "staging/"},
             wave=0,
             complexity="medium",
             node_type="task",
@@ -213,8 +215,10 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
         ),
         ManifestTask(
             id="code_scan",
-            description=f"[DETERMINISTIC] Tree-Sitter recursive analysis of {src_path}/ → Neo4j code graph.",
+            description=f"[DETERMINISTIC] Tree-Sitter recursive analysis of {src_path}/ -> Neo4j code graph.",
             skill_hint="code_scan",
+            deterministic=True,
+            skill_args={"root_dir": src_path, "deep_scan": True, "name": f"Enrich Code Scan - {args.workspace}"},
             wave=0,
             complexity="high",
             node_type="task",
@@ -224,6 +228,15 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
             id="rag_ingest",
             description="[DETERMINISTIC] Chunk and embed extracted Markdown into ChromaDB.",
             skill_hint="rag_ingest",
+            deterministic=True,
+            skill_args={
+                "files": json.dumps(["staging/"]),
+                "strategy": args.strategy,
+                "deep_synthesis": False,
+                "provider": "lemonade",
+                "embedding_provider": "local",
+                "name": f"Enrich RAG Ingest - {args.workspace}",
+            },
             dependencies=["pdf_extract"],
             wave=1,
             complexity="medium",
@@ -231,7 +244,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
         ),
         ManifestTask(
             id="deep_synthesis",
-            description="[AGENTIC] Extract knowledge triples (Concept → Concept) and persist as REL edges with citations.",
+            description="[AGENTIC] Extract knowledge triples (Concept -> Concept) and persist as REL edges with citations.",
             skill_hint="rag_ingest",
             assigned_model=model,
             dependencies=["rag_ingest"],
@@ -245,7 +258,9 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
                 f"[DETERMINISTIC] Semantic correlation suite (Neural Spark): create CORRELATES_WITH edges "
                 f"linking Concepts to CodeEntities. threshold={args.threshold} strategy={args.strategy}."
             ),
-            skill_hint="semantic_correlate",
+            skill_hint="kg3d_ingest",
+            deterministic=True,
+            skill_args={"threshold": args.threshold},
             dependencies=["code_scan", "deep_synthesis"],
             wave=3,
             complexity="medium",
@@ -255,6 +270,8 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
             id="validate_enrichment",
             description="[DETERMINISTIC] Verify CORRELATES_WITH edges exist in Neo4j. Fail if zero found.",
             skill_hint="validate_enrichment",
+            deterministic=True,
+            skill_args={},
             dependencies=["semantic_correlate"],
             wave=4,
             complexity="low",
@@ -297,7 +314,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
     manifest = SwarmManifest(
         id=manifest_id,
         name=f"Knowledge Enrichment — {args.workspace}",
-        description="Knowledge enrichment pipeline: extract → ingest → synthesise → correlate → validate → report.",
+        description="Knowledge enrichment pipeline: extract -> ingest -> synthesise -> correlate -> validate -> report.",
         requirement=(
             "Build the knowledge enrichment overlay for the Studio ENRICH toggle: "
             f"scan source code in {src_path}/, extract knowledge triples from ingested documents, "
@@ -335,7 +352,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered, encoding="utf-8")
-        print(f"[enrich] manifest → {out_path}")
+        print(f"[enrich] manifest -> {out_path}")
 
     if not run_it:
         if not out_path:
@@ -476,7 +493,7 @@ def build_parser() -> argparse.ArgumentParser:
     # enrich — knowledge enrichment pipeline
     p_enrich = sub.add_parser(
         "enrich",
-        help="Build and optionally run the knowledge enrichment pipeline (code scan → synthesis → correlate)",
+        help="Build and optionally run the knowledge enrichment pipeline (code scan -> synthesis -> correlate)",
     )
     p_enrich.add_argument("--workspace", default="c5_test", help="Target workspace (default: c5_test)")
     p_enrich.add_argument("--src", default="src/", help="Source path to scan with Tree-Sitter (relative to workspace, default: src/)")

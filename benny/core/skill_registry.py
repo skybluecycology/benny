@@ -203,6 +203,13 @@ BUILTIN_SKILLS: List[Skill] = [
             SkillParameter("deep_scan", "boolean", "Whether to perform deep AST analysis", required=False, default=True),
         ],
     ),
+    Skill(
+        id="validate_enrichment",
+        name="Validate Enrichment",
+        description="Verify that the enrichment pipeline successfully created CORRELATES_WITH edges in the knowledge graph.",
+        category="knowledge",
+        parameters=[],
+    ),
 ]
 
 
@@ -353,7 +360,7 @@ async def _execute_kg3d_ingest(workspace: str, **kwargs) -> str:
     # 2. Run correlation suite (links concepts to code)
     await run_full_correlation_suite(workspace, threshold=threshold)
     
-    return "✅ Knowledge Graph synthesis and community detection complete."
+    return "[OK] Knowledge Graph synthesis and community detection complete."
 
 
 async def _execute_code_scan(workspace: str, **kwargs) -> str:
@@ -383,6 +390,20 @@ async def _execute_code_scan(workspace: str, **kwargs) -> str:
     })
 
 
+async def _execute_validate_enrichment(workspace: str, **kwargs) -> str:
+    """Execute validate_enrichment skill."""
+    from .graph_db import run_cypher
+    
+    query = "MATCH ()-[r:CORRELATES_WITH]->() WHERE r.workspace = $workspace RETURN count(r) AS count"
+    results = run_cypher(query, {"workspace": workspace})
+    count = results[0]["count"] if results else 0
+    
+    if count > 0:
+        return f"[OK] Validation successful: Found {count} CORRELATES_WITH edges in the graph."
+    else:
+        raise ValueError(f"[!] Validation failed: No CORRELATES_WITH edges found in workspace '{workspace}'.")
+
+
 # Map skill IDs to their handler functions
 SKILL_HANDLERS: Dict[str, Callable] = {
     "search_kb": _execute_search_kb,
@@ -397,6 +418,7 @@ SKILL_HANDLERS: Dict[str, Callable] = {
     "rag_ingest": _execute_rag_ingest,
     "kg3d_ingest": _execute_kg3d_ingest,
     "code_scan": _execute_code_scan,
+    "validate_enrichment": _execute_validate_enrichment,
 }
 
 
@@ -526,7 +548,7 @@ class SkillRegistry:
                 agent_id=agent_id,
             )
             if not permitted:
-                return f"❌ Permission denied: role '{agent_role}' cannot execute '{skill_id}'"
+                return f"[!] Permission denied: role '{agent_role}' cannot execute '{skill_id}'"
         except Exception as e:
             # If RBAC system fails, allow execution but log warning
             import logging
@@ -535,11 +557,11 @@ class SkillRegistry:
         # Least Skills Security Check (Permission Manifest)
         violation = validate_tool_access(agent_id, skill_id, workspace)
         if violation:
-            return f"❌ SECURITY_PERMISSION_VIOLATION: {violation.message}"
+            return f"[!] SECURITY_PERMISSION_VIOLATION: {violation.message}"
         
         handler = SKILL_HANDLERS.get(skill_id)
         if not handler:
-            return f"❌ Unknown skill: {skill_id}"
+            return f"[!] Unknown skill: {skill_id}"
         try:
             result = await handler(workspace=workspace, active_nexus_id=active_nexus_id, **kwargs)
             
@@ -550,7 +572,7 @@ class SkillRegistry:
             return guard_tool_output(result, model="fastflowlm", tool_name=skill_id)
             
         except Exception as e:
-            return f"❌ Skill execution error ({skill_id}): {str(e)}"
+            return f"[!] Skill execution error ({skill_id}): {str(e)}"
 
     def get_catalog(self, workspace: str) -> Dict[str, List[dict]]:
         """Get skills grouped by category for progressive discovery."""

@@ -8,14 +8,29 @@ from typing import Optional, Dict, Any
 from contextlib import contextmanager
 import functools
 
-# Phoenix tracing imports
+# Phoenix tracing — availability flag only; actual imports are lazy (inside init_tracing)
+# so the module never blocks at startup waiting for a Phoenix server connection.
 try:
-    from phoenix.otel import register
-    from opentelemetry import trace
-    from opentelemetry.trace import Status, StatusCode
+    import phoenix  # noqa: F401 — presence check only
     PHOENIX_AVAILABLE = True
 except ImportError:
     PHOENIX_AVAILABLE = False
+
+# Lazy handles for opentelemetry Status/StatusCode — only valid after init_tracing()
+_Status = None
+_StatusCode = None
+
+
+def _get_status(code, msg: str = ""):
+    """Return an opentelemetry Status object if tracing is active, else None."""
+    global _Status, _StatusCode
+    if _Status is None:
+        try:
+            from opentelemetry.trace import Status, StatusCode  # noqa
+            _Status, _StatusCode = Status, StatusCode
+        except ImportError:
+            return None
+    return _Status(_StatusCode[code] if isinstance(code, str) else code, msg) if msg else _Status(_StatusCode[code] if isinstance(code, str) else code)
 
 
 # =============================================================================
@@ -39,25 +54,28 @@ def init_tracing(
 ) -> bool:
     """
     Initialize Phoenix tracing.
+    Lazily imports phoenix.otel only when called so that module-level import
+    of tracing.py never blocks on a missing Phoenix server.
     Returns True if successful, False if Phoenix is not available.
     """
     global _tracer
-    
+
     if not PHOENIX_AVAILABLE:
-        print("Phoenix tracing not available - install arize-phoenix")
         return False
-    
+
     try:
-        # Register with Phoenix
+        from phoenix.otel import register  # lazy import
+        from opentelemetry import trace
+
         register(
             endpoint=f"{phoenix_url}/v1/traces",
             project_name=service_name
         )
-        
         _tracer = trace.get_tracer(service_name)
         return True
     except Exception as e:
-        print(f"Failed to initialize Phoenix tracing: {e}")
+        import logging as _log
+        _log.getLogger(__name__).warning("Failed to initialize Phoenix tracing: %s", e)
         return False
 
 
@@ -95,10 +113,10 @@ def trace_llm_call(model: str, provider: str):
                         span.set_attribute("llm.completion_tokens", result.usage.completion_tokens)
                         span.set_attribute("llm.total_tokens", result.usage.total_tokens)
                     
-                    span.set_status(Status(StatusCode.OK))
+                    span.set_status(_get_status("OK"))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_status(_get_status("ERROR", str(e)))
                     span.record_exception(e)
                     raise
         
@@ -113,10 +131,10 @@ def trace_llm_call(model: str, provider: str):
                 
                 try:
                     result = func(*args, **kwargs)
-                    span.set_status(Status(StatusCode.OK))
+                    span.set_status(_get_status("OK"))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_status(_get_status("ERROR", str(e)))
                     span.record_exception(e)
                     raise
         
@@ -145,12 +163,12 @@ def trace_tool_execution(tool_name: str):
                 try:
                     result = func(*args, **kwargs)
                     span.set_attribute("tool.success", True)
-                    span.set_status(Status(StatusCode.OK))
+                    span.set_status(_get_status("OK"))
                     return result
                 except Exception as e:
                     span.set_attribute("tool.success", False)
                     span.set_attribute("tool.error", str(e))
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_status(_get_status("ERROR", str(e)))
                     span.record_exception(e)
                     raise
         return wrapper
@@ -174,10 +192,10 @@ def trace_workflow(workflow_name: str):
                 
                 try:
                     result = await func(*args, **kwargs)
-                    span.set_status(Status(StatusCode.OK))
+                    span.set_status(_get_status("OK"))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_status(_get_status("ERROR", str(e)))
                     span.record_exception(e)
                     raise
         
@@ -191,10 +209,10 @@ def trace_workflow(workflow_name: str):
                 
                 try:
                     result = func(*args, **kwargs)
-                    span.set_status(Status(StatusCode.OK))
+                    span.set_status(_get_status("OK"))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.set_status(_get_status("ERROR", str(e)))
                     span.record_exception(e)
                     raise
         
@@ -230,9 +248,9 @@ def trace_span(name: str, attributes: Optional[Dict[str, Any]] = None):
         
         try:
             yield span
-            span.set_status(Status(StatusCode.OK))
+            span.set_status(_get_status("OK"))
         except Exception as e:
-            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.set_status(_get_status("ERROR", str(e)))
             span.record_exception(e)
             raise
 

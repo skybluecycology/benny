@@ -601,11 +601,54 @@ async def executor_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 skill_content = skill_obj.content
 
         # NEW: Least Skills Security
-        assigned_skills = task.get("assigned_skills", [])
+        assigned_skills = list(task.get("assigned_skills", []))
+        if skill_hint and skill_hint not in assigned_skills:
+            assigned_skills.append(skill_hint)
+        
         manifest = create_ephemeral_manifest(execution_id, assigned_skills)
         register_manifest(manifest)
-        
-        execution_id = state.get("execution_id")
+
+        # DETERMINISTIC BYPASS — skip LLM entirely for manifest-declared atomic tasks
+        if task.get("deterministic") and skill_hint:
+            logger.info("[DETERMINISTIC] Bypassing LLM for task %s using skill %s", task_id, skill_hint)
+            skill_args = task.get("skill_args") or {}
+            try:
+                skill_result = await registry.execute_skill(
+                    skill_hint, 
+                    workspace_id, 
+                    agent_id=execution_id, 
+                    **skill_args
+                )
+                execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                task_manager.add_event(execution_id, "node_completed", {
+                    "nodeId": "executor",
+                    "task_id": task_id,
+                    "mode": "deterministic",
+                    "execution_time_ms": execution_time_ms,
+                })
+                return {
+                    "partial_results": [{
+                        "task_id": task_id,
+                        "content": skill_result,
+                        "error": None,
+                        "status": "completed",
+                        "wave": task.get("wave", 0),
+                        "execution_time_ms": execution_time_ms,
+                    }]
+                }
+            except Exception as se:
+                logger.error("Deterministic skill execution failed for %s: %s", task_id, se)
+                return {
+                    "partial_results": [{
+                        "task_id": task_id,
+                        "content": None,
+                        "error": str(se),
+                        "status": "failed",
+                        "wave": task.get("wave", 0),
+                        "execution_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
+                    }],
+                    "errors": [str(se)],
+                }
         
         # Build tool schemas for LLM
         assigned_skills = list(task.get("assigned_skills", []))
@@ -947,6 +990,7 @@ def aggregator_node(state: SwarmState) -> Dict[str, Any]:
     reports_path = get_workspace_path(workspace, "reports")
     reports_path.mkdir(parents=True, exist_ok=True)
     artifact_path = reports_path / artifact_filename
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(final_document, encoding="utf-8")
     
     # Update Task Manager

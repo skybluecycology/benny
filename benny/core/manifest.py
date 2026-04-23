@@ -108,6 +108,8 @@ class ManifestTask(BaseModel):
     parent_id: Optional[str] = None
     is_pillar: bool = False
     is_expanded: bool = False
+    deterministic: bool = False            # When True, executor runs skill_hint directly — no LLM
+    skill_args: Dict[str, Any] = Field(default_factory=dict)  # Args forwarded to the skill
     complexity: Literal["low", "medium", "high"] = "medium"
     files_touched: List[str] = Field(default_factory=list)
     estimated_tokens: Optional[int] = None
@@ -316,6 +318,8 @@ def swarm_state_seed_from_manifest(
                 "complexity": t.complexity,
                 "is_pillar": t.is_pillar,
                 "is_expanded": t.is_expanded,
+                "deterministic": t.deterministic,
+                "skill_args": dict(t.skill_args) if t.skill_args else {},
             }
         )
 

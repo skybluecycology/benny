@@ -85,24 +85,27 @@ class TaskManager:
             "data": entry
         })
 
-        # NEW: Log to OpenLineage for formal audit trail
-        try:
-            with self._lock:
-                task = self._tasks.get(task_id)
-                workspace = task.workspace if task else "default"
-            
-            track_aer(
-                run_id=task_id,
-                job_name=f"agent_reasoning_{task_id}",
-                workspace=workspace,
-                intent=intent,
-                observation=observation,
-                inference=inference,
-                plan=plan
-            )
-        except Exception as e:
-            # Don't let lineage failures crash the task
-            print(f"[WARNING] Failed to track AER in lineage: {e}")
+        # Log to OpenLineage for formal audit trail — fire-and-forget so Marquez
+        # latency / unreachability never stalls the execution pipeline.
+        def _emit_aer():
+            try:
+                with self._lock:
+                    _task = self._tasks.get(task_id)
+                    _ws = _task.workspace if _task else "default"
+                track_aer(
+                    run_id=task_id,
+                    job_name=f"agent_reasoning_{task_id}",
+                    workspace=_ws,
+                    intent=intent,
+                    observation=observation,
+                    inference=inference,
+                    plan=plan,
+                )
+            except Exception:
+                pass  # Lineage failures must never crash the task
+
+        import threading
+        threading.Thread(target=_emit_aer, daemon=True).start()
 
     def add_tool_event(self, task_id: str, tool_name: str, args: Dict[str, Any], result: Any, nodeId: str = "executor"):
         """Record a tool invocation event."""
