@@ -1,0 +1,64 @@
+# Benny — Agent Navigation Guide
+
+This is a **local-first, multi-model AI orchestration platform**. Key facts before you start:
+
+## Architecture in one sentence
+A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangGraph swarm executor, all portable under `$BENNY_HOME`.
+
+## Where things live
+
+| What | Where |
+|------|-------|
+| **Backend API** (FastAPI, 23 route modules) | `benny/api/` |
+| **CLI entry point** | `benny_cli.py` |
+| **Frontend** (React 19, Three.js, Vite) | `frontend/src/` |
+| **Swarm executor** (LangGraph) | `benny/graph/swarm.py` |
+| **Planner** (requirement → manifest) | `benny/graph/manifest_runner.py` |
+| **LLM router + offline guard** | `benny/core/models.py` |
+| **Knowledge graph (RAG, concepts)** | `benny/api/rag_routes.py` + `benny/core/adaptive_rag.py` |
+| **Code graph (Tree-Sitter AST)** | `benny/api/graph_routes.py` + `benny/graph/code_analyzer.py` |
+| **Neo4j driver** | `benny/core/graph_db.py` |
+| **Governance / audit / lineage** | `benny/governance/` |
+| **Portable home (init/up/down)** | `benny/portable/` |
+| **MCP server for Claude** | `benny/mcp/server.py` |
+| **Docker services** | `docker-compose.yml` (Neo4j, Marquez, Phoenix, N8N) |
+
+## Documentation (read these first)
+
+- **[docs/README.md](docs/README.md)** — navigation hub for all docs
+- **[architecture/SAD.md](architecture/SAD.md)** — C4 diagrams, dual-graph design, swarm lifecycle
+- **[docs/operations/BENNY_OPERATING_MANUAL.md](docs/operations/BENNY_OPERATING_MANUAL.md)** — run book
+- **[docs/operations/LOG_AND_LINEAGE_GUIDE.md](docs/operations/LOG_AND_LINEAGE_GUIDE.md)** — logs, SSE, Marquez, Phoenix, AER
+- **[architecture/WORKSPACE_GUIDE.md](architecture/WORKSPACE_GUIDE.md)** — workspace structure + c4_test/c5_test guide
+- **[architecture/GRAPH_SCHEMA.md](architecture/GRAPH_SCHEMA.md)** — Neo4j schema
+
+## Critical rules (do not break)
+
+1. **Always use `call_model()`** (`benny/core/models.py`) — never call litellm directly. This is how offline mode, logging, and lineage fire.
+2. **Never add absolute paths** to manifests or config. Use `${BENNY_HOME}` tokens. The SR-1 gate (`pytest tests/portability`) enforces this.
+3. **Always sign manifests** with `sign_manifest()` before sharing or executing.
+4. **All HTTP API calls need** `X-Benny-API-Key: benny-mesh-2026-auth` (unless path is in `GOVERNANCE_WHITELIST`).
+5. **Never commit** `logs/`, `brain/`, `$BENNY_HOME/` contents — they are git-ignored for good reason.
+
+## Dual-graph architecture
+
+There are **two graphs** in the same Neo4j instance:
+
+- **Knowledge graph** (`Concept`, `Document`, `REL` edges) — populated from ingested PDFs/markdown. Shown in **Notebook → KnowledgeGraphCanvas**.
+- **Code graph** (`File`, `Class`, `Function`, `DEFINES`/`DEPENDS_ON` edges) — populated by Tree-Sitter analysis. Shown in **Studio → CodeGraphCanvas**.
+- **Enrichment overlay** (`CORRELATES_WITH` edges) — links both graphs; toggled in Studio (planned, see `architecture/SAD.md §6.3`).
+
+## Active test workspaces (in `$BENNY_HOME/workspaces/`)
+
+- **c4_test** — H.G. Wells texts ingested; validates RAG pipeline end-to-end.
+- **c5_test** — UML/architecture PDFs ingested to markdown; `src/dangpy` source ready for code graph analysis. Next step: run code analyser, then enable enrichment toggle to map architecture concepts onto code.
+
+## Running tests
+
+```bash
+pytest tests/ -q                      # full suite (~200 tests)
+pytest tests/release -q               # 6σ release gates
+pytest tests/portability -q           # SR-1 absolute-path auditor
+```
+
+Release gates: G-COV (≥85%), G-SR1 (≤408 path violations), G-LAT (<300ms plan), G-ERR (0 flakes), G-SIG (manifest integrity), G-OFF (offline compliance).

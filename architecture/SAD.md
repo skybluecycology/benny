@@ -1,89 +1,300 @@
 # Software Architecture Document (SAD): Benny Studio
 
-**Project**: The Neural Nexus (Benny Studio)  
-**Version**: 1.5.0 (Architect Review Edition)  
-**Status**: DRAFT  
-**Author**: Antigravity (Assistant Architect)
+**Project**: The Neural Nexus (Benny Studio)
+**Version**: 2.0.0
+**Status**: CURRENT
+**Last Updated**: 2026-04-23
 
 ---
 
 ## 1. Executive Summary
-Benny Studio is a next-generation **High-Fidelity 3D Code Intelligence System**. It aims to move beyond linear file explorers and 2D dependency maps by creating a "Neural Nexus"—a unified spatial graph where source code symbols, technical documentation, and autonomous agent history converge into a single navigable landscape.
 
-```mermaid
-graph TD
-    subgraph DataSources["Workspace Data Sources"]
-        Code[Source Code: PY/TS/JS]
-        Docs[Documentation: MD/PDF]
-    end
+Benny Studio is a **local-first, multi-model AI orchestration platform** combining three overlapping capabilities:
 
-    subgraph AnalysisEngine["Analysis & Persistence Engine"]
-        TS[Tree-Sitter Parser]
-        Docling[Docling Extraction]
-        Neo4j[(Neo4j Code Graph)]
-        Chroma[(ChromaDB Vector)]
-        SC[Semantic Correlator]
-    end
+1. **Workflow Studio** — declarative swarm execution via signed `SwarmManifest` JSON, LangGraph-backed task DAGs, HITL approval gates.
+2. **Notebook** — RAG-driven knowledge workspace: ingest PDFs/markdown, synthesise concepts, chat against a knowledge graph.
+3. **Code Intelligence** — Tree-Sitter AST extraction into Neo4j, semantic correlation with the knowledge graph, 3D spatial code navigation.
 
-    subgraph Visualization["Interaction Layer"]
-        UI[Benny Studio HUD]
-        Canvas[3D CodeGraphCanvas]
-    end
-
-    Code --> TS
-    TS --> Neo4j
-    Docs --> Docling
-    Docling --> Chroma
-    Chroma --> SC
-    Neo4j <--> SC
-    Neo4j --> Canvas
-    SC --> Canvas
-    Canvas --> UI
-```
-
-## 2. Strategic Vision
-The system is built on the premise that architectural understanding is hampered by the separation of **Semantic Knowledge** (what we write about the code) and **Source Truth** (how the code is structured). Benny Bridges this gap through real-time static analysis and semantic correlation.
-
-## 3. High-Level Architecture (The Composite Strategy)
-
-Benny utilizes a hybrid persistence and analysis architecture:
-
-### 3.1 Source Extraction (Static Intelligence)
-*   **Engine**: [Tree-Sitter](https://tree-sitter.github.io/tree-sitter/)
-*   **Strategy**: Language-agnostic modeling using tree-sitter parsers to generate Abstract Syntax Trees (ASTs). These are filtered and projected into a directional Code Graph.
-*   **Persistence**: Neo4j (labeled as `CodeEntity`, `File`, `Class`, etc.).
-
-### 3.2 Knowledge Hub (RAG & Rationale)
-*   **Engine**: [Docling](https://github.com/DS4SD/docling)
-*   **Vector Stash**: ChromaDB
-*   **Function**: Ingests unstructured documentation (PDF, Markdown) and correlates concepts to code symbols via embedding similarity (Cosmological Correlation).
-
-### 3.3 Agentic Interaction (Discovery Swarm)
-*   **Pattern**: Multi-agent scouting.
-*   **Governance**: Unified Audit Trail (AER) and ephemeral tool manifests.
-*   **Engine**: Local LLM Orchestration (Lemonade / Ollama).
-
-## 4. Logical View (Component Mapping)
-
-| Component | Responsibility | Primary Tech |
-| :--- | :--- | :--- |
-| **`CodeGraphCanvas`** | Immersive 3D Spatial Rendering | React-Three-Fiber / Three.js |
-| **`CodeGraphAnalyzer`** | Polyglot Static Analysis | Tree-Sitter (Python / TS) |
-| **`DiscoverySwarm`** | Autonomous Workspace Exploration | LangChain / Custom Logic |
-| **`Librarian`** | Knowledge Synthesis & Wiki Gen | LLM (Metadata Extraction) |
-| **`Semantic Correlation`** | Knowledge-to-Code Mapping | Vector Embeddings |
-
-## 5. Deployment View (Local-First Infrastructure)
-
-Benny is architected as a **Local-First AI Native IDE Component**:
-*   **Containerization**: Docker-ready for Graph (Neo4j) and Vector (Chroma) backbones.
-*   **Inference**: Designed to interface with local inference providers (Lemonade, Ollama, LM Studio) to ensure zero data leakage and extreme privacy.
-
-## 6. Critical Quality Attributes
-1.  **Observability**: Full lineage tracking (AER logs) for every agent action.
-2.  **Scalability**: Graph snapshots allow time-series comparison of evolving architectures.
-3.  **Extensibility**: BPMN 2.0 conversion layer for workflow compatibility.
+The platform is **portable** (single `$BENNY_HOME` directory), **offline-capable** (`BENNY_OFFLINE=1`), and **governed** (every action emits OpenLineage events and an Audit Execution Record).
 
 ---
 
-*Ref: See [GRAPH_SCHEMA.md](./GRAPH_SCHEMA.md) for detailed node/edge modeling.*
+## 2. C4 Context Diagram
+
+```mermaid
+C4Context
+    title System Context — Benny Studio
+
+    Person(operator, "Operator", "Uses CLI, Studio UI, or Claude/MCP to plan and run workflows")
+    Person(developer, "Developer", "Ingests source code for analysis; views code graph")
+
+    System(benny, "Benny Studio", "Orchestrates agents, manages knowledge, executes workflows")
+
+    System_Ext(localLLM, "Local LLM Provider", "Lemonade / Ollama / LMStudio / LiteRT (NPU)")
+    System_Ext(cloudLLM, "Cloud LLM", "Anthropic / OpenAI (optional, disabled in offline mode)")
+    System_Ext(claudeCode, "Claude Code / Desktop", "MCP client — accesses Benny as a tool server")
+
+    Rel(operator, benny, "CLI / HTTP API / Studio UI")
+    Rel(developer, benny, "Code ingest, graph exploration")
+    Rel(benny, localLLM, "LLM inference (primary)")
+    Rel(benny, cloudLLM, "LLM inference (optional)")
+    Rel(claudeCode, benny, "MCP stdio / HTTP")
+```
+
+---
+
+## 3. C4 Container Diagram
+
+```mermaid
+C4Container
+    title Container View — Benny Studio
+
+    Person(user, "Operator / Developer")
+
+    Container(cli, "Benny CLI", "Python / argparse", "benny plan | run | up | down | status | doctor | migrate | mcp")
+    Container(api, "Backend API", "FastAPI / uvicorn :8005", "23 route modules; governance middleware; SSE event bus")
+    Container(ui, "Studio UI", "React 19 / Vite / Three.js :3000", "Workflow Studio + Notebook + Code Graph in one SPA")
+    Container(mcp, "MCP Server", "Python stdio", "Exposes plan/run/doctor as Claude tools via MCP protocol")
+    ContainerDb(neo4j, "Neo4j :7474/:7687", "Graph DB", "Code graph (CodeEntity, File, Class, Function) + knowledge triples")
+    ContainerDb(chroma, "ChromaDB", "Vector DB", "Embedded in-process; used by RAG for semantic search")
+    ContainerDb(sqlite, "SQLite (run-store)", "Relational", "RunRecord history; LangGraph checkpoints")
+    Container(marquez, "Marquez :3010", "OpenLineage", "Lineage event collector + UI")
+    Container(phoenix, "Phoenix :6006", "OTLP", "Distributed tracing + LLM span observability")
+
+    Rel(user, cli, "CLI commands")
+    Rel(user, ui, "Browser")
+    Rel(user, mcp, "Via Claude Desktop/Code")
+    Rel(cli, api, "HTTP REST")
+    Rel(ui, api, "HTTP REST + SSE")
+    Rel(mcp, api, "HTTP REST")
+    Rel(api, neo4j, "Bolt (neo4j driver)")
+    Rel(api, chroma, "In-process")
+    Rel(api, sqlite, "SQLAlchemy")
+    Rel(api, marquez, "OpenLineage HTTP events")
+    Rel(api, phoenix, "OTLP gRPC :4317")
+```
+
+---
+
+## 4. Docker Service Map
+
+| Service | Image | Port(s) | Role |
+|---------|-------|---------|------|
+| `neo4j` | neo4j:5 | HTTP 7474, Bolt 7687 | Code graph + knowledge triple store |
+| `marquez-db` | postgres:14 | 5432 (internal) | Marquez backing store |
+| `marquez-api` | marquezproject/marquez:0.47.0 | 5000/5001 | OpenLineage event ingestion |
+| `marquez-web` | marquezproject/marquez-web:0.47.0 | 3010 | Lineage browser UI |
+| `phoenix` | arizephoenix/phoenix:latest | 4317 (OTLP gRPC), 4318 (OTLP HTTP), 6006 (UI) | Tracing + LLM span viewer |
+| `n8n` | n8nio/n8n:latest | 5678 | Optional automation / webhook routing |
+| Local LLMs | host process | 13305 / 11434 / 1234 / 52625 | Lemonade / Ollama / LMStudio / FastFlowLM — run on the host for NPU access |
+
+Start all: `docker compose up -d` (from repo root). See `docker-compose.yml`.
+
+---
+
+## 5. API Surface
+
+```
+/api/health                    GET   liveness
+/api/workflows/plan            POST  build + sign SwarmManifest
+/api/workflows/execute/{id}    GET   run manifest — SSE event stream
+/api/workflows/runs            GET   list run records
+/api/graph/code/*              CRUD  code graph nodes + edges (LOD queries, layout)
+/api/graph/code/lod            GET   level-of-detail spatial index
+/api/rag/status                GET   vector store state
+/api/rag/query                 POST  retrieval-only
+/api/rag/chat                  POST  RAG chat (mode=semantic|graph)
+/api/rag/wiki/articles         GET   workspace wiki index
+/api/files/*                   POST  document upload + processing
+/api/llm/*                     CRUD  model routing + provider management
+/api/system/*                  GET   Neo4j, disk, workspace metrics
+/api/ops/doctor                GET   JSON health check (same as benny doctor)
+/api/governance/*              GET   permission + audit endpoints
+```
+
+All endpoints require `X-Benny-API-Key: benny-mesh-2026-auth` unless listed in `GOVERNANCE_WHITELIST` (`benny/api/server.py`).
+
+---
+
+## 6. Dual-Graph Architecture
+
+The platform intentionally maintains **two separate graphs** serving different purposes. They are stored in the same Neo4j instance under different node labels, but visualised in different UI surfaces.
+
+### 6.1 Notebook Knowledge Graph (`KnowledgeGraphCanvas`)
+
+- **Location**: `frontend/src/components/Notebook/KnowledgeGraphCanvas.tsx`
+- **Backend**: `benny/api/rag_routes.py`, `benny/core/adaptive_rag.py`
+- **Node types**: `Concept`, `Document`, `Documentation`
+- **Edge types**: `REL {predicate}`, `CORRELATES_WITH`
+- **Purpose**: Maps semantic relationships extracted from ingested PDFs and markdown. Shows *what concepts exist* and *how they relate* based on the content of your knowledge base.
+- **Populated by**: Document ingestion (`/api/files/upload`), triple extraction, synthesis engine.
+
+### 6.2 Studio Code Graph (`CodeGraphCanvas`)
+
+- **Location**: `frontend/src/components/Studio/CodeGraphCanvas.tsx`
+- **Backend**: `benny/api/graph_routes.py`, `benny/graph/code_analyzer.py`
+- **Node types**: `CodeEntity`, `File`, `Class`, `Function`, `Folder`, `Interface`
+- **Edge types**: `DEFINES`, `INHERITS`, `DEPENDS_ON`, `CONTAINS`
+- **Purpose**: Structural map of source code extracted by Tree-Sitter AST analysis. Shows *how code is organized* — file dependencies, class hierarchies, function definitions.
+- **Populated by**: Code analysis (`/api/graph/code/analyze`), Tree-Sitter parsers (Python, TypeScript, JavaScript).
+
+### 6.3 Planned: Code-Knowledge Enrichment Toggle
+
+**Concept**: A toggle in Benny Studio that overlays `CORRELATES_WITH` and `REPRESENTS` edges from the knowledge graph onto the code graph, linking `CodeEntity` nodes to `Concept` nodes.
+
+**Use case (c5_test)**: UML documents and architecture PDFs have been ingested in c5_test. Once the knowledge graph concepts are stable and the enrichment pipeline is validated, the toggle will allow an operator to see *which concepts from architecture documents map onto which source symbols* — closing the loop between design intent and implementation.
+
+**Prerequisites before enabling**:
+1. c5_test knowledge graph passes coherence check (`/api/rag/status?workspace=c5_test`).
+2. Semantic correlator has run (`POST /api/rag/synthesize` or synthesis panel in Notebook).
+3. Neo4j has `CORRELATES_WITH` edges linking `Concept` → `CodeEntity` for the target workspace.
+
+**Implementation path**:
+- Add `enrichmentMode: boolean` to `uiSlice.ts` in the Zustand store.
+- Extend `graph_routes.py` `/api/graph/code/lod` to accept `?enrich=true` — join `CodeEntity` nodes with their `CORRELATES_WITH` `Concept` neighbours in the Cypher query.
+- Render enrichment edges in `CodeGraphCanvas.tsx` as a distinct particle/edge style (e.g. dashed gold) separate from structural edges.
+
+---
+
+## 7. Plan → Execute Lifecycle
+
+```
+Operator input (natural language requirement)
+    │
+    ▼
+benny plan (or POST /api/workflows/plan)
+    │  benny/graph/manifest_runner.py::plan_from_requirement()
+    │  → Planner LLM call → SwarmManifest (tasks, waves, input/output specs)
+    │  → manifest_hash.py::sign_manifest() — HMAC-SHA256 signature
+    │
+    ▼
+SwarmManifest JSON (signed, stored in $BENNY_HOME/workflows/)
+    │
+    ▼
+benny run (or GET /api/workflows/execute/{id}) — SSE stream
+    │  benny/graph/swarm.py — LangGraph state machine
+    │  → wave_scheduler.py — parallel wave fan-out
+    │     → local_executor.py — task execution (LC-1..4)
+    │     → call_model() for each LLM step
+    │
+    ├── SSE events: plan_updated → wave_started → task_started → task_completed → run_finished
+    ├── AER (Audit Execution Record) per task → benny/governance/audit.py
+    ├── OpenLineage events → Marquez (if MARQUEZ_URL set)
+    └── OTLP spans → Phoenix (if PHOENIX_ENDPOINT set)
+    │
+    ▼
+RunRecord persisted to SQLite ($BENNY_HOME/runs/)
+```
+
+---
+
+## 8. Workspace Structure
+
+Each workspace lives at `$BENNY_HOME/workspaces/<name>/` and is self-contained:
+
+```
+workspaces/<name>/
+├── manifest.yaml          # workspace config (default_model, tools, wiki config)
+├── AGENTS.md              # agent coding standards + governance rules
+├── SOUL.md                # agent persona definition
+├── USER.md                # user preferences
+├── data_in/               # source documents for ingestion
+├── data_out/              # generated artefacts
+├── chromadb/              # vector store (per-workspace, isolated)
+├── manifests/             # signed SwarmManifest JSONs
+├── runs/                  # run records
+├── reports/               # generated analysis reports
+└── src/                   # source code to analyse (code graph workspaces)
+```
+
+### 8.1 Active Test Workspaces
+
+| Workspace | Purpose | Key Content |
+|-----------|---------|-------------|
+| `c4_test` | Workflow + RAG test ground | H.G. Wells texts ingested as markdown (`data_in/`); validates end-to-end ingestion → retrieval → chat |
+| `c5_test` | Code analysis + architecture mapping | UML diagrams and architecture PDFs ingested to markdown; `src/` contains `dangpy` source; used to map design documents onto code structure |
+
+**c5_test goal**: UML/architecture documents are already ingested in the knowledge graph. The next phase is running the code analyser on `src/dangpy` to populate the code graph, then enabling the enrichment toggle to find overlaps between architecture concepts and code symbols.
+
+---
+
+## 9. Swarm-Based Code Walkthrough → SAD Generation
+
+A **swarm of specialised agents** can be orchestrated via a `SwarmManifest` to produce a Software Architecture Document automatically. The agents walk the codebase independently, then synthesise findings into a structured document.
+
+### Proposed Manifest Structure
+
+```
+Wave 1 (parallel discovery):
+  Task A: CodeStructureScout     — runs code analyser, extracts entity stats
+  Task B: APIMapper              — reads all route files, extracts endpoints
+  Task C: DataFlowAnalyst        — traces call chains through graph_db.py, models.py
+  Task D: InfraMapper            — reads docker-compose.yml, services.py, config.toml
+  Task E: GovernanceAuditor      — reads governance/, audit.py, lineage.py
+
+Wave 2 (synthesis, depends on Wave 1 outputs):
+  Task F: SADWriter              — ingests all Wave 1 outputs → generates structured SAD.md
+  Task G: DiagramGenerator       — emits Mermaid C4 + sequence diagrams from structured data
+
+Wave 3 (validation):
+  Task H: SADReviewer            — cross-checks SAD claims against live Neo4j entity stats
+```
+
+### How to Trigger
+
+```bash
+# Plan the SAD generation swarm
+benny plan "Generate a complete Software Architecture Document for the benny workspace" \
+    --workspace c5_test \
+    --output reports/SAD_generated.md \
+    --model lemonade/Llama-3.1-70B-Instruct \
+    --out manifests/sad_gen.manifest.json
+
+# Review the manifest, then execute
+benny run manifests/sad_gen.manifest.json --json
+```
+
+The generated SAD will be written to `c5_test/data_out/reports/SAD_generated.md` and can be compared against this hand-authored document for coverage gaps.
+
+---
+
+## 10. Quality Attributes
+
+| Attribute | Mechanism |
+|-----------|-----------|
+| **Observability** | SSE event stream, AER audit trail, OpenLineage → Marquez, OTLP → Phoenix |
+| **Reproducibility** | Manifests are signed (HMAC-SHA256); any run can be replayed with `benny run <manifest>` |
+| **Portability** | Single `$BENNY_HOME` directory; `benny migrate` rewrites paths and re-signs manifests |
+| **Offline capability** | `BENNY_OFFLINE=1` blocks all cloud LLM calls; local providers (Lemonade, Ollama) keep system running |
+| **Governance** | `X-Benny-API-Key` on all API calls; `GovHeaderMiddleware` enforces whitelist; RBAC in `benny/gateway/rbac.py` |
+| **Testability** | 6σ release gates: G-COV (≥85%), G-SR1 (≤408 path violations), G-LAT (<300ms), G-ERR (0 flakes), G-SIG, G-OFF |
+
+---
+
+## 11. Key Module Map
+
+| Concern | Module |
+|---------|--------|
+| Manifest types + schema | `benny/core/manifest.py` |
+| Manifest signing | `benny/core/manifest_hash.py` |
+| LLM router + offline | `benny/core/models.py` |
+| Swarm execution (LangGraph) | `benny/graph/swarm.py` |
+| Plan → manifest | `benny/graph/manifest_runner.py` |
+| Code analyser (Tree-Sitter) | `benny/graph/code_analyzer.py` |
+| Neo4j driver | `benny/core/graph_db.py` |
+| RAG + hybrid retrieval | `benny/core/adaptive_rag.py` |
+| Knowledge synthesis | `benny/synthesis/engine.py` |
+| AER audit trail | `benny/governance/audit.py` |
+| OpenLineage emission | `benny/governance/lineage.py` |
+| OTLP tracing | `benny/governance/tracing.py` |
+| HTTP API root | `benny/api/server.py` |
+| SSE event bus | `benny/core/event_bus.py` |
+| Portable home | `benny/portable/home.py` |
+| Service manager | `benny/portable/runner.py` |
+| MCP server | `benny/mcp/server.py` |
+
+---
+
+*Ref: [GRAPH_SCHEMA.md](./GRAPH_SCHEMA.md) for Neo4j node/edge modeling details.*
+*Ref: [docs/operations/BENNY_OPERATING_MANUAL.md](../docs/operations/BENNY_OPERATING_MANUAL.md) for run book.*
+*Ref: [docs/operations/LOG_AND_LINEAGE_GUIDE.md](../docs/operations/LOG_AND_LINEAGE_GUIDE.md) for log/lineage observability.*

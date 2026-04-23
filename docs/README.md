@@ -1,51 +1,75 @@
 # Benny Documentation
 
-**Deterministic Graph Workflow Platform with Built-in Governance**
+**Deterministic Graph Workflow Platform with Multi-Model AI Orchestration**
 
 ---
 
-## 📚 Documentation Structure
+## Start Here
 
-### [Requirements](../requirement.md) ⭐ START HERE
+New to Benny? Read in this order:
 
-Complete technical requirements for Benny v1.0:
-
-- Multi-model orchestration (LiteLLM)
-- Workspace isolation architecture
-- Skills & tool system
-- LangGraph orchestration
-- Governance (OpenLineage + Phoenix)
-- Deployment patterns
+1. **[Operating Manual](operations/BENNY_OPERATING_MANUAL.md)** — install, start, stop, plan, run, diagnose
+2. **[SAD](../architecture/SAD.md)** — system architecture, C4 diagrams, dual-graph design, swarm lifecycle
+3. **[Log & Lineage Guide](operations/LOG_AND_LINEAGE_GUIDE.md)** — how to observe, trace, and debug everything
 
 ---
 
-## 📐 Architecture (Planned)
+## Operations
 
-| Document                        | Status | Description                     |
-| ------------------------------- | ------ | ------------------------------- |
-| `architecture/system_design.md` | 🔜     | C4 diagrams, system context     |
-| `architecture/multi_model.md`   | 🔜     | LiteLLM integration details     |
-| `architecture/lineage_spec.md`  | 🔜     | OpenLineage event specification |
-
----
-
-## 📖 Operations (Planned)
-
-| Document                        | Status | Description                 |
-| ------------------------------- | ------ | --------------------------- |
-| `operations/deployment.md`      | 🔜     | Docker Compose & Kubernetes |
-| `operations/observability.md`   | 🔜     | Phoenix & Marquez setup     |
-| `operations/getting_started.md` | 🔜     | Quick start guide           |
+| Document | Description |
+|----------|-------------|
+| [BENNY_OPERATING_MANUAL.md](operations/BENNY_OPERATING_MANUAL.md) | **Primary run book** — init, up, down, plan, run, doctor, migrate, uninstall, release gates, troubleshooting |
+| [LOG_AND_LINEAGE_GUIDE.md](operations/LOG_AND_LINEAGE_GUIDE.md) | All log files, SSE events, Marquez lineage, Phoenix tracing, AER audit records, end-to-end process trace |
+| [manifest_operating_manual.md](operations/manifest_operating_manual.md) | Manifest execution and planning detail |
+| [local_llm_setup.md](operations/local_llm_setup.md) | Configuring Lemonade, Ollama, LMStudio, LiteRT |
+| [marquez_setup.md](operations/marquez_setup.md) | OpenLineage / Marquez setup and configuration |
 
 ---
 
-## Quick Links
+## Architecture
 
-- **Requirements**: [requirement.md](../requirement.md)
-- **Skills**: `../skills/` (to be created)
-- **Source**: `../src/` (to be created)
+| Document | Description |
+|----------|-------------|
+| [SAD.md](../architecture/SAD.md) | Software Architecture Document — C4 diagrams, dual-graph architecture, enrichment toggle design, swarm-based SAD generation |
+| [WORKSPACE_GUIDE.md](../architecture/WORKSPACE_GUIDE.md) | Workspace structure, c4_test and c5_test guide, graph surfaces |
+| [GRAPH_SCHEMA.md](../architecture/GRAPH_SCHEMA.md) | Neo4j node/edge schema — CodeEntity, Concept, Document, CORRELATES_WITH, REL |
+| [PAIN_POINTS_AND_VISION.md](../architecture/PAIN_POINTS_AND_VISION.md) | Strategic direction and known friction points |
+| [concepts/SWARM_VS_STUDIO.md](../architecture/concepts/SWARM_VS_STUDIO.md) | Design comparison: swarm vs studio execution models |
+| [guides/AUDIT_TRACING.md](../architecture/guides/AUDIT_TRACING.md) | Governance audit protocol |
+| [guides/DEBUG_WORKFLOWS.md](../architecture/guides/DEBUG_WORKFLOWS.md) | Workflow debugging techniques |
 
 ---
 
-> **Version**: Benny v1.0  
-> **Last Updated**: 2026-01-31
+## Requirements & Phase History
+
+| Document | Description |
+|----------|-------------|
+| [PBR-001_CONTINUATION_PLAN.md](requirements/PBR-001_CONTINUATION_PLAN.md) | Phase roadmap and history (Phases 0–8) |
+| [PORTABLE_BENNY_REQUIREMENTS.md](requirements/PORTABLE_BENNY_REQUIREMENTS.md) | Full Phase 0–8 technical specification |
+
+---
+
+## Quick Reference
+
+```bash
+# Daily workflow
+benny up --home $BENNY_HOME                          # start all services
+benny status --home $BENNY_HOME                      # check health
+benny plan "Summarise PDFs in data_in/" --workspace c4_test --save
+benny run manifests/latest.manifest.json --json
+benny runs ls --limit 10
+benny down --home $BENNY_HOME
+
+# Observe a run in real time
+curl -N -H "Accept: text/event-stream" \
+     -H "X-Benny-API-Key: benny-mesh-2026-auth" \
+     http://127.0.0.1:8005/api/workflows/execute/<manifest_id>
+
+# Logs
+tail -f $BENNY_HOME/logs/api.log
+grep '"ok": false' $BENNY_HOME/logs/llm_calls.jsonl | jq .
+
+# Lineage & tracing (requires docker compose up -d marquez-db marquez-api marquez-web phoenix)
+open http://localhost:3010    # Marquez lineage UI
+open http://localhost:6006    # Phoenix tracing UI
+```
