@@ -135,18 +135,26 @@ async def get_graph_lod(workspace: str = "default", tier: int = 1):
         edge_query = """
         MATCH (n)-[r]->(m)
         WHERE id(n) IN $ids AND id(m) IN $ids
-        RETURN id(n) as source, id(m) as target, type(r) as type
+        RETURN id(n) as source, id(m) as target, type(r) as type,
+               r.confidence as confidence, r.rationale as rationale, r.predicate as predicate
         """
-        
+
         edges = []
         with read_session() as session:
             result = session.run(edge_query, ids=node_ids)
             for record in result:
-                edges.append({
+                edge = {
                     "source": record["source"],
                     "target": record["target"],
                     "type": record["type"]
-                })
+                }
+                if record["confidence"] is not None:
+                    edge["confidence"] = record["confidence"]
+                if record["rationale"] is not None:
+                    edge["rationale"] = record["rationale"]
+                if record["predicate"] is not None:
+                    edge["predicate"] = record["predicate"]
+                edges.append(edge)
                 
         return {"nodes": nodes, "edges": edges}
         

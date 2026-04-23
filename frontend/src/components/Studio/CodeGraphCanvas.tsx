@@ -22,7 +22,8 @@ import {
   Terminal,
   ChevronRight,
   Home,
-  Settings
+  Settings,
+  Link2
 } from 'lucide-react';
 import { SymbolInspector } from './SymbolInspector';
 import { analyzeMesh, edgeKey as meshEdgeKey } from './graph/CognitiveMeshEngine';
@@ -54,6 +55,7 @@ type CogMesh = {
   sonification: boolean;
   ambientHeartbeat: boolean;
   foveatedLOD: boolean;
+  knowledgeEnrichment: boolean;
   bloomIntensity: number;
   pruneThreshold: number;
   particleDensity: number;
@@ -385,16 +387,25 @@ function CodeGraphEdge({
   const getColor = () => {
     if (isSelected || hovered) return '#FFFFFF';
     switch(edge.type) {
-      case 'INHERITS': return '#39FF14'; 
-      case 'DEFINES': return '#ffffff';  
-      case 'CALLS': return '#FF5F1F';    
-      case 'DEPENDS_ON': return '#00FFFF'; 
+      case 'INHERITS':        return '#39FF14';
+      case 'DEFINES':         return '#ffffff';
+      case 'CALLS':           return '#FF5F1F';
+      case 'DEPENDS_ON':      return '#00FFFF';
+      case 'CORRELATES_WITH': return '#F59E0B';
       default: return '#888888';
     }
   };
 
-  const baseEdgeOpacity = isSelected || hovered ? 1 : isNodeSelected ? 0.9 : edge.type === 'DEFINES' ? 0.3 : 0.6;
-  const baseLineWidth = (isSelected || hovered) ? 4 : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
+  const isEnrichmentEdge = edge.type === 'CORRELATES_WITH';
+  const enrichmentConfidence: number = isEnrichmentEdge ? (edge.metadata?.confidence ?? edge.confidence ?? 0.5) : 1;
+  const baseEdgeOpacity = isSelected || hovered ? 1
+    : isEnrichmentEdge ? Math.max(0.25, enrichmentConfidence * 0.85)
+    : isNodeSelected ? 0.9
+    : edge.type === 'DEFINES' ? 0.3
+    : 0.6;
+  const baseLineWidth = (isSelected || hovered) ? 4
+    : isEnrichmentEdge ? 1.0
+    : (isNodeSelected ? 3 : (edge.type === 'INHERITS' ? 2.5 : 1.5));
 
   const myelinBoost = cognitiveMesh?.myelination ? 1 + 2 * importance : 1;
   const prePruneOpacity = cognitiveMesh?.myelination ? Math.min(1, baseEdgeOpacity + 0.2 * importance) : baseEdgeOpacity;
@@ -416,9 +427,9 @@ function CodeGraphEdge({
          transparent
          opacity={edgeOpacity}
          lineWidth={lineWidth}
-         dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS'}
-         dashScale={2}
-         dashSize={0.5}
+         dashed={edge.type === 'DEPENDS_ON' || edge.type === 'CALLS' || isEnrichmentEdge}
+         dashScale={isEnrichmentEdge ? 3 : 2}
+         dashSize={isEnrichmentEdge ? 0.35 : 0.5}
       />
 
       {/* UML Arrowhead */}
@@ -435,8 +446,8 @@ function CodeGraphEdge({
       )}
 
       {/* Semantic Predicate Label (UML Annotation) */}
-      {(edge.type === 'REL' || edge.metadata?.predicate) && (hovered || isNodeSelected) && (
-        <Html 
+      {(edge.type === 'REL' || edge.metadata?.predicate || isEnrichmentEdge) && (hovered || isNodeSelected) && (
+        <Html
            position={new THREE.Vector3().addVectors(
              new THREE.Vector3().fromArray(edge.sourcePos),
              new THREE.Vector3().fromArray(edge.targetPos)
@@ -444,14 +455,23 @@ function CodeGraphEdge({
            center
            distanceFactor={10}
         >
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.5 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="px-2 py-0.5 rounded bg-[#00FFFF]/80 border border-white/40 shadow-lg"
+            className={`px-2 py-0.5 rounded border shadow-lg flex flex-col items-center gap-0.5 ${
+              isEnrichmentEdge
+                ? 'bg-[#F59E0B]/80 border-[#F59E0B]/60'
+                : 'bg-[#00FFFF]/80 border-white/40'
+            }`}
           >
-             <span className="text-[7px] font-black text-black uppercase tracking-widest whitespace-nowrap italic">
-                {edge.metadata?.predicate || edge.type}
-             </span>
+            <span className="text-[7px] font-black text-black uppercase tracking-widest whitespace-nowrap italic">
+              {edge.metadata?.predicate || (isEnrichmentEdge ? 'correlates' : edge.type)}
+            </span>
+            {isEnrichmentEdge && (
+              <span className="text-[6px] font-mono text-black/70 whitespace-nowrap">
+                {Math.round(enrichmentConfidence * 100)}% confidence
+              </span>
+            )}
           </motion.div>
         </Html>
       )}
@@ -725,6 +745,7 @@ export function CodeGraphCanvas() {
     showClusters,
     graphRenderSettings,
     cognitiveMesh,
+    toggleCognitiveMesh,
   } = useWorkflowStore();
   const executionEvents = useWorkflowStore(s => s.executionEvents);
   
@@ -773,13 +794,14 @@ export function CodeGraphCanvas() {
     if (isFetching.current) return;
     isFetching.current = true;
     try {
-      // Phase 4: Use new LoD endpoint
       const snapshotParam = activeGraphId && activeGraphId !== 'neural_nexus' ? `&snapshot_id=${activeGraphId}` : '';
       const pathParam = focusPath ? `&path=${focusPath}` : '';
-      
-      const endpoint = selectionTier === 1 && !focusPath 
-        ? `${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}`
-        : `${API_BASE_URL}/api/graph/code/lod?workspace=${currentWorkspace}&tier=${selectionTier}${snapshotParam}${pathParam}`;
+
+      // When enrichment is on, always use LOD endpoint so Concept nodes are included
+      const useLoD = cognitiveMesh.knowledgeEnrichment || selectionTier !== 1 || !!focusPath;
+      const endpoint = useLoD
+        ? `${API_BASE_URL}/api/graph/code/lod?workspace=${currentWorkspace}&tier=${selectionTier}${snapshotParam}${pathParam}`
+        : `${API_BASE_URL}/api/graph/code?workspace=${currentWorkspace}${snapshotParam}`;
 
       const resp = await fetch(endpoint, {
          headers: { ...GOVERNANCE_HEADERS }
@@ -885,10 +907,14 @@ export function CodeGraphCanvas() {
        return { ...node, id: nodeId, degree, depth, scale, position };
     });
 
+    const effectiveEdgeTypes = cognitiveMesh.knowledgeEnrichment
+      ? [...visibleEdgeTypes, 'CORRELATES_WITH']
+      : visibleEdgeTypes;
+
     const edges = codeGraph.edges.filter((e: any) => {
        const sid = String(e.source);
        const tid = String(e.target);
-       const matchesFilter = visibleEdgeTypes.includes(String(e.type));
+       const matchesFilter = effectiveEdgeTypes.includes(String(e.type));
        return matchesFilter && nodes.find(n => n.id === sid) && nodes.find(n => n.id === tid);
     }).map((edge: any) => {
        const sid = String(edge.source);
@@ -905,7 +931,7 @@ export function CodeGraphCanvas() {
     });
 
     return { nodes, edges };
-  }, [codeGraph, visibleTypes, visibleEdgeTypes]);
+  }, [codeGraph, visibleTypes, visibleEdgeTypes, cognitiveMesh.knowledgeEnrichment]);
 
   const analysis = useMemo<MeshAnalysis | null>(() => {
     if (!processedGraph.nodes.length) return null;
@@ -962,11 +988,10 @@ export function CodeGraphCanvas() {
   useEffect(() => {
     fetchDirs();
     fetchGraph();
-    // Reset camera on root
     if (!focusPath && cameraControlsRef.current) {
         cameraControlsRef.current.setLookAt(0, 40, 80, 0, 0, 0, true);
     }
-  }, [currentWorkspace, activeGraphId, focusPath, selectionTier]);
+  }, [currentWorkspace, activeGraphId, focusPath, selectionTier, cognitiveMesh.knowledgeEnrichment]);
 
   // Sync Mode Polling (Phase 4 Streaming)
   useEffect(() => {
@@ -1167,12 +1192,34 @@ export function CodeGraphCanvas() {
             <span className="text-[10px] font-black tracking-[0.2em] text-[#00FFFF]/60 group-hover:text-[#00FFFF]">RE_SCAN</span>
          </button>
 
-         <button 
+         <button
            onClick={handleDeepLayout}
            className="btn-pill px-5 h-10 flex items-center gap-3 bg-white/5 border border-white/10 hover:bg-white/20 transition-all group"
          >
             <RefreshCw size={14} className="text-white/20 group-hover:text-white transition-colors" />
             <span className="text-[10px] font-black tracking-[0.2em] text-white/20 group-hover:text-white">DEEP_LAYOUT</span>
+         </button>
+
+         <div className="border-t border-white/5 my-1" />
+
+         <button
+           onClick={(e) => { e.stopPropagation(); toggleCognitiveMesh('knowledgeEnrichment'); }}
+           className={`btn-pill px-5 h-10 flex items-center gap-3 transition-all group ${
+             cognitiveMesh.knowledgeEnrichment
+               ? 'bg-[#F59E0B]/15 border border-[#F59E0B]/60 hover:bg-[#F59E0B]/25'
+               : 'bg-white/5 border border-white/10 hover:border-[#F59E0B]/40 hover:bg-[#F59E0B]/5'
+           }`}
+           title="Overlay CORRELATES_WITH edges from the knowledge graph onto the code graph"
+         >
+           <Link2
+             size={14}
+             className={cognitiveMesh.knowledgeEnrichment ? 'text-[#F59E0B]' : 'text-white/20 group-hover:text-[#F59E0B]/60 transition-colors'}
+           />
+           <span className={`text-[10px] font-black tracking-[0.2em] ${
+             cognitiveMesh.knowledgeEnrichment ? 'text-[#F59E0B]' : 'text-white/20 group-hover:text-[#F59E0B]/60'
+           }`}>
+             {cognitiveMesh.knowledgeEnrichment ? 'ENRICHED' : 'ENRICH'}
+           </span>
          </button>
       </div>
 
