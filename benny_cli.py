@@ -747,6 +747,11 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                     # Build a short note from meaningful result keys
                     note_parts: List[str] = []
                     if isinstance(result, dict):
+                        s = result.get("status", "")
+                        if s == "already_converted":
+                            note_parts.append(f"{result.get('data_in_files', 0)} files in data_in")
+                        elif result.get("staging_files"):
+                            note_parts.append(f"{result['staging_files']} staging files")
                         for key, label in [
                             ("staging_files",        "{v} staging files"),
                             ("data_in_files",        "{v} data_in files"),
@@ -755,6 +760,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                             ("correlates_with_count", "{v} corr. edges"),
                             ("corr_count",            "{v} corr. edges"),
                             ("concept_count",         "{v} concepts"),
+                            ("md_files",              "{v} md files"),
                             ("report_path",           "report written"),
                         ]:
                             if key in result:
