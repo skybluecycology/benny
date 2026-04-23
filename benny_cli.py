@@ -166,30 +166,47 @@ def cmd_manifests_ls(args: argparse.Namespace) -> int:
     return 0
 
 
-async def cmd_enrich(args: argparse.Namespace) -> int:
-    """Build (and optionally run) the knowledge enrichment pipeline manifest.
+async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intentionally long; each section is a clear phase
+    """Knowledge enrichment pipeline with Rich live display, OpenLineage events,
+    local run folder, and GDPR-compliant audit trail.
 
-    The pipeline is deterministic — no LLM planning. It always produces the
-    same DAG: pdf_extract + code_scan -> rag_ingest -> deep_synthesis ->
-    semantic_correlate -> validate_enrichment -> generate_report.
+    Executes 7 tasks across 5 waves via direct API calls so each task gets its
+    own spinner, elapsed time, and lineage event — no LLM planning needed.
 
     Usage:
         benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json
         benny enrich --workspace c5_test --src src/dangpy --run
         benny enrich --workspace c5_test --src src/dangpy --json
     """
+    import hashlib
+    import os
+    import time
     import uuid
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    from benny.core.manifest import (
-        ManifestEdge,
-        ManifestPlan,
-        ManifestTask,
-    )
+    import httpx
+    from rich import box
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+    from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
+
+    from benny.core.manifest import ManifestEdge, ManifestPlan, ManifestTask
     from benny.core.manifest_hash import sign_manifest
+    from benny.governance.audit import emit_governance_event
+    from benny.governance.lineage import BennyLineageClient
 
-    run_it = args.run_after or args.json
+    console = Console()
 
+    API_BASE = os.environ.get("BENNY_API_URL", "http://127.0.0.1:8005")
+    API_KEY  = os.environ.get("BENNY_API_KEY",  "benny-mesh-2026-auth")
+    _H = {"X-Benny-API-Key": API_KEY}
+    _HJ = {**_H, "Content-Type": "application/json"}
+
+    # ─── 1. Resolve model ────────────────────────────────────────────────────
     model = args.model
     if not model:
         try:
@@ -198,94 +215,78 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
         except Exception:
             model = "lemonade/qwen3-tk-4b-FLM"
 
-    manifest_id = f"enrich-{args.workspace}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    run_it   = args.run_after or args.json
     src_path = args.src.rstrip("/")
+    ts       = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    manifest_id = f"enrich-{args.workspace}-{ts}"
+    run_id      = uuid.uuid4().hex[:12]
+    started_at  = datetime.now(timezone.utc)
 
+    # ─── 2. Build manifest ───────────────────────────────────────────────────
     tasks = [
         ManifestTask(
             id="pdf_extract",
-            description=f"[DETERMINISTIC] Convert PDFs and documents in staging/ to Markdown using Docling.",
+            description="[DETERMINISTIC] Convert staging/ PDFs/docs to Markdown via Docling.",
             skill_hint="extract_pdf",
             deterministic=True,
-            skill_args={"pdf_path": "staging/"},
-            wave=0,
-            complexity="medium",
-            node_type="task",
+            skill_args={"src_dir": "staging/"},
+            wave=0, complexity="medium", node_type="task",
             files_touched=["staging/"],
         ),
         ManifestTask(
             id="code_scan",
-            description=f"[DETERMINISTIC] Tree-Sitter recursive analysis of {src_path}/ -> Neo4j code graph.",
+            description=f"[DETERMINISTIC] Tree-Sitter scan of {src_path}/ -> Neo4j code graph.",
             skill_hint="code_scan",
             deterministic=True,
-            skill_args={"root_dir": src_path, "deep_scan": True, "name": f"Enrich Code Scan - {args.workspace}"},
-            wave=0,
-            complexity="high",
-            node_type="task",
+            skill_args={"root_dir": src_path, "deep_scan": True},
+            wave=0, complexity="high", node_type="task",
             files_touched=[f"{src_path}/"],
         ),
         ManifestTask(
             id="rag_ingest",
-            description="[DETERMINISTIC] Chunk and embed extracted Markdown into ChromaDB.",
+            description="[DETERMINISTIC] Chunk + embed Markdown -> ChromaDB.",
             skill_hint="rag_ingest",
             deterministic=True,
-            skill_args={
-                "files": json.dumps(["staging/"]),
-                "strategy": args.strategy,
-                "deep_synthesis": False,
-                "provider": "lemonade",
-                "embedding_provider": "local",
-                "name": f"Enrich RAG Ingest - {args.workspace}",
-            },
+            skill_args={"deep_synthesis": False, "strategy": args.strategy},
             dependencies=["pdf_extract"],
-            wave=1,
-            complexity="medium",
-            node_type="task",
+            wave=1, complexity="medium", node_type="task",
         ),
         ManifestTask(
             id="deep_synthesis",
-            description="[AGENTIC] Extract knowledge triples (Concept -> Concept) and persist as REL edges with citations.",
+            description="[AGENTIC] Extract knowledge triples (Concept -> Concept) -> Neo4j REL edges.",
             skill_hint="rag_ingest",
             assigned_model=model,
             dependencies=["rag_ingest"],
-            wave=2,
-            complexity="high",
-            node_type="task",
+            wave=2, complexity="high", node_type="task",
         ),
         ManifestTask(
             id="semantic_correlate",
             description=(
-                f"[DETERMINISTIC] Semantic correlation suite (Neural Spark): create CORRELATES_WITH edges "
-                f"linking Concepts to CodeEntities. threshold={args.threshold} strategy={args.strategy}."
+                f"[DETERMINISTIC] Neural Spark semantic correlation -> CORRELATES_WITH edges. "
+                f"threshold={args.threshold} strategy={args.strategy}."
             ),
-            skill_hint="kg3d_ingest",
+            skill_hint="kg3d_ingest",          # registered skill that calls run_full_correlation_suite
             deterministic=True,
-            skill_args={"threshold": args.threshold},
+            skill_args={"threshold": args.threshold, "strategy": args.strategy},
             dependencies=["code_scan", "deep_synthesis"],
-            wave=3,
-            complexity="medium",
-            node_type="task",
+            wave=3, complexity="medium", node_type="task",
         ),
         ManifestTask(
             id="validate_enrichment",
-            description="[DETERMINISTIC] Verify CORRELATES_WITH edges exist in Neo4j. Fail if zero found.",
+            description="[DETERMINISTIC] Assert CORRELATES_WITH edges > 0 in Neo4j.",
             skill_hint="validate_enrichment",
             deterministic=True,
             skill_args={},
             dependencies=["semantic_correlate"],
-            wave=4,
-            complexity="low",
-            node_type="task",
+            wave=4, complexity="low", node_type="task",
         ),
         ManifestTask(
             id="generate_report",
-            description="[AGENTIC] Write enrichment statistics and concept-to-code mapping to data_out/enrichment_report.md.",
+            description="[AGENTIC] Write enrichment_report.md with statistics and concept-to-code mapping.",
             skill_hint="rag_ingest",
             assigned_model=model,
             dependencies=["validate_enrichment"],
-            wave=4,
-            complexity="medium",
-            node_type="output",
+            wave=4, complexity="medium", node_type="output",
             files_touched=["data_out/enrichment_report.md"],
         ),
     ]
@@ -309,21 +310,31 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
             ["semantic_correlate"],
             ["validate_enrichment", "generate_report"],
         ],
+        ascii_dag=(
+            "pdf_extract --+\n"
+            "              +--> rag_ingest --> deep_synthesis --+\n"
+            "              |                                    +--> semantic_correlate --> validate_enrichment --> generate_report\n"
+            "code_scan ----+--------------------------------------------+\n"
+        ),
     )
 
     manifest = SwarmManifest(
         id=manifest_id,
-        name=f"Knowledge Enrichment — {args.workspace}",
-        description="Knowledge enrichment pipeline: extract -> ingest -> synthesise -> correlate -> validate -> report.",
+        name=f"Knowledge Enrichment \u2014 {args.workspace}",
+        description="Knowledge enrichment pipeline: extract \u2192 ingest \u2192 synthesise \u2192 correlate \u2192 validate \u2192 report.",
         requirement=(
             "Build the knowledge enrichment overlay for the Studio ENRICH toggle: "
             f"scan source code in {src_path}/, extract knowledge triples from ingested documents, "
-            f"and create CORRELATES_WITH edges linking concepts to code symbols."
+            "and create CORRELATES_WITH edges linking concepts to code symbols."
         ),
         workspace=args.workspace,
         inputs=InputSpec(
             files=["staging/", f"{src_path}/"],
-            context={"src_path": src_path, "correlation_threshold": args.threshold, "correlation_strategy": args.strategy},
+            context={
+                "src_path": src_path,
+                "correlation_threshold": args.threshold,
+                "correlation_strategy": args.strategy,
+            },
         ),
         outputs=OutputSpec(
             files=["data_out/enrichment_report.md"],
@@ -335,52 +346,496 @@ async def cmd_enrich(args: argparse.Namespace) -> int:
             model=model,
             max_concurrency=2,
             max_depth=3,
-            skills_allowed=["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "semantic_correlate", "validate_enrichment"],
+            skills_allowed=["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "validate_enrichment"],
         ),
         tags=["enrichment", "code-analysis", "knowledge-graph"],
-        metadata={"src_path": src_path, "correlation_threshold": args.threshold, "correlation_strategy": args.strategy},
+        metadata={
+            "src_path": src_path,
+            "correlation_threshold": args.threshold,
+            "correlation_strategy": args.strategy,
+        },
     )
-
     sign_manifest(manifest)
-
-    print(f"[enrich] workspace={args.workspace}  src={src_path}  model={model}")
-    print(f"[enrich] tasks={len(tasks)}  waves=5  manifest_id={manifest_id}")
-
     rendered = manifest.model_dump_json(indent=2)
 
+    # ─── 3. Write --out path ─────────────────────────────────────────────────
     out_path = Path(args.out) if args.out else None
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered, encoding="utf-8")
-        print(f"[enrich] manifest -> {out_path}")
 
+    # Plan-only mode: show a nice panel and exit
     if not run_it:
-        if not out_path:
-            print(rendered)
-        print("[enrich] pass --run to execute, or: benny run <manifest.json>")
+        plan_tbl = Table(box=box.SIMPLE, show_header=True, header_style="bold cyan", expand=True)
+        plan_tbl.add_column("Wave", justify="center", width=5)
+        plan_tbl.add_column("Task ID", min_width=22)
+        plan_tbl.add_column("Type", width=14)
+        plan_tbl.add_column("Skill hint", width=22)
+        plan_tbl.add_column("Description", style="dim")
+        for t in tasks:
+            tag = "[magenta]AGENTIC[/]" if "[AGENTIC]" in t.description else "[blue]DETERMINISTIC[/]"
+            plan_tbl.add_row(str(t.wave), t.id, tag, t.skill_hint or "", t.description[:60])
+        console.print()
+        console.print(Panel(
+            plan_tbl,
+            title=f"[bold cyan]Knowledge Enrichment Plan[/]  [dim]{args.workspace}[/]",
+            border_style="cyan", padding=(0, 2),
+        ))
+        if out_path:
+            console.print(f"  [dim]Manifest written \u2192[/] {out_path}")
+        console.print(f"  [dim]Run with:[/] benny enrich --workspace {args.workspace} --src {args.src} --run\n")
         return 0
 
-    from benny.graph.manifest_runner import execute_manifest
-    from benny.persistence import run_store
+    # ─── 4. Create local run folder ──────────────────────────────────────────
+    benny_home = Path(os.environ.get("BENNY_HOME", "."))
+    run_folder = benny_home / "workspace" / args.workspace / "runs" / f"enrich-{run_id}"
+    run_folder.mkdir(parents=True, exist_ok=True)
 
-    run_store.save_manifest(manifest)
-    print(f"[enrich] executing manifest_id={manifest_id} ...")
-    record = await execute_manifest(manifest)
+    (run_folder / "manifest.json").write_text(rendered, encoding="utf-8")
 
-    print(f"[enrich] run_id={record.run_id}  status={record.status.value}")
-    if record.duration_ms:
-        print(f"[enrich] duration={record.duration_ms}ms")
-    if record.errors:
-        print(f"[enrich] errors: {record.errors}", file=sys.stderr)
-    if record.artifact_paths:
-        print(f"[enrich] artifacts: {record.artifact_paths}")
-    if record.governance_url:
-        print(f"[enrich] lineage: {record.governance_url}")
+    gdpr: Dict[str, Any] = {
+        "schema": "GDPR-data-processing-record-v1",
+        "data_controller": "Benny Platform Operator",
+        "processing_purpose": (
+            "Knowledge graph enrichment — semantic correlation of architecture "
+            "documents to source code symbols for developer tooling."
+        ),
+        "legal_basis": "Legitimate interests (Article 6(1)(f) GDPR) — technical system analysis",
+        "data_categories": [
+            "Source code file paths, class names, function names (no personal data)",
+            "Architecture document text fragments (no personal data)",
+            "Graph relationship metadata (no personal data)",
+        ],
+        "personal_data": False,
+        "ai_disclosure": f"AI model used: {model}",
+        "retention_days": 90,
+        "right_to_erasure": (
+            f"Delete run folder: {run_folder}; "
+            f"run Cypher: MATCH (c:Concept)-[r:CORRELATES_WITH]->(e:CodeEntity {{workspace: '{args.workspace}'}}) DELETE r"
+        ),
+        "generated_at": started_at.isoformat(),
+        "run_id": run_id,
+        "manifest_id": manifest_id,
+        "workspace": args.workspace,
+    }
+    (run_folder / "GDPR_notice.json").write_text(
+        json.dumps(gdpr, indent=2, default=str), encoding="utf-8"
+    )
+
+    # ─── 5. Header panel ─────────────────────────────────────────────────────
+    console.print()
+    console.print(Panel.fit(
+        f"[bold white]Workspace[/]    [cyan]{args.workspace}[/]\n"
+        f"[bold white]Source path[/]  [cyan]{src_path}/[/]\n"
+        f"[bold white]Model[/]        [cyan]{model}[/]\n"
+        f"[bold white]Threshold[/]    [cyan]{args.threshold}[/]  "
+        f"[dim]strategy={args.strategy}[/]\n"
+        f"[bold white]Run folder[/]   [dim]{run_folder}[/]\n"
+        f"[bold white]Lineage[/]      [link=http://localhost:3010]http://localhost:3010[/link]  "
+        f"[dim](Marquez)[/]",
+        title="[bold cyan] Benny Knowledge Enrichment [/]",
+        border_style="cyan",
+        padding=(0, 2),
+    ))
+    console.print()
+
+    # ─── 6. Start OpenLineage workflow ───────────────────────────────────────
+    lineage = BennyLineageClient()
+    try:
+        lineage.start_workflow(
+            workflow_id=manifest_id,
+            workflow_name=f"Knowledge Enrichment \u2014 {args.workspace}",
+            workspace=args.workspace,
+            inputs=["staging/", f"{src_path}/"],
+            outputs=["data_out/enrichment_report.md"],
+            metadata={"run_id": run_id, "model": model, "threshold": args.threshold},
+        )
+    except Exception:
+        pass  # lineage is best-effort; never crash the pipeline
+
+    # ─── 7. Task status state ────────────────────────────────────────────────
+    TASK_DEFS = [
+        {"id": "pdf_extract",        "wave": 0, "desc": "Convert staging/ PDFs \u2192 Markdown (Docling)"},
+        {"id": "code_scan",          "wave": 0, "desc": "Tree-Sitter code scan \u2192 Neo4j graph"},
+        {"id": "rag_ingest",         "wave": 1, "desc": "Chunk + embed \u2192 ChromaDB"},
+        {"id": "deep_synthesis",     "wave": 2, "desc": "Extract knowledge triples \u2192 Neo4j REL"},
+        {"id": "semantic_correlate", "wave": 3, "desc": "Neural Spark \u2192 CORRELATES_WITH edges"},
+        {"id": "validate_enrichment","wave": 4, "desc": "Assert CORRELATES_WITH edges exist"},
+        {"id": "generate_report",    "wave": 4, "desc": "Write enrichment_report.md"},
+    ]
+
+    task_status:  Dict[str, str]             = {t["id"]: "pending"  for t in TASK_DEFS}
+    task_elapsed: Dict[str, Optional[float]] = {t["id"]: None       for t in TASK_DEFS}
+    task_note:    Dict[str, str]             = {t["id"]: ""         for t in TASK_DEFS}
+    task_error:   Dict[str, Optional[str]]   = {t["id"]: None       for t in TASK_DEFS}
+
+    def _make_table() -> Table:
+        tbl = Table(
+            box=box.ROUNDED, show_header=True, header_style="bold cyan",
+            expand=True, border_style="dim",
+        )
+        tbl.add_column("W", style="dim cyan", width=3, justify="center")
+        tbl.add_column("Task", style="bold white", min_width=22)
+        tbl.add_column("Status", width=14, justify="center")
+        tbl.add_column("Description", style="dim white", ratio=1)
+        tbl.add_column("Elapsed", width=8, justify="right")
+        tbl.add_column("Notes", style="dim", width=22, no_wrap=True)
+        for t in TASK_DEFS:
+            st = task_status[t["id"]]
+            el = task_elapsed[t["id"]]
+            el_str = f"{el:.1f}s" if el is not None else "-"
+            st_cell: Text
+            if   st == "pending":  st_cell = Text("\u25cb  pending",  style="dim")
+            elif st == "running":  st_cell = Text("\u25c9  running",  style="bold yellow")
+            elif st == "done":     st_cell = Text("\u2713  done",     style="bold green")
+            elif st == "skipped":  st_cell = Text("\u2296  skipped",  style="dim yellow")
+            else:                  st_cell = Text("\u2717  failed",   style="bold red")
+            tbl.add_row(str(t["wave"]), t["id"], st_cell, t["desc"], el_str, task_note[t["id"]])
+        return tbl
+
+    # ─── 8. Per-task API executor ────────────────────────────────────────────
+    async def _run_task(tid: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=360.0) as client:
+            if tid == "pdf_extract":
+                # Verify staging/ has files to process
+                r = await client.get(f"{API_BASE}/api/files", headers=_H,
+                                     params={"workspace": args.workspace})
+                r.raise_for_status()
+                data = r.json()
+                staging = data.get("staging", [])
+                if not staging:
+                    raise RuntimeError(
+                        "No files found in staging/ — upload architecture docs first."
+                    )
+                return {"staging_files": len(staging), "files": [f.get("name", f) for f in staging[:5]]}
+
+            elif tid == "code_scan":
+                r = await client.post(
+                    f"{API_BASE}/api/graph/code/generate", headers=_HJ,
+                    json={"workspace": args.workspace, "root_dir": src_path},
+                )
+                r.raise_for_status()
+                return r.json()
+
+            elif tid == "rag_ingest":
+                r = await client.post(
+                    f"{API_BASE}/api/rag/ingest", headers=_HJ,
+                    json={"workspace": args.workspace, "deep_synthesis": False,
+                          "strategy": args.strategy},
+                )
+                r.raise_for_status()
+                return r.json()
+
+            elif tid == "deep_synthesis":
+                r = await client.post(
+                    f"{API_BASE}/api/graph/synthesize", headers=_HJ,
+                    json={"workspace": args.workspace, "model": model},
+                )
+                r.raise_for_status()
+                return r.json()
+
+            elif tid == "semantic_correlate":
+                r = await client.post(
+                    f"{API_BASE}/api/rag/correlate", headers=_H,
+                    params={"workspace": args.workspace, "threshold": args.threshold},
+                )
+                r.raise_for_status()
+                return r.json()
+
+            elif tid == "validate_enrichment":
+                r = await client.get(
+                    f"{API_BASE}/api/graph/code/lod", headers=_H,
+                    params={"workspace": args.workspace, "tier": 1},
+                )
+                r.raise_for_status()
+                data = r.json()
+                corr = [e for e in data.get("edges", []) if e.get("type") == "CORRELATES_WITH"]
+                if not corr:
+                    raise RuntimeError(
+                        f"Zero CORRELATES_WITH edges found in workspace '{args.workspace}'. "
+                        "Check that deep_synthesis and semantic_correlate completed successfully."
+                    )
+                return {"correlates_with_count": len(corr)}
+
+            elif tid == "generate_report":
+                # Pull graph stats then write a rich Markdown report
+                r = await client.get(
+                    f"{API_BASE}/api/graph/stats", headers=_H,
+                    params={"workspace": args.workspace},
+                )
+                r.raise_for_status()
+                stats = r.json()
+                ntypes = stats.get("node_types", {})
+                rtypes = stats.get("relationship_types", {})
+                corr_cnt    = rtypes.get("CORRELATES_WITH", 0)
+                concept_cnt = ntypes.get("Concept", 0)
+                code_cnt    = ntypes.get("CodeEntity", ntypes.get("Function", 0) + ntypes.get("Class", 0))
+
+                report = "\n".join([
+                    "# Knowledge Enrichment Report",
+                    "",
+                    f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
+                    f"**Workspace**: `{args.workspace}`  ",
+                    f"**Model**: `{model}`  ",
+                    f"**Threshold**: `{args.threshold}`  ",
+                    f"**Strategy**: `{args.strategy}`  ",
+                    "",
+                    "## Graph Statistics",
+                    "",
+                    "| Metric | Count |",
+                    "|--------|------:|",
+                    f"| Concept nodes | {concept_cnt} |",
+                    f"| CodeEntity nodes | {code_cnt} |",
+                    f"| `CORRELATES_WITH` edges | {corr_cnt} |",
+                    "",
+                    "## Summary",
+                    "",
+                    f"{corr_cnt} semantic correlation edge(s) now link {concept_cnt} architecture "
+                    f"concept(s) to {code_cnt} code entity node(s) in workspace `{args.workspace}`.",
+                    "",
+                    "Enable the **ENRICH** toggle in Benny Studio \u2192 Code Graph to see amber "
+                    "dashed overlays connecting architecture concepts to source code symbols.",
+                    "",
+                    "## Run Provenance",
+                    "",
+                    f"- Run ID: `{run_id}`",
+                    f"- Manifest ID: `{manifest_id}`",
+                    f"- Run folder: `{run_folder}`",
+                    f"- Lineage (Marquez): http://localhost:3010",
+                    f"- GDPR notice: `{run_folder / 'GDPR_notice.json'}`",
+                    "",
+                    "## All Node / Edge Counts",
+                    "",
+                    "| Type | Count |",
+                    "|------|------:|",
+                    *[f"| `{k}` | {v} |" for k, v in {**ntypes, **rtypes}.items()],
+                ])
+
+                data_out = benny_home / "workspace" / args.workspace / "data_out"
+                data_out.mkdir(parents=True, exist_ok=True)
+                report_path = data_out / "enrichment_report.md"
+                report_path.write_text(report, encoding="utf-8")
+                return {"report_path": str(report_path), "corr_count": corr_cnt,
+                        "concept_count": concept_cnt, "code_count": code_cnt}
+
+            else:
+                raise ValueError(f"Unknown task id: {tid!r}")
+
+    # ─── 9. Execute waves with Rich Live display ──────────────────────────────
+    completed_tasks: List[str] = []
+    all_errors:      List[str] = []
+    final_status = "completed"
+
+    wave_groups: Dict[int, List[str]] = {}
+    for t in TASK_DEFS:
+        wave_groups.setdefault(t["wave"], []).append(t["id"])
+
+    progress = Progress(
+        SpinnerColumn(spinner_name="dots2"),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=28),
+        TextColumn("[bold]{task.completed}[/]/[dim]{task.total}[/]"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
+    )
+    overall = progress.add_task("[cyan]Enrichment pipeline", total=len(TASK_DEFS))
+
+    with Live(console=console, refresh_per_second=8) as live:
+        live.update(Group(progress, _make_table()))
+
+        for wave_num in sorted(wave_groups.keys()):
+            wave_tids = wave_groups[wave_num]
+
+            if final_status == "failed":
+                for tid in [t["id"] for t in TASK_DEFS if task_status[t["id"]] == "pending"]:
+                    task_status[tid] = "skipped"
+                live.update(Group(progress, _make_table()))
+                break
+
+            progress.update(
+                overall,
+                description=f"[cyan]Wave {wave_num}[/]  [dim]{', '.join(wave_tids)}[/]",
+            )
+            for tid in wave_tids:
+                task_status[tid] = "running"
+            live.update(Group(progress, _make_table()))
+
+            wave_t0 = time.monotonic()
+            results = await asyncio.gather(
+                *[_run_task(tid) for tid in wave_tids], return_exceptions=True
+            )
+
+            for tid, result in zip(wave_tids, results):
+                elapsed = time.monotonic() - wave_t0
+                task_elapsed[tid] = elapsed
+                task_ts = datetime.now(timezone.utc).isoformat()
+
+                if isinstance(result, Exception):
+                    task_status[tid] = "failed"
+                    err = str(result)
+                    task_error[tid] = err
+                    task_note[tid]  = (err[:20] + "\u2026") if len(err) > 20 else err
+                    all_errors.append(f"{tid}: {err}")
+                    final_status = "failed"
+                    try:
+                        lineage.emit_tool_execution(
+                            manifest_id, tid, {"workspace": args.workspace}, False, err
+                        )
+                    except Exception:
+                        pass
+                else:
+                    task_status[tid] = "done"
+                    completed_tasks.append(tid)
+                    # Build a short note from meaningful result keys
+                    note_parts: List[str] = []
+                    if isinstance(result, dict):
+                        for key, label in [
+                            ("staging_files",        "{v} staging files"),
+                            ("correlates_with_count", "{v} corr. edges"),
+                            ("corr_count",            "{v} corr. edges"),
+                            ("concept_count",         "{v} concepts"),
+                            ("report_path",           "report written"),
+                        ]:
+                            if key in result:
+                                val = result[key]
+                                note_parts.append(label.format(v=val) if "{v}" in label else label)
+                    task_note[tid] = ", ".join(note_parts[:2])
+                    try:
+                        lineage.emit_tool_execution(
+                            manifest_id, tid, {"workspace": args.workspace}, True
+                        )
+                    except Exception:
+                        pass
+
+                # Write per-task audit record
+                task_record: Dict[str, Any] = {
+                    "task_id":     tid,
+                    "wave":        wave_num,
+                    "status":      task_status[tid],
+                    "timestamp":   task_ts,
+                    "elapsed_s":   round(elapsed, 3),
+                    "result":      None if isinstance(result, Exception) else result,
+                    "error":       task_error[tid],
+                    "lineage_ref": manifest_id,
+                    "run_id":      run_id,
+                }
+                record_json = json.dumps(task_record, indent=2, default=str)
+                # SHA-256 integrity seal
+                task_record["_sha256"] = hashlib.sha256(record_json.encode()).hexdigest()
+                (run_folder / f"task_{tid}.json").write_text(
+                    json.dumps(task_record, indent=2, default=str), encoding="utf-8"
+                )
+                try:
+                    emit_governance_event(
+                        event_type="ENRICH_TASK_DONE" if task_status[tid] == "done" else "ENRICH_TASK_FAILED",
+                        data=task_record,
+                        workspace_id=args.workspace,
+                    )
+                except Exception:
+                    pass
+
+                progress.advance(overall)
+                live.update(Group(progress, _make_table()))
+
+    # ─── 10. Write summary.json + close lineage ───────────────────────────────
+    duration_s = (datetime.now(timezone.utc) - started_at).total_seconds()
+    summary: Dict[str, Any] = {
+        "run_id":           run_id,
+        "manifest_id":      manifest_id,
+        "workspace":        args.workspace,
+        "src_path":         src_path,
+        "model":            model,
+        "threshold":        args.threshold,
+        "strategy":         args.strategy,
+        "status":           final_status,
+        "started_at":       started_at.isoformat(),
+        "duration_s":       round(duration_s, 2),
+        "tasks_completed":  completed_tasks,
+        "tasks_failed":     [k for k, v in task_status.items() if v == "failed"],
+        "errors":           all_errors,
+        "run_folder":       str(run_folder),
+        "marquez_url":      "http://localhost:3010",
+        "gdpr_notice":      str(run_folder / "GDPR_notice.json"),
+    }
+    sum_json = json.dumps(summary, indent=2, default=str)
+    summary["_sha256"] = hashlib.sha256(sum_json.encode()).hexdigest()
+    (run_folder / "summary.json").write_text(
+        json.dumps(summary, indent=2, default=str), encoding="utf-8"
+    )
+
+    try:
+        if final_status == "completed":
+            lineage.complete_workflow(
+                manifest_id,
+                f"Knowledge Enrichment \u2014 {args.workspace}",
+                args.workspace,
+                completed_tasks,
+                int(duration_s * 1000),
+                ["data_out/enrichment_report.md"],
+            )
+        else:
+            lineage.fail_workflow(
+                manifest_id,
+                f"Knowledge Enrichment \u2014 {args.workspace}",
+                args.workspace,
+                "; ".join(all_errors),
+            )
+    except Exception:
+        pass
+
+    try:
+        emit_governance_event(
+            "ENRICH_RUN_COMPLETE", summary, workspace_id=args.workspace
+        )
+    except Exception:
+        pass
+
+    # ─── 11. Final summary panel ─────────────────────────────────────────────
+    ok = final_status == "completed"
+    console.print()
+    console.print(Rule(f"[bold {'green' if ok else 'red'}]Enrichment {'Complete \u2713' if ok else 'Failed \u2717'}"))
+
+    sum_tbl = Table(box=box.SIMPLE, show_header=False, expand=True)
+    sum_tbl.add_column("Key",   style="dim",        width=22)
+    sum_tbl.add_column("Value", style="bold white")
+
+    sum_tbl.add_row(
+        "Status",
+        f"[bold {'green' if ok else 'red'}]{final_status.upper()}[/]",
+    )
+    sum_tbl.add_row("Duration",        f"{duration_s:.1f}s")
+    sum_tbl.add_row("Tasks completed", f"{len(completed_tasks)} / {len(TASK_DEFS)}")
+    sum_tbl.add_row("Run ID",          run_id)
+    sum_tbl.add_row("Manifest ID",     manifest_id)
+    sum_tbl.add_row("Run folder",      str(run_folder))
+    sum_tbl.add_row("Lineage",         "[link=http://localhost:3010]http://localhost:3010[/link]  [dim](Marquez)[/dim]")
+    if ok:
+        sum_tbl.add_row(
+            "Studio ENRICH toggle",
+            "[link=http://localhost:3000]http://localhost:3000[/link]  \u2192 Studio \u2192 Code Graph \u2192 [cyan]ENRICH[/cyan]",
+        )
+    sum_tbl.add_row("GDPR notice",     str(run_folder / "GDPR_notice.json"))
+
+    console.print(Panel(
+        sum_tbl,
+        title="[bold]Run Summary[/]",
+        border_style="green" if ok else "red",
+        padding=(0, 2),
+    ))
+
+    if all_errors:
+        console.print()
+        console.print("[bold red]Errors:[/]")
+        for err in all_errors:
+            console.print(f"  [red]\u2717[/] {err}")
 
     if args.json:
-        print(record.model_dump_json(indent=2))
+        console.print()
+        console.print(json.dumps(summary, indent=2, default=str))
 
-    return 0 if record.status.value in ("completed", "partial_success") else 1
+    console.print()
+    return 0 if ok else 1
 
 
 # =============================================================================

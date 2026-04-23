@@ -22,7 +22,7 @@
     "model": "lemonade/qwen3-tk-4b-FLM",
     "max_concurrency": 2,
     "max_depth": 3,
-    "skills_allowed": ["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "semantic_correlate", "validate_enrichment"]
+    "skills_allowed": ["extract_pdf", "rag_ingest", "code_scan", "kg3d_ingest", "validate_enrichment"]
   },
   "plan": {
     "tasks": [
@@ -66,7 +66,7 @@
       {
         "id": "semantic_correlate",
         "description": "[DETERMINISTIC] Run the semantic correlation suite (Neural Spark) to create CORRELATES_WITH edges linking Concept nodes to matching CodeEntity nodes. Threshold: 0.70. Strategy: aggressive.",
-        "skill_hint": "semantic_correlate",
+        "skill_hint": "kg3d_ingest",
         "dependencies": ["code_scan", "deep_synthesis"],
         "wave": 3,
         "complexity": "medium",
