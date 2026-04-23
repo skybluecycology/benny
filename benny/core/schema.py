@@ -57,7 +57,7 @@ class SynthesisConfig(BaseModel):
     min_section_chars: int = Field(default=50, description="Minimum chars for a section to be processed")
 
     # Parallel extraction
-    parallel_limit: int = Field(default=4, description="Max concurrent LLM calls for section extraction")
+    parallel_limit: int = Field(default=1, description="Max concurrent LLM calls for section extraction")
     inference_delay: float = Field(default=0.5, description="Delay between calls to prevent thermal throttle")
 
     # Quality

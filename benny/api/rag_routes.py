@@ -37,6 +37,7 @@ class IngestRequest(BaseModel):
     deep_synthesis: bool = False # Whether to extract triples and run clustering
     strategy: str = "safe" # Heuristic layer: 'safe' or 'aggressive'
     correlation_threshold: float = 0.70 # Similarity threshold for aggressive mode
+    force_reingest: bool = False # Whether to force re-processing even if already in DB
 
 
 
@@ -80,7 +81,7 @@ async def ingest_files(request: IngestRequest):
             run_id, 
             intent=f"Ingesting {len(request.files) if request.files else 'all'} files from data_in",
             observation="Initialization complete",
-            plan=f"1. Extract text via Docling 2. Chunk 3. Batch upsert to ChromaDB ({collection_name if 'collection_name' in locals() else 'knowledge'})"
+            plan=f"1. Extract text via Docling 2. Chunk 3. Batch upsert to ChromaDB"
         )
     except Exception as e:
         logger.warning("Lineage tracking failed (init): %s", e)
@@ -101,6 +102,8 @@ async def ingest_files(request: IngestRequest):
         supported = ['.txt', '.md', '.pdf', '.docx', '.pptx', '.html']
         file_paths = [f for f in file_paths if f.suffix.lower() in supported]
         
+        logger.info(f"Ingestion started for {len(file_paths)} files in {data_in_path}")
+        
         if not file_paths:
             task_manager.update_task(run_id, status="failed", message="No supported files found")
             raise HTTPException(404, "No supported files found")
@@ -117,6 +120,7 @@ async def ingest_files(request: IngestRequest):
         for idx, file_path in enumerate(file_paths):
             try:
                 msg = f"Processing {file_path.name} ({idx+1}/{len(file_paths)})..."
+                logger.info(msg)
                 task_manager.update_task(
                     run_id, 
                     message=msg, 
@@ -133,59 +137,69 @@ async def ingest_files(request: IngestRequest):
                 except Exception:
                     pass
                 text = extract_structured_text(file_path)
+                print(f"DEBUG: Extracted {len(text)} chars from {file_path.name}. Preview: {text[:100]}...")
                 
-                # Simple chunking (split by paragraphs)
-                chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
+                # Better chunking (split by paragraphs, then size limit)
+                raw_chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
+                if not raw_chunks and text.strip():
+                    raw_chunks = [text.strip()]
+                
+                chunks = []
+                max_chunk_chars = 4000
+                for rc in raw_chunks:
+                    if len(rc) > max_chunk_chars:
+                        for i in range(0, len(rc), max_chunk_chars):
+                            chunks.append(rc[i:i+max_chunk_chars])
+                    else:
+                        chunks.append(rc)
                 
                 if chunks:
-                    task_manager.update_task(run_id, metadata={"stage": "INDEXING", "current_file": file_path.name, "chunks": len(chunks)})
-                    
-                    # 1. DELETE old entries for this source to prevent duplicates
-                    collection.delete(where={"source": file_path.name})
+                    try:
+                        task_manager.update_task(run_id, metadata={"stage": "INDEXING", "current_file": file_path.name, "chunks": len(chunks)})
+                        
+                        # 1. DELETE old entries for this source to ensure fresh start
+                        logger.info(f"Clearing old vectors for {file_path.name} to ensure fresh ingestion.")
+                        collection.delete(where={"source": file_path.name})
 
-                    # 2. UPLOAD in batches
-                    batch_size = request.batch_size or 500
-                    for i in range(0, len(chunks), batch_size):
-                        batch_chunks = chunks[i:i + batch_size]
-                        batch_ids = [f"{file_path.stem}_{run_id[-4:]}_{j}" for j in range(i, i + len(batch_chunks))]
-                        batch_metadatas = [
-                            {"source": file_path.name, "chunk_index": j, "run_id": run_id} 
-                            for j in range(i, i + len(batch_chunks))
-                        ]
-                        
-                        collection.add(documents=batch_chunks, metadatas=batch_metadatas, ids=batch_ids)
-                        
-                        # Emit AER for commit
-                        perc = (i + len(batch_chunks)) / len(chunks) * 100
-                        task_manager.update_task(run_id, metadata={
-                            "stage": "INDEXING", 
-                            "current_file": file_path.name, 
-                            "chunks": len(chunks),
-                            "indexed_count": i + len(batch_chunks)
-                        })
-                        try:
-                            track_aer(run_id, "rag_ingest", request.workspace, f"Committing chunks for {file_path.name}", f"Committed {i+len(batch_chunks)}/{len(chunks)} chunks ({perc:.0f}%)")
-                        except Exception:
-                            pass
+                        # 2. UPLOAD in batches
+                        batch_size = request.batch_size or 500
+                        for i in range(0, len(chunks), batch_size):
+                            batch_chunks = chunks[i:i + batch_size]
+                            batch_ids = [f"{file_path.stem}_{run_id[-4:]}_{j}" for j in range(i, i + len(batch_chunks))]
+                            batch_metadatas = [
+                                {"source": file_path.name, "chunk_index": j, "run_id": run_id} 
+                                for j in range(i, i + len(batch_chunks))
+                            ]
+                            collection.add(documents=batch_chunks, metadatas=batch_metadatas, ids=batch_ids)
+                    except Exception as index_e:
+                        logger.error(f"Vector Indexing error for {file_path.name}: {index_e}")
+                        task_manager.add_aer_entry(run_id, "Error", f"Indexing Failed {file_path.name}: {str(index_e)}")
+                        # Do not abort the loop, let it continue to deep synthesis
                 
                 # 3. DEEP SYNTHESIS (Optional)
                 if request.deep_synthesis:
                     try:
-                        from ..synthesis.engine import extract_triples
+                        from ..synthesis.engine import parallel_extract_triples
                         from ..graph.triples import save_knowledge_triples
                         
                         track_aer(run_id, "rag_ingest", request.workspace, f"Deep Synthesis for {file_path.name}", "Extracting triples via LLM Engine")
                         task_manager.update_task(run_id, metadata={"stage": "SYNTHESIZING", "current_file": file_path.name})
                         
-                        # Process text in batches if very large, but for now we'll take top 30k chars
-                        sample_text = text[:30000] 
-                        triples = await extract_triples(
-                            sample_text, 
-                            source_name=file_path.name, 
+                        print(f"DEBUG: STARTING Triple Extraction for {file_path.name}...")
+                        
+                        # Prepare NPU-friendly chunks for synthesis (limit to 10 sections to prevent runaway extraction)
+                        synth_chunks = chunks[:10] 
+                        sections = [{"title": f"{file_path.name} Part {i+1}", "text": c} for i, c in enumerate(synth_chunks) if len(c) > 100]
+                        
+                        triples = await parallel_extract_triples(
+                            sections=sections,
                             run_id=run_id, 
                             workspace=request.workspace,
-                            strategy=request.strategy
+                            strategy=request.strategy,
+                            timeout=300.0,
+                            parallel_limit=2
                         )
+                        print(f"DEBUG: FINISHED Triple Extraction for {file_path.name}: Found {len(triples)} triples")
                         
                         if triples:
                             await save_knowledge_triples(request.workspace, triples, file_path.name)
@@ -196,9 +210,9 @@ async def ingest_files(request: IngestRequest):
                                 from ..synthesis.engine import save_concept_article
                                 # Use the first few triples to identify the primary concept or use the filename
                                 primary_concept = file_path.stem
-                                summary_prompt = f"Summarize the core concepts of this document section in 3-4 sentences for a technical wiki:\n\n{sample_text[:2000]}"
+                                summary_prompt = f"Summarize the core concepts of this document section in 3-4 sentences for a technical wiki:\n\n{text[:2000]}"
                                 from ..synthesis.engine import call_llm
-                                summary = await call_llm(summary_prompt, run_id=run_id)
+                                summary = await call_llm(summary_prompt, run_id=run_id, workspace=request.workspace)
                                 
                                 wiki_file = await save_concept_article(
                                     workspace=request.workspace,
@@ -339,7 +353,7 @@ async def get_indexing_manifest(workspace: str = "default"):
         from ..core.workspace import get_workspace_path
         
         import os
-        for base_path_obj in scan_paths:
+        for base_path_obj in [data_in_path]:
             base_path = str(base_path_obj)
             if not os.path.exists(base_path):
                 continue

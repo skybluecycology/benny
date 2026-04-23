@@ -421,6 +421,38 @@ def list_workspaces() -> List[dict]:
     return workspaces
 
 
+
+def delete_workspace(workspace_id: str) -> dict:
+    """
+    Delete a workspace directory and its associated database records.
+    
+    Args:
+        workspace_id: ID of the workspace to delete
+        
+    Returns:
+        Status dictionary
+    """
+    if workspace_id == "default":
+        raise PermissionError("The default workspace cannot be deleted.")
+        
+    # 1. Clean up Neo4j
+    from .graph_db import delete_workspace_data
+    try:
+        delete_workspace_data(workspace_id)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to clean up Neo4j data for workspace {workspace_id}: {e}")
+        
+    # 2. Delete the directory structure
+    import shutil
+    path = get_workspace_path(workspace_id)
+    if path.exists():
+        shutil.rmtree(path)
+        
+    return {"status": "deleted", "workspace_id": workspace_id}
+
+
+
 def get_workspace_files(workspace_id: str, subdir: str = "data_out") -> List[dict]:
     """
     List files in a workspace subdirectory.

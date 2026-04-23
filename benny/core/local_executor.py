@@ -93,7 +93,7 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # Use a longer default timeout for local models (LC-5.4)
-        self.timeout = float(os.environ.get("BENNY_LLM_TIMEOUT", "120"))
+        self.timeout = float(os.environ.get("BENNY_LLM_TIMEOUT", "300"))
 
     async def generate(self, prompt: str, system: Optional[str] = None, run_id: Optional[str] = None, **kwargs) -> str:
         start_ts = time.time()

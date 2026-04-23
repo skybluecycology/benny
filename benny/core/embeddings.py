@@ -34,29 +34,41 @@ async def get_embedding_async(
     """Get embeddings via HTTP (Async). No Torch/Transformers required."""
     from .models import LOCAL_PROVIDERS
     
-    provider_config = LOCAL_PROVIDERS.get(provider)
-    if not provider_config:
-        # Fallback to Ollama if lemonade is missing
-        url = "http://localhost:11434/api/embeddings"
-        payload = {"model": "nomic-embed-text", "prompt": text}
-        client = _get_async_client()
-        response = await client.post(url, json=payload)
-    else:
-        api_base = provider_config["base_url"]
-        url = f"{api_base}/embeddings"
-        payload = {"model": model, "input": text}
-        client = _get_async_client()
-        response = await client.post(url, json=payload)
+    # Dynamic provider cascade for failover
+    providers_to_try = [provider] + [p for p in ["lmstudio", "fastflowlm", "ollama"] if p != provider]
+    client = _get_async_client()
+    
+    for current_provider in providers_to_try:
+        provider_config = LOCAL_PROVIDERS.get(current_provider)
+        
+        if not provider_config:
+            if current_provider == "ollama":
+                url = "http://localhost:11434/api/embeddings"
+                payload = {"model": "nomic-embed-text", "prompt": text}
+            else:
+                continue
+        else:
+            api_base = provider_config.get("base_url", "http://localhost:11434/api")
+            # fastflowlm and others might use /v1, so we ensure /embeddings is appended correctly
+            url = f"{api_base}/embeddings"
+            payload = {"model": model, "input": text}
+            
+        try:
+            response = await client.post(url, json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                if "data" in data:
+                    return data["data"][0]["embedding"]
+                return data.get("embedding", [])
+        except httpx.ConnectError:
+            logger.debug(f"Connection refused for embedding provider {current_provider}. Trying next...")
+            continue
+        except Exception as e:
+            logger.warning(f"Error with embedding provider {current_provider}: {e}")
+            continue
 
-    if response.status_code == 200:
-        data = response.json()
-        # Handle both OpenAI format and Ollama format
-        if "data" in data:
-            return data["data"][0]["embedding"]
-        return data.get("embedding", [])
-    else:
-        logger.error(f"Embedding failed: {response.status_code} - {response.text}")
-        return [0.0] * 768 # Fallback to zero vector to prevent crash
+    logger.error("All local embedding providers failed (ConnectError/Timeout).")
+    return [0.0] * 768 # Fallback to zero vector to prevent crash
 
 def get_embedding_sync(
     text: str, 
@@ -66,26 +78,37 @@ def get_embedding_sync(
     """Get embeddings via HTTP (Sync). Used by ChromaDB EmbeddingFunction."""
     from .models import LOCAL_PROVIDERS
     
-    provider_config = LOCAL_PROVIDERS.get(provider)
-    if not provider_config:
-        url = "http://localhost:11434/api/embeddings"
-        payload = {"model": "nomic-embed-text", "prompt": text}
-    else:
-        api_base = provider_config["base_url"]
-        url = f"{api_base}/embeddings"
-        payload = {"model": model, "input": text}
-
+    providers_to_try = [provider] + [p for p in ["lmstudio", "fastflowlm", "ollama"] if p != provider]
     client = _get_sync_client()
-    try:
-        response = client.post(url, json=payload)
-        if response.status_code == 200:
-            data = response.json()
-            if "data" in data:
-                return data["data"][0]["embedding"]
-            return data.get("embedding", [])
-    except Exception as e:
-        logger.error(f"Sync embedding failed: {e}")
     
+    for current_provider in providers_to_try:
+        provider_config = LOCAL_PROVIDERS.get(current_provider)
+        
+        if not provider_config:
+            if current_provider == "ollama":
+                url = "http://localhost:11434/api/embeddings"
+                payload = {"model": "nomic-embed-text", "prompt": text}
+            else:
+                continue
+        else:
+            api_base = provider_config.get("base_url", "http://localhost:11434/api")
+            url = f"{api_base}/embeddings"
+            payload = {"model": model, "input": text}
+
+        try:
+            response = client.post(url, json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                if "data" in data:
+                    return data["data"][0]["embedding"]
+                return data.get("embedding", [])
+        except httpx.ConnectError:
+            continue
+        except Exception as e:
+            logger.warning(f"Sync embedding error with provider {current_provider}: {e}")
+            continue
+    
+    logger.error("All sync local embedding providers failed.")
     return [0.0] * 768
 
 # =============================================================================

@@ -8,7 +8,7 @@ from ..core.schema import WorkspaceManifest
 
 router = APIRouter()
 
-@router.get("/", response_model=list[str])
+@router.get("", response_model=list[str])
 async def get_workspaces():
     """List all available workspace IDs."""
     try:
@@ -56,7 +56,20 @@ async def update_workspace_manifest(workspace_id: str, updates: dict = Body(...)
         from ..core.workspace import update_manifest
         manifest = update_manifest(workspace_id, updates)
         return manifest
-    except HTTPException as he:
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{workspace_id}")
+async def delete_workspace_endpoint(workspace_id: str):
+    """Deep delete a workspace and all its metadata."""
+    try:
+        from ..core.workspace import delete_workspace
+        result = delete_workspace(workspace_id)
+        return result
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

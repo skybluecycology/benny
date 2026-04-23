@@ -28,7 +28,7 @@ class SkillCreate(BaseModel):
     parameters: List[SkillParameterCreate] = []
 
 
-@router.get("/skills")
+@router.get("")
 async def list_skills(workspace: str = "default"):
     """Get all available skills (built-in + workspace)"""
     try:
@@ -42,7 +42,7 @@ async def list_skills(workspace: str = "default"):
         raise HTTPException(500, f"Failed to list skills: {str(e)}")
 
 
-@router.get("/skills/catalog")
+@router.get("/catalog")
 async def get_skill_catalog(workspace: str = "default"):
     """Get skills grouped by category for progressive discovery"""
     try:
@@ -55,7 +55,7 @@ async def get_skill_catalog(workspace: str = "default"):
         raise HTTPException(500, f"Failed to get catalog: {str(e)}")
 
 
-@router.post("/skills")
+@router.post("")
 async def create_skill(request: SkillCreate, workspace: str = "default"):
     """Save a custom skill to the workspace"""
     try:
@@ -74,7 +74,7 @@ async def create_skill(request: SkillCreate, workspace: str = "default"):
         raise HTTPException(500, f"Failed to save skill: {str(e)}")
 
 
-@router.delete("/skills/{skill_id}")
+@router.delete("/{skill_id}")
 async def delete_skill(skill_id: str, workspace: str = "default"):
     """Delete a custom workspace skill"""
     try:

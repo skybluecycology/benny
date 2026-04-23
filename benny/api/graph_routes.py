@@ -649,7 +649,7 @@ async def _event_generator(run_id: str) -> AsyncGenerator[str, None]:
 
     while True:
         try:
-            event = await asyncio.wait_for(queue.get(), timeout=120.0)
+            event = await asyncio.wait_for(queue.get(), timeout=300.0)
             yield event.to_sse()
             if event.event in (IngestionEventType.COMPLETED, IngestionEventType.ERROR):
                 break
@@ -1022,7 +1022,9 @@ async def _process_content_to_graph(
         inference_delay=inference_delay,
         timeout=llm_timeout,
         config=synthesis_config,
-        event_callback=event_callback
+        event_callback=event_callback,
+        workspace=workspace,
+        run_id=run_id
     )
 
     if not triples:

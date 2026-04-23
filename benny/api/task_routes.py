@@ -7,7 +7,7 @@ from fastapi.responses import Response
 
 router = APIRouter()
 
-@router.get("/tasks", response_model=List[Task])
+@router.get("", response_model=List[Task])
 async def list_tasks(workspace: Optional[str] = Query(None)):
     """List all background tasks for a workspace."""
     return task_manager.list_tasks(workspace)

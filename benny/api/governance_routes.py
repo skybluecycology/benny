@@ -75,12 +75,8 @@ async def update_manual(workspace: str, filename: str, content: Dict[str, str] =
 @router.get("/security-events")
 async def list_security_events(workspace: str = Query("global"), limit: int = 50):
     """List recent security events from the audit log."""
-    # This is a simplified implementation that parses the audit log
-    # In a production system, this would query a proper database or indexed log store.
     try:
         result = verify_audit_integrity(workspace)
-        # For now, we'll just return a success message or specific tampered events
-        # as a placeholder for a more complex log query API.
         return {
             "integrity_status": result,
             "hint": "Security events are mirrored in the governance.log and workspace-specific audit.log"
@@ -92,7 +88,6 @@ async def list_security_events(workspace: str = Query("global"), limit: int = 50
 async def verify_execution_audit(execution_id: str, workspace: str = Query("default")):
     """
     Enhanced audit verification endpoint with detailed failure information.
-    Returns comprehensive audit trail including failures, node states, and execution phases.
     """
     try:
         audit = retrieve_execution_audit(execution_id, workspace, include_nodes=True, include_checkpoints=True)
@@ -103,10 +98,7 @@ async def verify_execution_audit(execution_id: str, workspace: str = Query("defa
 
 @router.get("/execution/{execution_id}/failures")
 async def get_execution_failures(execution_id: str, workspace: str = Query("default")):
-    """
-    Get all failures recorded for a specific execution.
-    Useful for quickly identifying what went wrong.
-    """
+    """Get all failures recorded for a specific execution."""
     try:
         audit = retrieve_execution_audit(execution_id, workspace, include_nodes=False)
         return {
@@ -122,14 +114,9 @@ async def get_execution_failures(execution_id: str, workspace: str = Query("defa
 
 @router.get("/execution/{execution_id}/nodes")
 async def get_execution_nodes(execution_id: str, workspace: str = Query("default")):
-    """
-    Get detailed node execution states for a specific execution.
-    Shows input/output data and execution time for each node.
-    """
+    """Get detailed node execution states."""
     try:
         audit = retrieve_execution_audit(execution_id, workspace, include_nodes=True, include_checkpoints=False)
-        
-        # Extract and organize node data
         nodes_by_status = {"completed": [], "failed": [], "other": []}
         for node_event in audit.get("node_states", []):
             node_data = node_event.get("data", {})
@@ -153,10 +140,7 @@ async def get_execution_nodes(execution_id: str, workspace: str = Query("default
 
 @router.get("/execution/{execution_id}/report")
 async def get_execution_report(execution_id: str, workspace: str = Query("default")):
-    """
-    Generate a human-readable text report of the execution failure.
-    Includes full stack traces and error context.
-    """
+    """Generate a human-readable text report of the execution failure."""
     try:
         report = generate_execution_report(execution_id, workspace)
         return {

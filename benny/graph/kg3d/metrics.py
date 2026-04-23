@@ -15,13 +15,13 @@ def compute_all(graph: Graph) -> Dict[str, NodeMetrics]:
         G.add_edge(edge.source_id, edge.target_id, weight=edge.weight, kind=edge.kind)
 
     # 1. Pagerank
-    pagerank = nx.pagerank(G, weight="weight")
+    pagerank = nx.pagerank(G, weight="weight") if len(G) > 0 else {}
     
     # 2. Degree
     degree = dict(G.degree())
     
     # 3. Betweenness
-    betweenness = nx.betweenness_centrality(G, weight="weight")
+    betweenness = nx.betweenness_centrality(G, weight="weight") if len(G) > 0 else {}
     
     # 4. Descendant ratio (reachable nodes / total nodes)
     total_nodes = len(graph.nodes)

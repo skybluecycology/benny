@@ -14,6 +14,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from ..core.graph_db import get_driver, read_session, write_session
 from ..governance.aer_decorator import aer_tracked
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

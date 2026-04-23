@@ -22,7 +22,7 @@ class UrlIngestRequest(BaseModel):
 
 router = APIRouter()
 
-@router.post("/files/download-url")
+@router.post("/download-url")
 async def download_url(request: UrlIngestRequest):
     """Download content from a URL, parse HTML to Markdown, and save to data_in"""
     try:
@@ -76,7 +76,7 @@ async def download_url(request: UrlIngestRequest):
     except Exception as e:
         raise HTTPException(500, f"URL download failed: {str(e)}")
 
-@router.post("/files/download-gutenberg")
+@router.post("/download-gutenberg")
 async def download_gutenberg(request: UrlIngestRequest):
     """Download a TXT from Gutenberg, extract Title and save as Markdown"""
     try:
@@ -114,7 +114,7 @@ async def download_gutenberg(request: UrlIngestRequest):
         raise HTTPException(500, f"Gutenberg download failed: {str(e)}")
 
 
-@router.post("/files/upload")
+@router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     workspace: str = "default",
@@ -166,7 +166,7 @@ async def upload_file(
 
 
 
-@router.get("/files")
+@router.get("")
 async def list_files(workspace: str = "default"):
     """List all files in workspace data_in, data_out, and staging"""
     try:
@@ -185,7 +185,7 @@ async def list_files(workspace: str = "default"):
         raise HTTPException(500, f"Failed to list files: {str(e)}")
 
 
-@router.get("/files/recursive-scan")
+@router.get("/recursive-scan")
 async def recursive_scan(workspace: str = "default"):
     """Recursively scan the entire workspace directory including hidden files."""
     try:
@@ -205,7 +205,7 @@ async def recursive_scan(workspace: str = "default"):
                     all_files.append({
                         "name": name,
                         "path": str(rel_path),
-                        "full_path": str(file_path.relative_to(WORKSPACE_ROOT.absolute())),
+                        "full_path": str(file_path.relative_to(WORKSPACE_ROOT.resolve())),
                         "size": file_path.stat().st_size,
                         "modified": file_path.stat().st_mtime,
                         "type": file_path.suffix.lower().lstrip('.') or "unknown",
@@ -223,7 +223,7 @@ async def recursive_scan(workspace: str = "default"):
         raise HTTPException(500, f"Recursive scan failed: {str(e)}")
 
 
-@router.get("/files/preview")
+@router.get("/preview")
 async def preview_file(path: str, workspace: str = "default"):
     """Get content preview or metadata based on file type."""
     try:
@@ -266,7 +266,7 @@ async def preview_file(path: str, workspace: str = "default"):
         raise HTTPException(500, f"Preview failed: {str(e)}")
 
 
-@router.delete("/files/{filename}")
+@router.delete("/{filename}")
 async def delete_file(
     filename: str,
     workspace: str = "default",

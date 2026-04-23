@@ -20,9 +20,11 @@ delta_seq = 0
 delta_queue: asyncio.Queue = asyncio.Queue()
 
 @router.get("/ontology")
-async def get_ontology():
+async def get_ontology(workspace: str = "default"):
     """Returns the full graph as JSON with computed metrics."""
-    graph = load_default_ontology()
+    # Load from Neo4j if workspace provided, otherwise fallback to fixture
+    graph = await load_default_ontology(workspace=workspace)
+    
     metrics = get_cached_metrics(graph)
     
     if not metrics:
@@ -93,3 +95,44 @@ def inject_test_proposal(proposal: Proposal) -> str:
     p_id = str(uuid.uuid4())
     pending_proposals[p_id] = proposal
     return p_id
+
+@router.get("/status")
+async def get_kg_status(workspace: str = "default"):
+    """Returns high-level graph health and density metrics for the workspace."""
+    try:
+        from ..core.graph_db import get_driver
+        driver = get_driver()
+        
+        with driver.session() as session:
+            # Count by labels
+            labels_res = session.run("""
+                MATCH (n {workspace: $workspace})
+                UNWIND labels(n) as label
+                RETURN label, count(n) as count
+            """, workspace=workspace)
+            node_counts = {record["label"]: record["count"] for record in labels_res}
+            
+            # Count edges by type
+            edges_res = session.run("""
+                MATCH (n {workspace: $workspace})-[r]->(m {workspace: $workspace})
+                RETURN type(r) as kind, count(r) as count
+            """, workspace=workspace)
+            edge_counts = {record["kind"]: record["count"] for record in edges_res}
+            
+            # Source check
+            sources_res = session.run("""
+                MATCH (s:Source {workspace: $workspace})
+                RETURN s.name as name
+            """, workspace=workspace)
+            sources = [r["name"] for r in sources_res]
+
+        return {
+            "workspace": workspace,
+            "node_counts": node_counts,
+            "edge_counts": edge_counts,
+            "sources": sources,
+            "total_nodes": sum(node_counts.values()),
+            "total_edges": sum(edge_counts.values())
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Status check failed: {str(e)}")

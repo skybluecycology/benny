@@ -108,7 +108,7 @@ def get_notebook_stats(notebook_id: str, workspace: str = "default") -> dict:
         return {"document_count": 0, "unique_sources": 0, "message_count": 0}
 
 
-@router.get("/notebooks")
+@router.get("")
 async def list_notebooks(workspace: str = "default"):
     """List all notebooks in tree structure"""
     try:
@@ -130,7 +130,7 @@ async def list_notebooks(workspace: str = "default"):
         raise HTTPException(500, f"Failed to list notebooks: {str(e)}")
 
 
-@router.post("/notebooks")
+@router.post("")
 async def create_notebook(request: NotebookCreate, workspace: str = "default"):
     """Create a new notebook"""
     try:
@@ -184,7 +184,7 @@ async def create_notebook(request: NotebookCreate, workspace: str = "default"):
         raise HTTPException(500, f"Failed to create notebook: {str(e)}")
 
 
-@router.put("/notebooks/{notebook_id}")
+@router.put("/{notebook_id}")
 async def update_notebook(notebook_id: str, request: NotebookUpdate, workspace: str = "default"):
     """Rename or update notebook"""
     try:
@@ -218,7 +218,7 @@ async def update_notebook(notebook_id: str, request: NotebookUpdate, workspace: 
         raise HTTPException(500, f"Failed to update notebook: {str(e)}")
 
 
-@router.delete("/notebooks/{notebook_id}")
+@router.delete("/{notebook_id}")
 async def delete_notebook(notebook_id: str, workspace: str = "default"):
     """Delete notebook and all associated data"""
     try:
@@ -260,7 +260,7 @@ async def delete_notebook(notebook_id: str, workspace: str = "default"):
         raise HTTPException(500, f"Failed to delete notebook: {str(e)}")
 
 
-@router.get("/notebooks/{notebook_id}")
+@router.get("/{notebook_id}")
 async def get_notebook(notebook_id: str, workspace: str = "default"):
     """Get details for a specific notebook"""
     try:

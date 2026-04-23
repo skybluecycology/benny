@@ -16,6 +16,7 @@ import KnowledgeGraphCanvas from './components/Notebook/KnowledgeGraphCanvas';
 import SynthesisPanel from './components/Notebook/SynthesisPanel';
 import V2GraphSelector from './components/Studio/V2GraphSelector';
 import GlobalAdminDashboard from './components/Admin/GlobalAdminDashboard';
+import WorkspaceManager from './components/Admin/WorkspaceManager';
 import ExecutionAuditHub from './components/Studio/ExecutionAuditHub';
 import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { RootErrorBoundary } from './components/Shared/RootErrorBoundary';
@@ -25,9 +26,10 @@ import AppV2 from './AppV2Beta';
 
 
 
-import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield } from 'lucide-react';
+import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield, Folder } from 'lucide-react';
 
-type View = 'studio' | 'notebook' | 'llm' | 'admin';
+type View = 'studio' | 'notebook' | 'llm' | 'admin' | 'workspaces';
+
 
 import WorkspaceSelector from './components/Shared/WorkspaceSelector';
 import SidebarTabs from './components/Studio/SidebarTabs';
@@ -164,6 +166,14 @@ function App() {
             <Shield size={20} />
           </button>
 
+          <button 
+            className={`nav-rail-item ${view === 'workspaces' ? 'active' : ''}`}
+            onClick={() => setView('workspaces')}
+            title="Workspace Manager"
+          >
+            <Folder size={20} />
+          </button>
+
           <div style={{ flex: 1 }} />
           
           <button 
@@ -268,6 +278,7 @@ function App() {
           
           {view === 'llm' && <LLMManager />}
           {view === 'admin' && <GlobalAdminDashboard />}
+          {view === 'workspaces' && <WorkspaceManager />}
 
           {(view === 'studio' || view === 'notebook') && (
             <button 

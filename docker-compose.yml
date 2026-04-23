@@ -122,26 +122,7 @@ services:
   # Local LLM Providers (Choose one or more)
   # ============================================
 
-  # Ollama - Popular local LLM server (GPU accelerated)
-  # Pull models with: docker exec benny-ollama ollama pull llama3
-  ollama:
-    image: ollama/ollama:latest
-    container_name: benny-ollama
-    ports:
-      - "11434:11434"   # Ollama API
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - benny-network
-    restart: unless-stopped
-    # Uncomment for GPU support (NVIDIA):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+
 
   # Note: Lemonade and FastFlowLM run on the host machine
   # They are not containerized as they require direct NPU access
@@ -176,7 +157,6 @@ volumes:
     name: benny-marquez-db
   n8n_data:
     name: benny-n8n
-  ollama_data:
-    name: benny-ollama
+
   neo4j_data:
     name: benny-neo4j

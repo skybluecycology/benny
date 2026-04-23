@@ -22,6 +22,16 @@ class NodeCategory(str, Enum):
     OPTIMISATION_REINFORCEMENT_LEARNING = "optimisation_reinforcement_learning"
     ODE_PDE = "ode_pde"
     PROBABILITY_STOCHASTIC_STATISTICS = "probability_stochastic_statistics"
+    
+    # Synthesized Categories
+    PERSON = "person"
+    THEORY = "theory"
+    TECHNOLOGY = "technology"
+    ORGANIZATION = "organization"
+    LOCATION = "location"
+    EVENT = "event"
+    CONCEPT = "concept"
+    DOCUMENTATION = "documentation"
 
 class EdgeKind(str, Enum):
     PREREQUISITE = "prerequisite"

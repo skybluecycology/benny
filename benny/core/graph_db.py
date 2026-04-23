@@ -996,3 +996,32 @@ def multi_hop_traversal(query: str, workspace: str = "default", depth: int = 3, 
         logger.warning("Multi-hop traversal failed: %s", e)
     
     return results
+
+
+def delete_workspace_data(workspace: str) -> dict:
+    """
+    Deep delete all nodes and relationships associated with a workspace from Neo4j.
+    Enforces referential integrity by using DETACH DELETE.
+    """
+    with write_session() as session:
+        # 1. Delete all nodes with the workspace property (Concepts, Sources, etc.)
+        # DETACH DELETE removes all associated relationships.
+        session.run("""
+            MATCH (n {workspace: $workspace})
+            DETACH DELETE n
+        """, workspace=workspace)
+        
+        # 2. Delete any SynthesisRuns associated with the workspace
+        session.run("""
+            MATCH (r:SynthesisRun {workspace: $workspace})
+            DETACH DELETE r
+        """, workspace=workspace)
+        
+        # 3. Delete any CodeScans or other workspace-specific structures
+        session.run("""
+            MATCH (s:CodeScan {workspace: $workspace})
+            DETACH DELETE s
+        """, workspace=workspace)
+
+    return {"status": "workspace_data_deleted", "workspace": workspace}
+

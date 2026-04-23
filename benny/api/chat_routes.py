@@ -208,7 +208,7 @@ ANSWER:"""
     return prompt
 
 
-@router.post("/chat/query")
+@router.post("/query")
 async def query_chat(request: ChatRequest, workspace: str = "default"):
     """Send a message and get RAG-augmented response"""
     try:
@@ -324,7 +324,7 @@ async def query_chat(request: ChatRequest, workspace: str = "default"):
         raise HTTPException(500, f"Chat query failed: {str(e)}")
 
 
-@router.get("/chat/history/{notebook_id}")
+@router.get("/history/{notebook_id}")
 async def get_chat_history(notebook_id: str, workspace: str = "default", limit: int = 100):
     """Retrieve conversation history for a notebook"""
     try:
@@ -343,7 +343,7 @@ async def get_chat_history(notebook_id: str, workspace: str = "default", limit: 
         raise HTTPException(500, f"Failed to retrieve chat history: {str(e)}")
 
 
-@router.delete("/chat/history/{notebook_id}")
+@router.delete("/history/{notebook_id}")
 async def clear_chat_history(notebook_id: str, workspace: str = "default"):
     """Clear conversation history for a notebook"""
     try:

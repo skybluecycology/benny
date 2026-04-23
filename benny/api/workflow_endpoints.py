@@ -39,7 +39,7 @@ router = APIRouter()
 # ---- plan ------------------------------------------------------------------
 
 
-@router.post("/workflows/plan", response_model=SwarmManifest)
+@router.post("/plan", response_model=SwarmManifest)
 async def plan_workflow(req: PlanRequest) -> SwarmManifest:
     """Plan without executing; the returned manifest is signed (content_hash
     + signature) so callers can cache and later re-submit it to
@@ -112,7 +112,7 @@ async def _run_in_background(manifest: SwarmManifest, run_id: str) -> None:
     )
 
 
-@router.post("/workflows/run", response_model=RunResponse)
+@router.post("/run", response_model=RunResponse)
 async def run_workflow(
     manifest: SwarmManifest, background_tasks: BackgroundTasks
 ) -> RunResponse:

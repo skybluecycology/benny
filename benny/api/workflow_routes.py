@@ -235,7 +235,7 @@ async def _execute_swarm_async(
         executions[execution_id]["failed_at"] = datetime.now().isoformat()
 
 
-@router.post("/workflow/execute", response_model=WorkflowResponse)
+@router.post("/execute", response_model=WorkflowResponse)
 async def execute_workflow(request: WorkflowRequest, background_tasks: BackgroundTasks):
     """Execute a workflow"""
     execution_id = str(uuid.uuid4())
@@ -289,7 +289,7 @@ async def execute_workflow(request: WorkflowRequest, background_tasks: Backgroun
 
 from ..core.task_manager import task_manager
 
-@router.get("/workflow/{execution_id}/status")
+@router.get("/{execution_id}/status")
 async def get_workflow_status(execution_id: str):
     """Get status of a workflow execution"""
     if execution_id not in executions:

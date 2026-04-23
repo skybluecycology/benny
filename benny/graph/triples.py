@@ -37,7 +37,7 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     ON CREATE SET o.type = $object_type, o.created_at = timestamp()
     ON MATCH SET  o.type = $object_type, o.updated_at = timestamp()
 
-    MERGE (s)-[r:REL {predicate: $predicate}]->(o)
+    MERGE (s)-[r:RELATES_TO {predicate: $predicate}]->(o)
     ON CREATE SET
         r.confidence     = $confidence,
         r.citation       = $citation,
@@ -51,6 +51,7 @@ async def save_knowledge_triples(workspace: str, triples: List[KnowledgeTriple],
     ON MATCH SET
         r.confidence     = $confidence,
         r.citation       = $citation,
+        r.workspace      = $workspace,
         r.model_id       = $model_id,
         r.strategy       = $strategy,
         r.rationale      = $rationale,

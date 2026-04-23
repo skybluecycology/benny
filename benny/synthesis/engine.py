@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import re
-from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
+from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple, Callable
 
 import httpx
 
@@ -30,7 +30,7 @@ def _get_shared_client() -> httpx.AsyncClient:
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=10.0),
+            timeout=httpx.Timeout(300.0, connect=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
         )
     return _shared_client
@@ -458,7 +458,8 @@ async def extract_triples(
     run_id: Optional[str] = None,
     workspace: Optional[str] = "default",
     config: Optional[SynthesisConfig] = None,
-    strategy: str = "safe"
+    strategy: str = "safe",
+    timeout: Optional[float] = None
 ) -> List[KnowledgeTriple]:
     """
     Extract knowledge triples from text using the configured LLM.
@@ -475,7 +476,7 @@ async def extract_triples(
         resolved_model = await get_active_model(workspace)
 
         # Pass workspace and role to ensure manifest-level model selection
-        raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg, role="graph_synthesis")
+        raw = await call_llm(prompt, run_id=run_id, workspace=workspace, config=cfg, role="graph_synthesis", timeout=timeout)
         
         # Robustly parse JSON and capture any reasoning/thinking blocks
         triples_data, thinking = _parse_json_from_llm(raw)
@@ -591,9 +592,10 @@ async def parallel_extract_triples(
     inference_delay: float = 0.5,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
-    event_callback: Optional[Any] = None,
+    event_callback: Optional[Callable] = None,
+    workspace: str = "default",
     run_id: Optional[str] = None,
-    **kwargs  # Handle any unexpected arguments from stale callers
+    **kwargs
 ) -> List[KnowledgeTriple]:
     """
     Process multiple document sections in parallel for high-performance ingestion.
@@ -623,7 +625,8 @@ async def parallel_extract_triples(
                 inference_delay=inference_delay,
                 timeout=timeout,
                 config=cfg,
-                run_id=run_id
+                run_id=run_id,
+                workspace=workspace
             )
 
     # Launch parallel tasks
@@ -820,12 +823,17 @@ async def _get_generic_local_embedding(text: str, provider: str, model: str = No
         model_name = "nomic-embed-text-v1-GGUF"
 
     client = _get_shared_client()
-    response = await client.post(url, json={"model": model_name, "input": text})
-    if response.status_code == 200:
-        data = response.json()
-        return data["data"][0]["embedding"]
-    else:
-        raise Exception(f"{provider} embedding failed: {response.status_code} {response.text}")
+    try:
+        response = await client.post(url, json={"model": model_name, "input": text})
+        if response.status_code == 200:
+            data = response.json()
+            return data["data"][0]["embedding"]
+        else:
+            logger.warning(f"{provider} embedding failed ({response.status_code}): {response.text}")
+            return [0.0] * 768
+    except Exception as e:
+        logger.error(f"Failed to connect to {provider} embedding endpoint: {e}")
+        return [0.0] * 768
 
 
 async def _get_ollama_embedding(text: str, model: str = "nomic-embed-text") -> List[float]:
@@ -853,7 +861,8 @@ async def batch_embed_concepts(
     provider: str = "local",
     model: str = None,
     batch_size: int = 8,
-    event_callback: Optional[Any] = None
+    event_callback: Optional[Any] = None,
+    workspace: Optional[str] = None
 ) -> Dict[str, List[float]]:
     """
     Embed multiple concepts concurrently with controlled parallelism.
@@ -868,7 +877,7 @@ async def batch_embed_concepts(
         nonlocal completed
         async with semaphore:
             try:
-                embedding = await get_embedding(concept, provider=provider, model=model)
+                embedding = await get_embedding(concept, provider=provider, model=model, workspace=workspace)
                 results[concept] = embedding
                 completed += 1
                 if event_callback:
@@ -879,7 +888,7 @@ async def batch_embed_concepts(
                     ))
             except Exception as e:
                 logger.error(f"Failed to embed concept '{concept}': {e}")
-                results[concept] = [] # Fallback empty embedding
+                results[concept] = [0.0] * 768 # Fallback empty embedding
 
     tasks = [embed_one(c) for c in concepts]
     await asyncio.gather(*tasks)

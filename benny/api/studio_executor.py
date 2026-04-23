@@ -48,7 +48,7 @@ def _emit_execution_event(run_id: str, event_type: str, data: Dict[str, Any]):
     event_bus.emit(run_id, event_type, data)
 
 
-@router.get("/workflows/execute/{run_id}/events")
+@router.get("/{run_id}/events")
 async def stream_execution_events(run_id: str):
     """SSE endpoint for real-time execution events via centralized EventBus."""
     logging.info(f"[AUDIT] SSE stream requested for run_id: {run_id}")
@@ -64,7 +64,7 @@ async def stream_execution_events(run_id: str):
     )
 
 
-@router.post("/workflows/execute/{run_id}/hitl-response")
+@router.post("/{run_id}/hitl-response")
 async def submit_hitl_response(run_id: str, response: Dict[str, Any]):
     """Submit a HITL response to resume a paused workflow."""
     if run_id not in _hitl_responses:
@@ -530,7 +530,7 @@ async def _run_workflow_background(run_id: str, request: StudioExecuteRequest, s
         track_workflow_complete(run_id, "studio_workflow", request.workspace, [r.node_type for r in node_results], 0, status=overall_status)
 
 
-@router.post("/workflows/execute")
+@router.post("/execute")
 async def execute_studio_workflow(request: StudioExecuteRequest):
     """Start Studio node graph execution in background."""
     logging.info(f"[AUDIT] /api/workflows/execute called | workspace={request.workspace} | nodes={len(request.nodes)}")
