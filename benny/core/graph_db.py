@@ -546,11 +546,20 @@ def get_full_graph(
     """
     with read_session() as session:
         # 1. Fetch Edges based on workspace and optional run_id
-        edge_match = "MATCH (a {workspace: $workspace})-[r:RELATES_TO]->(b {workspace: $workspace})"
-        if run_id:
-            edge_match = "MATCH (a {workspace: $workspace})-[r:RELATES_TO {run_id: $run_id}]->(b {workspace: $workspace})"
+        # We now support multiple relationship types to accommodate Code Graphs and Correlations
+        valid_rels = [
+            'RELATES_TO', 'REPRESENTS', 'CORRELATES_WITH', 'CODE_REL', 
+            'DEFINES', 'CALLS', 'INHERITS', 'DEPENDS_ON', 'CONTAINS', 
+            'SOURCED_FROM', 'PREREQUISITE_FOR', 'CONFLICTS_WITH', 'ANALOGOUS_TO'
+        ]
         
-        edge_result = session.run(edge_match + """
+        edge_match = "MATCH (a {workspace: $workspace})-[r]->(b {workspace: $workspace})"
+        where_clause = "WHERE type(r) IN $rels"
+        
+        if run_id:
+            where_clause += " AND (r.run_id = $run_id OR r.snapshot_id = $run_id)"
+        
+        edge_result = session.run(f"{edge_match} {where_clause}" + """
             RETURN elementId(a) AS source, a.name AS source_name,
                    elementId(b) AS target, b.name AS target_name,
                    type(r) AS type, r.predicate AS predicate, 
@@ -559,7 +568,7 @@ def get_full_graph(
                    r.timestamp AS timestamp, r.section AS section, 
                    r.citation AS citation, r.confidence AS confidence,
                    r.run_id AS run_id
-        """, workspace=workspace, run_id=run_id or "")
+        """, workspace=workspace, run_id=run_id or "", rels=valid_rels)
 
         edges = []
         visible_node_ids = set()
@@ -596,7 +605,7 @@ def get_full_graph(
         else:
             node_query = """
                 MATCH (n {workspace: $workspace})
-                WHERE n:Concept OR n:Source
+                WHERE n:Concept OR n:Source OR n:Document OR n:CodeEntity
                 RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name,
                        n.domain AS domain, n.created_at AS created_at, n.node_type AS node_type,
                        n.centrality AS centrality
@@ -718,7 +727,7 @@ def get_graph_stats(workspace: str = "default", run_id: Optional[str] = None) ->
             WHERE ($run_id IS NULL OR $run_id = "" OR n.run_id = $run_id OR n.snapshot_id = $run_id)
             WITH
                 count(CASE WHEN n:Concept THEN 1 END) AS concepts,
-                count(CASE WHEN n:Source THEN 1 END) AS sources
+                count(CASE WHEN n:Source OR n:Document THEN 1 END) AS sources
             OPTIONAL MATCH (a {workspace: $ws})-[r]->(b {workspace: $ws})
             WHERE ($run_id IS NULL OR $run_id = "" OR r.run_id = $run_id OR r.snapshot_id = $run_id)
             WITH concepts, sources,
@@ -745,7 +754,8 @@ def get_mapped_sources(workspace: str = "default") -> List[str]:
     """Get a list of all source documents that have been mapped into the graph."""
     with read_session() as session:
         result = session.run("""
-            MATCH (s:Source {workspace: $ws})
+            MATCH (s {workspace: $ws})
+            WHERE s:Source OR s:Document
             RETURN s.name AS name
             ORDER BY s.created_at DESC
         """, ws=workspace)

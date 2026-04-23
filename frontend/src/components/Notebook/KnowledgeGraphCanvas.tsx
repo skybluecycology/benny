@@ -48,16 +48,31 @@ interface KnowledgeGraphCanvasProps {
 }
 
 const EDGE_COLORS: Record<string, string> = {
-  RELATES_TO: '#8b5cf6',
-  SOURCED_FROM: '#6366f1',
-  CONFLICTS_WITH: '#ef4444',
-  ANALOGOUS_TO: '#f59e0b',
+  RELATES_TO: '#8b5cf6',      // Purple
+  SOURCED_FROM: '#6366f1',    // Indigo
+  CONFLICTS_WITH: '#ef4444',  // Red
+  ANALOGOUS_TO: '#f59e0b',    // Amber
+  REPRESENTS: '#10b981',      // Emerald
+  CORRELATES_WITH: '#3b82f6', // Blue
+  CODE_REL: '#6b7280',        // Gray
+  DEFINES: '#ec4899',         // Pink
+  CALLS: '#f97316',           // Orange
+  INHERITS: '#84cc16',        // Lime
+  DEPENDS_ON: '#06b6d4',      // Cyan
+  CONTAINS: '#64748b',        // Slate
 };
 
 // Dynamic color assignments for Entity Typing Category Maps
 const NODE_COLORS: Record<string, string> = {
   Concept: '#a56eff',
   Source: '#4dbbff',
+  Document: '#4dbbff',
+  CodeEntity: '#94a3b8',
+  File: '#64748b',
+  Folder: '#475569',
+  Class: '#ec4899',
+  Function: '#f97316',
+  Interface: '#8b5cf6',
   Theory: '#ff9f0a',
   Technology: '#34c759',
   Person: '#ff3b30',
