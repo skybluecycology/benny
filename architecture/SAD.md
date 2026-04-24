@@ -138,18 +138,38 @@ The platform intentionally maintains **two separate graphs** serving different p
 - **Purpose**: Structural map of source code extracted by Tree-Sitter AST analysis. Shows *how code is organized* — file dependencies, class hierarchies, function definitions.
 - **Populated by**: Code analysis (`/api/graph/code/analyze`), Tree-Sitter parsers (Python, TypeScript, JavaScript).
 
-### 6.3 Planned: Code-Knowledge Enrichment Toggle
+### 6.3 Code-Knowledge Enrichment Toggle
 
 **Concept**: A toggle in Benny Studio that overlays `CORRELATES_WITH` and `REPRESENTS` edges from the knowledge graph onto the code graph, linking `CodeEntity` nodes to `Concept` nodes.
 
-**Use case (c5_test)**: UML documents and architecture PDFs have been ingested in c5_test. Once the knowledge graph concepts are stable and the enrichment pipeline is validated, the toggle will allow an operator to see *which concepts from architecture documents map onto which source symbols* — closing the loop between design intent and implementation.
+**Use case (c5_test)**: UML documents and architecture PDFs have been ingested in c5_test. The enrichment pipeline allows an operator to see *which concepts from architecture documents map onto which source symbols* — closing the loop between design intent and implementation.
 
-**Prerequisites before enabling**:
+**Pipeline** (`benny enrich`): a fixed 7-task DAG across 5 waves, driven by the declarative v2.0 manifest at `manifests/templates/knowledge_enrichment_pipeline.json`.
+
+```
+Wave 0 (parallel):   pdf_extract (inspect_and_classify), code_scan (fire_and_poll)
+Wave 1:              rag_ingest (blocking_with_task_fallback, 1800s)
+Wave 2:              deep_synthesis (blocking_with_task_list_fallback, 1800s)
+Wave 3:              semantic_correlate (blocking, 900s) — emits CORRELATES_WITH
+Wave 4 (parallel):   validate_enrichment, generate_report
+```
+
+Key architectural properties:
+
+1. **Fully declarative** — every endpoint, HTTP method, body shape, timeout, polling rule, and fallback policy lives in the manifest. The CLI dispatches purely from the `execution.kind` tag on each task; nothing is hardcoded in Python about which endpoint a task calls.
+2. **Variable substitution** — `${workspace}`, `${src_path}`, `${model}`, `${correlation_threshold}`, `${api_base}`, `${benny_home}`, `${run_id}`, `${task_run_id}`. Resolved from CLI flags → env vars → `manifest.variables` defaults.
+3. **Resumable** — `--resume <prior_run_id>` reads `workspace/<ws>/runs/enrich-<id>/task_*.json` and skips any task whose status is in `execution.resume.skip_if_status` (default: `done`, `completed`, `completed_after_timeout`). Cross-task artefacts (e.g. `pdf_extract.emits.pdf_files`) are rehydrated from the prior run's recorded result.
+4. **Timeout-resilient** — blocking tasks (`rag_ingest`, `deep_synthesis`) carry a `fallback_on_timeout` block that queries `task_manager` status when the POST dies, so client-side timeouts don't mask server-side success.
+5. **Windows FD-safe** — `benny/api/server.py` pins `WindowsProactorEventLoopPolicy` at module import to avoid `ValueError: too many file descriptors in select()` under heavy ingest load (default `SelectorEventLoop` caps around 512 FDs).
+
+**Prerequisites**:
 1. c5_test knowledge graph passes coherence check (`/api/rag/status?workspace=c5_test`).
-2. Semantic correlator has run (`POST /api/rag/synthesize` or synthesis panel in Notebook).
+2. Semantic correlator has run (`POST /api/rag/correlate` — invoked as `semantic_correlate` wave).
 3. Neo4j has `CORRELATES_WITH` edges linking `Concept` → `CodeEntity` for the target workspace.
 
-**Implementation path**:
+**Full reference**: [docs/operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md](../docs/operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md).
+
+**Studio implementation path**:
 - Add `enrichmentMode: boolean` to `uiSlice.ts` in the Zustand store.
 - Extend `graph_routes.py` `/api/graph/code/lod` to accept `?enrich=true` — join `CodeEntity` nodes with their `CORRELATES_WITH` `Concept` neighbours in the Cypher query.
 - Render enrichment edges in `CodeGraphCanvas.tsx` as a distinct particle/edge style (e.g. dashed gold) separate from structural edges.
@@ -214,7 +234,7 @@ workspaces/<name>/
 | `c4_test` | Workflow + RAG test ground | H.G. Wells texts ingested as markdown (`data_in/`); validates end-to-end ingestion → retrieval → chat |
 | `c5_test` | Code analysis + architecture mapping | UML diagrams and architecture PDFs ingested to markdown; `src/` contains `dangpy` source; used to map design documents onto code structure |
 
-**c5_test goal**: UML/architecture documents are already ingested in the knowledge graph. The next phase is running the code analyser on `src/dangpy` to populate the code graph, then enabling the enrichment toggle to find overlaps between architecture concepts and code symbols.
+**c5_test status**: UML/architecture documents are ingested in the knowledge graph, the Tree-Sitter code analyser populates the code graph from `src/dangpy` (~1800 nodes), and the declarative enrichment pipeline (`benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json`) generates `CORRELATES_WITH` edges between architecture concepts and code symbols. The Studio ENRICH toggle consumes those edges as an overlay on the code graph.
 
 ---
 

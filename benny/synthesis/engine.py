@@ -860,17 +860,52 @@ async def batch_embed_concepts(
     concepts: List[str],
     provider: str = "local",
     model: str = None,
-    batch_size: int = 8,
+    batch_size: int = 16,
     event_callback: Optional[Any] = None,
     workspace: Optional[str] = None
 ) -> Dict[str, List[float]]:
     """
-    Embed multiple concepts concurrently with controlled parallelism.
-    Returns a dict of concept_name -> embedding vector.
+    Embed multiple concepts concurrently with database-backed caching.
+    
+    Logic:
+    1. Check Neo4j for existing embeddings for these concepts in this workspace.
+    2. Only send missing ones to the LLM provider.
+    3. Save newly generated embeddings back to Neo4j.
     """
-    semaphore = asyncio.Semaphore(batch_size)
+    from ..core.graph_db import read_session, write_session
+    
     results: Dict[str, List[float]] = {}
-    total = len(concepts)
+    missing_concepts: List[str] = []
+    
+    # 1. Check Cache (Neo4j)
+    if workspace:
+        logger.info("Embedding Cache: checking Neo4j for %d existing vectors...", len(concepts))
+        with read_session() as session:
+            # We check both Concepts (by name) and CodeEntities (by name: summary)
+            # This is a broad check for anything in the workspace with an embedding.
+            query = """
+            MATCH (n {workspace: $ws})
+            WHERE n.embedding IS NOT NULL AND (n.name IN $names OR (n.name + ': ' + coalesce(n.summary, '')) IN $names)
+            RETURN n.name as name, n.summary as summary, n.embedding as embedding
+            """
+            cache_res = session.run(query, ws=workspace, names=concepts)
+            for rec in cache_res:
+                key = rec["name"]
+                # Match the 'name: summary' format used in correlation
+                if rec["summary"] and f"{rec['name']}: {rec['summary']}" in concepts:
+                    key = f"{rec['name']}: {rec['summary']}"
+                results[key] = rec["embedding"]
+        
+        logger.info("Embedding Cache: found %d/%d vectors in Neo4j", len(results), len(concepts))
+
+    missing_concepts = [c for c in concepts if c not in results]
+    if not missing_concepts:
+        return results
+
+    # 2. Embed Missing via LLM
+    logger.info("Embedding: sending %d missing items to %s provider...", len(missing_concepts), provider)
+    semaphore = asyncio.Semaphore(batch_size)
+    total = len(missing_concepts)
     completed = 0
 
     async def embed_one(concept: str):
@@ -883,14 +918,30 @@ async def batch_embed_concepts(
                 if event_callback:
                     await event_callback(IngestionEvent(
                         event=IngestionEventType.SECTION_PROGRESS,
-                        message=f"Embedded {completed}/{total} concepts",
+                        message=f"Embedded {completed}/{total} new items",
                         data={"current": completed, "total": total}
                     ))
+                
+                # 3. Save back to Neo4j (Async/Background)
+                if workspace:
+                    # We determine if it's a Concept or CodeEntity by splitting
+                    is_symbol = ": " in concept
+                    name = concept.split(": ")[0] if is_symbol else concept
+                    summary = concept.split(": ")[1] if is_symbol else None
+                    
+                    with write_session() as w_session:
+                        save_query = """
+                        MATCH (n {workspace: $ws, name: $name})
+                        WHERE ($summary IS NULL OR n.summary = $summary)
+                        SET n.embedding = $embedding
+                        """
+                        w_session.run(save_query, ws=workspace, name=name, summary=summary, embedding=embedding)
+                        
             except Exception as e:
-                logger.error(f"Failed to embed concept '{concept}': {e}")
-                results[concept] = [0.0] * 768 # Fallback empty embedding
+                logger.error(f"Failed to embed '{concept[:30]}...': {e}")
+                results[concept] = [0.0] * 768
 
-    tasks = [embed_one(c) for c in concepts]
+    tasks = [embed_one(c) for c in missing_concepts]
     await asyncio.gather(*tasks)
     return results
 

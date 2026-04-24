@@ -25,7 +25,7 @@ Two phases, always separable:
 
 ## The JSON Contract
 
-A manifest is a Pydantic v2 model with `schema_version = "1.0"`. Core fields:
+A manifest is a Pydantic v2 model with `schema_version = "1.0"` (the general-purpose `SwarmManifest`). Core fields:
 
 | Field             | Meaning                                                            |
 | ----------------- | ------------------------------------------------------------------ |
@@ -41,6 +41,17 @@ A manifest is a Pydantic v2 model with `schema_version = "1.0"`. Core fields:
 | `plan.ascii_dag`  | Optional human-readable DAG sketch.                                |
 
 A `RunRecord` carries: `run_id`, `manifest_id`, `status`, `started_at`, `duration_ms`, `errors[]`, `node_states{task_id: status}`, `final_document`, `artifact_paths[]`, `governance_url`, optional `manifest_snapshot`.
+
+### Declarative pipeline manifests (`schema_version = "2.0"`)
+
+Some fixed-DAG workflows — currently the knowledge enrichment pipeline — ship with an extended manifest shape that makes the executor fully declarative. These manifests add:
+
+- A top-level **`variables`** map providing defaults for every `${token}` used elsewhere in the file.
+- An **`execution`** block that declares the API base URL, auth header, preflight probe, resume policy, and governance toggles.
+- A per-task **`execution`** block carrying `kind` (`inspect_and_classify` | `fire_and_poll` | `blocking` | `blocking_with_task_fallback` | `blocking_with_task_list_fallback` | `validate` | `report`), the HTTP contract (`method`, `path`, `body`, `params`, `timeout`), and — for blocking kinds — a `fallback_on_timeout` strategy that consults the server's `task_manager` when the request times out.
+- **`inputs_from`** declarations that wire one task's emitted artefacts into another task's request body (e.g. `rag_ingest.inputs_from.pdf_files.source_task = "pdf_extract"`).
+
+Reference template: [`manifests/templates/knowledge_enrichment_pipeline.json`](../../manifests/templates/knowledge_enrichment_pipeline.json). Full usage guide: [`KNOWLEDGE_ENRICHMENT_WORKFLOW.md`](KNOWLEDGE_ENRICHMENT_WORKFLOW.md). Invoked via `benny enrich --manifest <path> --run` (add `--resume <prior_run_id>` to skip already-completed stages).
 
 ---
 

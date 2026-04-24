@@ -170,26 +170,28 @@ async def get_active_model(workspace_id: str = "default", role: str = "chat") ->
         if hasattr(manifest, "default_model") and manifest.default_model:
             return manifest.default_model
     except Exception as e:
-        print(f"DEBUG: Critical error in get_active_model: {e}")
+        logger.debug(f"Manifest load failed for {workspace_id}: {e}")
     
     # 3. Auto-detect local providers (Heartbeat probe)
-    # This ensures "it just works" out of the box if Lemonade/Ollama is running
+    # Increased timeout (5.0s) to handle busy local NPUs/CPUs (PBR-001 Phase 3)
     for provider_name, config in LOCAL_PROVIDERS.items():
         try:
-            async with httpx.AsyncClient(timeout=1.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(config["base_url"].replace("/v1", "/models"))
                 if resp.status_code == 200:
-                    # Return first available model from this provider
                     data = resp.json()
                     models = data.get("data", [])
                     if models:
                         model_id = models[0].get("id")
                         return f"{provider_name}/{model_id}"
-        except Exception as e:
-            # logging.debug(f"Provider {provider_name} not available: {e}")
+        except Exception:
             pass
 
     # 4. Global fallback
+    # If a workspace is specified, assume we want 'local' instead of leaking to cloud
+    if workspace_id != "default":
+        return "lemonade/default"
+        
     return "openai/gpt-4o"
 
 # =============================================================================

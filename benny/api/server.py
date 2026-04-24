@@ -2,6 +2,27 @@
 Benny API Server - FastAPI application with CORS and routers
 """
 
+import sys as _sys
+import asyncio as _asyncio
+
+# ─── Windows FD-limit fix ─────────────────────────────────────────────────────
+# On Windows the default SelectorEventLoop is backed by select.select(), which
+# caps out at 64 or 512 file descriptors. Large RAG ingests (Docling + ChromaDB
+# embedding + Neo4j writes + Marquez lineage) push well past that and crash
+# the uvicorn subprocess with `ValueError: too many file descriptors in select()`.
+# ProactorEventLoop uses IOCP under the hood and has no such cap.
+if _sys.platform == "win32":
+    try:
+        # Increase the C runtime's max files limit (affects stdio, open(), etc.)
+        import msvcrt
+        msvcrt.setmaxstdio(2048)
+        
+        # Force ProactorEventLoopPolicy for this process
+        _asyncio.set_event_loop_policy(_asyncio.WindowsProactorEventLoopPolicy())
+        print("✓ Windows ProactorEventLoopPolicy Enforced (IOCP)")
+    except Exception as e:
+        print(f"⚠ Warning: Failed to enforce ProactorEventLoop: {e}")
+
 import json
 import builtins
 
@@ -54,7 +75,14 @@ from ..core.workspace import get_workspace_path
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize shared resources
-    print("✓ Neural Nexus Kernel Initialized")
+    loop = _asyncio.get_running_loop()
+    loop_type = type(loop).__name__
+    print(f"✓ Neural Nexus Kernel Initialized (Loop: {loop_type})")
+    
+    if _sys.platform == "win32" and loop_type == "SelectorEventLoop":
+        print("⚠ WARNING: Server is running on SelectorEventLoop on Windows. "
+              "File descriptor errors may occur under load.")
+    
     yield
     # Shutdown: Clean up
     print("Neo4j driver closed")
@@ -142,4 +170,5 @@ app.mount("/api/static", StaticFiles(directory=str(workspace_path)), name="files
 if __name__ == "__main__":
     import uvicorn
     # Cognitive Mesh Security: Bind to loopback only by default
-    uvicorn.run(app, host="0.0.0.0", port=8005, reload=True)
+    # Note: Use string import for better reload stability on Windows
+    uvicorn.run("benny.api.server:app", host="0.0.0.0", port=8005, reload=True, loop="asyncio")

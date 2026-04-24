@@ -1,9 +1,19 @@
 import threading
 import json
 import uuid
+import sys
+import asyncio
 from typing import Dict, Optional, List, Any
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+
+# Force Proactor on Windows to handle many concurrent sockets/files
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 
 from .schema import Task, TaskStatus
 from .workspace import get_workspace_path
@@ -18,6 +28,7 @@ class TaskManager:
     def __init__(self):
         self._tasks: Dict[str, Task] = {}
         self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="benny-task-audit")
 
     def create_task(self, workspace: str, task_type: str, task_id: Optional[str] = None) -> Task:
         """Create and register a new task."""
@@ -104,8 +115,7 @@ class TaskManager:
             except Exception:
                 pass  # Lineage failures must never crash the task
 
-        import threading
-        threading.Thread(target=_emit_aer, daemon=True).start()
+        self._executor.submit(_emit_aer)
 
     def add_tool_event(self, task_id: str, tool_name: str, args: Dict[str, Any], result: Any, nodeId: str = "executor"):
         """Record a tool invocation event."""

@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import uuid
+import random
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -26,7 +27,7 @@ from ..core.graph_db import (
     add_analogy, set_concept_embedding, vector_search,
     get_mapped_sources, delete_source_from_graph,
     create_synthesis_run, get_synthesis_history, delete_synthesis_run,
-    update_graph_centrality, batch_add_triples, get_recent_updates
+    update_graph_centrality, batch_add_triples, get_recent_updates, run_cypher
 )
 from ..synthesis.engine import (
     extract_triples, detect_conflicts, find_synthesis,
@@ -105,7 +106,7 @@ async def get_graph_lod(workspace: str = "default", tier: int = 1):
             """
             
         query += """
-        RETURN n.id as id, n.name as name, labels(n)[0] as type, 
+        RETURN elementId(n) as id, n.name as name, labels(n)[0] as type, 
                n.pos_x as x, n.pos_y as y, n.pos_z as z,
                n.community_id as community_id, n.community_name as community_name
         """
@@ -134,8 +135,8 @@ async def get_graph_lod(workspace: str = "default", tier: int = 1):
         node_ids = [n["id"] for n in nodes]
         edge_query = """
         MATCH (n)-[r]->(m)
-        WHERE id(n) IN $ids AND id(m) IN $ids
-        RETURN id(n) as source, id(m) as target, type(r) as type,
+        WHERE elementId(n) IN $ids AND elementId(m) IN $ids
+        RETURN elementId(n) as source, elementId(m) as target, type(r) as type,
                r.confidence as confidence, r.rationale as rationale, r.predicate as predicate
         """
 
@@ -1247,80 +1248,130 @@ async def _process_content_to_graph(
 
 
 @router.post("/graph/synthesize")
-async def synthesize(request: SynthesizeRequest):
+async def synthesize(request: SynthesizeRequest, background_tasks: BackgroundTasks):
     """
     Run the Synthesis Layer: find structural isomorphisms across the graph.
-    
-    This is the "So What?" - the aha moment.
+    Runs as a background task to handle large graphs via topological batching.
     """
+    task_id = str(uuid.uuid4())
+    task_manager.create_task(request.workspace, "synthesis", task_id=task_id)
+    
+    background_tasks.add_task(
+        _background_synthesis,
+        workspace=request.workspace,
+        provider=request.provider,
+        model=request.model,
+        task_id=task_id
+    )
+    
+    return {
+        "status": "started",
+        "task_id": task_id,
+        "message": "Synthesis initiated in background (Topological Batching mode)"
+    }
+
+
+async def _background_synthesis(
+    workspace: str,
+    provider: str,
+    model: Optional[str],
+    task_id: str
+):
+    """Background worker for community-based synthesis."""
     try:
-        # Build a text summary of the graph for the LLM
-        graph = get_full_graph(request.workspace, show_all=True)
-
-        if not graph["nodes"]:
-            return {"analogies": [], "message": "Graph is empty. Ingest some text first."}
-
-        # Build summary
-        lines = []
-        node_map = {n["id"]: n["name"] for n in graph["nodes"]}
-        for edge in graph["edges"]:
-            src = node_map.get(edge["source"], "?")
-            tgt = node_map.get(edge["target"], "?")
-            rel_type = edge.get("type", "")
-            pred = edge.get("predicate", "")
-            label = pred if pred else rel_type
-            lines.append(f"  {src} --[{label}]--> {tgt}")
-
-        # FIX: Build the graph_summary string from lines
-        graph_summary = "\n".join(lines)
+        track_workflow_start(task_id, "synthesis", workspace)
+        
+        # 1. Fetch communities and their sizes
+        query = """
+            MATCH (n {workspace: $workspace}) 
+            WHERE n.community_id IS NOT NULL
+            RETURN n.community_id AS cid, count(*) AS count 
+            ORDER BY count DESC
+        """
+        communities = run_cypher(query, {"workspace": workspace})
+        
+        if not communities:
+            # Fallback to global synthesis if no communities found
+            communities = [{"cid": None, "count": 0}]
 
         # Load manifest for timeout
-        manifest = load_manifest(request.workspace)
+        manifest = load_manifest(workspace)
         llm_timeout = manifest.llm_timeout
+        
+        total_analogies = 0
+        all_analogies = []
+        
+        processed = 0
+        for comm in communities:
+            cid = comm["cid"]
+            count = comm["count"]
+            
+            processed += 1
+            progress = int((processed / len(communities)) * 95)
+            task_manager.update_task(task_id, progress=progress, message=f"Analyzing community {processed}/{len(communities)} (id={cid})")
 
-        # Register Synthesis Task
-        task_id = str(uuid.uuid4())
-        task_manager.create_task(request.workspace, "synthesis", task_id=task_id)
-        track_workflow_start(task_id, "synthesis", request.workspace)
-        task_manager.add_aer_entry(
-            task_id,
-            intent="Finding structural analogies across knowledge graph segments",
-            observation=f"Graph summary built ({len(lines)} relationships)",
-            plan="1. LLM pattern match 2. Isomorphism verification 3. Analogy persistence"
-        )
+            # 2. Extract local subgraph summary
+            # We exclude SOURCED_FROM and focus on RELATES_TO for conceptual synthesis
+            if cid is not None:
+                edge_query = """
+                    MATCH (a {workspace: $workspace, community_id: $cid})-[r:RELATES_TO]->(b {workspace: $workspace, community_id: $cid})
+                    RETURN a.name AS src, r.predicate AS pred, b.name AS tgt
+                    LIMIT 1000
+                """
+                edges = run_cypher(edge_query, {"workspace": workspace, "cid": cid})
+            else:
+                # Global fallback
+                edge_query = """
+                    MATCH (a {workspace: $workspace})-[r:RELATES_TO]->(b {workspace: $workspace})
+                    RETURN a.name AS src, r.predicate AS pred, b.name AS tgt
+                    LIMIT 1000
+                """
+                edges = run_cypher(edge_query, {"workspace": workspace})
 
-        analogies = await find_synthesis(
-            graph_summary=graph_summary,
-            provider=request.provider,
-            model=request.model,
-            timeout=llm_timeout
-        )
+            if not edges:
+                continue
 
-        # Store discovered analogies in the graph
-        for a in analogies:
-            try:
-                add_analogy(
-                    concept_a=a["concept_a"],
-                    concept_b=a["concept_b"],
-                    description=a.get("description", ""),
-                    pattern=a.get("pattern", ""),
-                    workspace=request.workspace
-                )
-            except Exception:
-                pass
+            lines = [f"  {e['src']} --[{e['pred']}]--> {e['tgt']}" for e in edges]
+            graph_summary = "\n".join(lines)
 
-        task_manager.update_task(task_id, status="completed", progress=100, message=f"Found {len(analogies)} analogies")
-        track_workflow_complete(task_id, "synthesis", ["pattern_match", "graph_update"], 0)
+            # 3. Find synthesis patterns
+            task_manager.add_aer_entry(
+                task_id,
+                intent=f"Finding isomorphisms in community {cid}",
+                observation=f"Extracted {len(lines)} relationships",
+                plan="LLM pattern match"
+            )
 
-        return {
-            "status": "synthesized",
-            "run_id": task_id,
-            "analogies_found": len(analogies),
-            "analogies": analogies
-        }
+            analogies = await find_synthesis(
+                graph_summary=graph_summary,
+                provider=provider,
+                model=model,
+                timeout=llm_timeout,
+                run_id=task_id
+            )
+
+            # 4. Store discovered analogies
+            for a in analogies:
+                try:
+                    add_analogy(
+                        concept_a=a["concept_a"],
+                        concept_b=a["concept_b"],
+                        description=a.get("description", ""),
+                        pattern=a.get("pattern", ""),
+                        workspace=workspace
+                    )
+                    total_analogies += 1
+                    all_analogies.append(a)
+                except Exception:
+                    pass
+
+        task_manager.update_task(task_id, status="completed", progress=100, message=f"Found {total_analogies} analogies across {len(communities)} communities")
+        track_workflow_complete(task_id, "synthesis", workspace, ["pattern_match", "graph_update"], 0)
 
     except Exception as e:
-        raise HTTPException(500, f"Synthesis failed: {str(e)}")
+        logger.error("Background synthesis failed: %s", e, exc_info=True)
+        task_manager.update_task(task_id, status="failed", message=f"Synthesis failed: {str(e)}")
+        track_workflow_complete(task_id, "synthesis", workspace, ["failed"], 0, status="failed")
 
 
 @router.post("/graph/cross-domain")

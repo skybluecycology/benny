@@ -79,130 +79,109 @@ async def run_aggressive_correlation(workspace: str, threshold: float = 0.70) ->
     Connects Concepts to Code Symbols using embedding cosine similarity.
     Strategy: 'aggressive' — higher recall, lower precision.
 
-    Every link is tagged with r.rationale (embedding similarity description)
-    and r.confidence (actual cosine similarity score).
+    Optimized for Neural Spark (6-Sigma):
+    - Uses NumPy matrix multiplication for vectorized similarity computation (O(N*M)).
+    - Batches Neo4j MERGE operations using UNWIND to avoid database round-trip exhaustion.
     """
     from .schema_adapter import SchemaAdapter
-    from .engine import get_embedding
+    from .engine import batch_embed_concepts
 
     adapter = SchemaAdapter(workspace)
     valid_types = adapter.get_valid_entity_types()
-    schema_mode = adapter.get_schema_mode()
-
-    logger.info(
-        "Aggressive Correlation: workspace='%s', threshold=%.2f, schema_mode='%s', entity_types=%s",
-        workspace, threshold, schema_mode, valid_types
-    )
-
     type_list = ", ".join(f"'{t}'" for t in valid_types)
 
-    # 1. Fetch concepts
-    concept_query = """
-    MATCH (c:Concept {workspace: $workspace})
-    RETURN c.name as name, id(c) as id
-    """
-
-    # 2. Fetch symbols — dynamic type list from adapter
-    symbol_query = f"""
-    MATCH (s:CodeEntity {{workspace: $workspace}})
-    WHERE s.type IN [{type_list}]
-    RETURN s.name as name, s.summary as summary, id(s) as id, s.type as type
-    """
-
-    concepts = []
-    symbols = []
+    # 1. Fetch data
+    concept_query = "MATCH (c:Concept {workspace: $workspace}) RETURN c.name as name, id(c) as id"
+    symbol_query = f"MATCH (s:CodeEntity {{workspace: $workspace}}) WHERE s.type IN [{type_list}] RETURN s.name as name, s.summary as summary, id(s) as id, s.type as type"
 
     with read_session() as session:
-        res_c = session.run(concept_query, workspace=workspace)
-        concepts = [dict(record) for record in res_c]
-
-        res_s = session.run(symbol_query, workspace=workspace)
-        symbols = [dict(record) for record in res_s]
+        concepts = [dict(r) for r in session.run(concept_query, workspace=workspace)]
+        symbols = [dict(r) for r in session.run(symbol_query, workspace=workspace)]
 
     if not concepts or not symbols:
-        logger.warning(
-            "Aggressive Correlation: no data to correlate — "
-            "concepts=%d, symbols=%d. Verify that ingestion has run.",
-            len(concepts), len(symbols)
-        )
         return 0
 
-    logger.info(
-        "Aggressive Correlation: comparing %d concepts vs %d symbols",
-        len(concepts), len(symbols)
-    )
+    logger.info("Aggressive Correlation: workspace='%s', comparing %d concepts vs %d symbols (threshold=%.2f)", 
+                workspace, len(concepts), len(symbols), threshold)
 
-    # 3. Compute embeddings
-    from .engine import batch_embed_concepts
-    
+    # 2. Compute embeddings
+    logger.info("Aggressive Correlation: Generating embeddings for %d concepts...", len(concepts))
     concept_names = [c["name"] for c in concepts]
-    concept_embeddings_kv = await batch_embed_concepts(concept_names, provider="local", batch_size=10)
+    concept_embeddings_kv = await batch_embed_concepts(concept_names, provider="local", workspace=workspace)
     
-    symbol_texts = [f"{s['name']}: {s.get('summary', '')}" for s in symbols]
-    symbol_embeddings_kv = await batch_embed_concepts(symbol_texts, provider="local", batch_size=10)
+    logger.info("Aggressive Correlation: Generating embeddings for %d symbols (this may take time)...", len(symbols))
+    symbol_texts = [f"{s['name']}: {s.get('summary', '') or ''}" for s in symbols]
+    symbol_embeddings_kv = await batch_embed_concepts(symbol_texts, provider="local", workspace=workspace)
 
-    # Re-map results to IDs for the correlation loop
-    concept_embeddings: Dict[int, Any] = {}
-    for c in concepts:
-        concept_embeddings[c["id"]] = concept_embeddings_kv.get(c["name"], [])
+    logger.info("Aggressive Correlation: Embeddings generated. Running vectorized similarity math...")
 
-    symbol_embeddings: Dict[int, Any] = {}
-    symbol_meta: Dict[int, dict] = {}
-    for i, s in enumerate(symbols):
-        symbol_embeddings[s["id"]] = symbol_embeddings_kv.get(symbol_texts[i], [])
-        symbol_meta[s["id"]] = s
+    # Convert to matrices for vectorized math
+    C_matrix = np.array([concept_embeddings_kv.get(name, [0.0]*768) for name in concept_names])
+    S_matrix = np.array([symbol_embeddings_kv.get(text, [0.0]*768) for text in symbol_texts])
 
-    # 4. Pairwise cosine similarity → link if above threshold
+    # Normalize rows
+    C_norms = np.linalg.norm(C_matrix, axis=1, keepdims=True)
+    S_norms = np.linalg.norm(S_matrix, axis=1, keepdims=True)
+    
+    # Avoid division by zero
+    C_norms[C_norms == 0] = 1.0
+    S_norms[S_norms == 0] = 1.0
+    
+    C_normed = C_matrix / C_norms
+    S_normed = S_matrix / S_norms
+
+    # 3. Compute similarity matrix (N x M)
+    # This is the "Neural Spark" core — O(N*M) in optimized BLAS
+    sim_matrix = np.dot(C_normed, S_normed.T)
+
+    # 4. Find pairs above threshold
+    indices = np.argwhere(sim_matrix >= threshold)
+    
+    batch_data = []
+    for c_idx, s_idx in indices:
+        sim = float(sim_matrix[c_idx, s_idx])
+        c = concepts[c_idx]
+        s = symbols[s_idx]
+        
+        batch_data.append({
+            "c_id": c["id"],
+            "s_id": s["id"],
+            "sim": sim,
+            "rationale": f"Cosine similarity {sim:.4f} >= {threshold:.2f} between Concept '{c['name']}' and {s['type']} '{s['name']}'"
+        })
+
+    if not batch_data:
+        return 0
+
+    # 5. Batched write to Neo4j
+    # We use UNWIND to process the entire batch in a single transaction
+    write_query = """
+    UNWIND $batch as row
+    MATCH (c) WHERE id(c) = row.c_id
+    MATCH (s) WHERE id(s) = row.s_id
+    MERGE (c)-[r:CORRELATES_WITH]->(s)
+    ON CREATE SET
+        r.strategy   = 'aggressive',
+        r.confidence = row.sim,
+        r.rationale  = row.rationale,
+        r.created_at = timestamp()
+    ON MATCH SET
+        r.strategy   = 'aggressive',
+        r.confidence = row.sim,
+        r.rationale  = row.rationale,
+        r.updated_at = timestamp()
+    """
+    
+    # Process in chunks of 500 to avoid locking issues on massive graphs
+    chunk_size = 500
     links_created = 0
+    with write_session() as session:
+        for i in range(0, len(batch_data), chunk_size):
+            chunk = batch_data[i : i + chunk_size]
+            session.run(write_query, batch=chunk)
+            links_created += len(chunk)
 
-    for c in concepts:
-        c_id = c["id"]
-        c_vec = np.array(concept_embeddings[c_id])
-        norm_c = np.linalg.norm(c_vec)
-        if norm_c == 0:
-            continue
-
-        for s in symbols:
-            s_id = s["id"]
-            s_vec = np.array(symbol_embeddings[s_id])
-            norm_s = np.linalg.norm(s_vec)
-            if norm_s == 0:
-                continue
-
-            sim = float(np.dot(c_vec, s_vec) / (norm_c * norm_s))
-
-            if sim >= threshold:
-                rationale = (
-                    f"Embedding cosine similarity {sim:.4f} >= threshold {threshold:.2f} "
-                    f"between Concept '{c['name']}' and {symbol_meta[s_id]['type']} '{s['name']}'"
-                )
-                write_query = """
-                MATCH (c) WHERE id(c) = $c_id
-                MATCH (s) WHERE id(s) = $s_id
-                MERGE (c)-[r:CORRELATES_WITH]->(s)
-                ON CREATE SET
-                    r.strategy   = 'aggressive',
-                    r.confidence = $sim,
-                    r.rationale  = $rationale,
-                    r.created_at = timestamp()
-                ON MATCH SET
-                    r.strategy   = 'aggressive',
-                    r.confidence = $sim,
-                    r.rationale  = $rationale,
-                    r.updated_at = timestamp()
-                """
-                with write_session() as session:
-                    session.run(
-                        write_query,
-                        c_id=c_id, s_id=s_id,
-                        sim=sim, rationale=rationale
-                    )
-                links_created += 1
-
-    logger.info(
-        "Aggressive Correlation: created %d links (threshold=%.2f) in workspace '%s'",
-        links_created, threshold, workspace
-    )
+    logger.info("Aggressive Correlation: created %d links in workspace '%s'", links_created, workspace)
     return links_created
 
 

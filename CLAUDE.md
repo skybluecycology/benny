@@ -29,7 +29,10 @@ A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangG
 benny plan "<requirement>" --workspace <ws> --save   # LLM-generate manifest
 benny run <manifest.json> --json                      # execute manifest
 benny runs ls --limit 10                              # run history
-benny enrich --workspace c5_test --src src/dangpy --run   # knowledge enrichment pipeline
+benny enrich --workspace c5_test --src src/dangpy --run               # enrichment (inline mode)
+benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
+             --workspace c5_test --src src/dangpy --run                # enrichment (declarative v2.0)
+benny enrich --manifest <path> --resume <prior_run_id> --run           # resume a partial run
 benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 ```
 
@@ -56,12 +59,12 @@ There are **two graphs** in the same Neo4j instance:
 
 - **Knowledge graph** (`Concept`, `Document`, `REL` edges) — populated from ingested PDFs/markdown. Shown in **Notebook → KnowledgeGraphCanvas**.
 - **Code graph** (`File`, `Class`, `Function`, `DEFINES`/`DEPENDS_ON` edges) — populated by Tree-Sitter analysis. Shown in **Studio → CodeGraphCanvas**.
-- **Enrichment overlay** (`CORRELATES_WITH` edges) — links both graphs; toggled in Studio (planned, see `architecture/SAD.md §6.3`).
+- **Enrichment overlay** (`CORRELATES_WITH` edges) — links both graphs; built by the `benny enrich` pipeline (see [docs/operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md](docs/operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md)), toggled in Studio. Manifest template at `manifests/templates/knowledge_enrichment_pipeline.json` (schema_version 2.0, fully declarative).
 
 ## Active test workspaces (in `$BENNY_HOME/workspaces/`)
 
 - **c4_test** — H.G. Wells texts ingested; validates RAG pipeline end-to-end.
-- **c5_test** — UML/architecture PDFs ingested to markdown; `src/dangpy` source ready for code graph analysis. Next step: run code analyser, then enable enrichment toggle to map architecture concepts onto code.
+- **c5_test** — UML/architecture PDFs in `data_in/staging/`; `src/dangpy` for the code graph; enrichment pipeline operational end-to-end via `benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json --workspace c5_test --src src/dangpy --run`.
 
 ## Running tests
 

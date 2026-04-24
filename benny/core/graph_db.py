@@ -32,7 +32,7 @@ def get_driver():
         _driver = GraphDatabase.driver(
             NEO4J_URI,
             auth=(NEO4J_USER, NEO4J_PASSWORD),
-            max_connection_pool_size=50,
+            max_connection_pool_size=16,  # Reduced from 50 for Windows stability (PBR-001)
             connection_acquisition_timeout=30
         )
     return _driver
@@ -720,34 +720,41 @@ def get_neighbors(concept_name: str, workspace: str = "default", depth: int = 1,
 
 
 def get_graph_stats(workspace: str = "default", run_id: Optional[str] = None) -> dict:
-    """Get counts of concepts, sources, and relationships in a single query, optionally filtered by run_id."""
+    """
+    Get detailed counts of node types and relationship types in a workspace.
+    Returns a structure compatible with the CLI report generator.
+    """
     with read_session() as session:
-        query = """
+        # 1. Get Node Type Distribution
+        node_query = """
             MATCH (n {workspace: $ws})
             WHERE ($run_id IS NULL OR $run_id = "" OR n.run_id = $run_id OR n.snapshot_id = $run_id)
-            WITH
-                count(CASE WHEN n:Concept THEN 1 END) AS concepts,
-                count(CASE WHEN n:Source OR n:Document THEN 1 END) AS sources
-            OPTIONAL MATCH (a {workspace: $ws})-[r]->(b {workspace: $ws})
-            WHERE ($run_id IS NULL OR $run_id = "" OR r.run_id = $run_id OR r.snapshot_id = $run_id)
-            WITH concepts, sources,
-                count(r) AS relationships,
-                count(CASE WHEN type(r) = 'CONFLICTS_WITH' THEN 1 END) AS conflicts,
-                count(CASE WHEN type(r) = 'ANALOGOUS_TO' THEN 1 END) AS analogies
-            RETURN concepts, sources, relationships, conflicts, analogies
+            RETURN labels(n) as labels, count(n) as count
         """
-        result = session.run(query, ws=workspace, run_id=run_id or "")
+        node_res = session.run(node_query, ws=workspace, run_id=run_id or "")
+        node_types = {}
+        for rec in node_res:
+            # Use the most specific label (usually the last one or CodeEntity)
+            label = rec["labels"][-1] if rec["labels"] else "Unknown"
+            node_types[label] = node_types.get(label, 0) + rec["count"]
 
-        record = result.single()
-        if record:
-            return {
-                "concepts": record["concepts"],
-                "sources": record["sources"],
-                "relationships": record["relationships"],
-                "conflicts": record["conflicts"],
-                "analogies": record["analogies"]
-            }
-        return {"concepts": 0, "sources": 0, "relationships": 0, "conflicts": 0, "analogies": 0}
+        # 2. Get Relationship Type Distribution
+        rel_query = """
+            MATCH (a {workspace: $ws})-[r]->(b {workspace: $ws})
+            WHERE ($run_id IS NULL OR $run_id = "" OR r.run_id = $run_id OR r.snapshot_id = $run_id)
+            RETURN type(r) as type, count(r) as count
+        """
+        rel_res = session.run(rel_query, ws=workspace, run_id=run_id or "")
+        rel_types = {}
+        for rec in rel_res:
+            rel_types[rec["type"]] = rec["count"]
+
+        return {
+            "node_types": node_types,
+            "relationship_types": rel_types,
+            "workspace": workspace,
+            "run_id": run_id
+        }
 
 
 def get_mapped_sources(workspace: str = "default") -> List[str]:

@@ -169,6 +169,40 @@ benny mcp --port 8005
 
 The MCP server (`benny/mcp/server.py`) exposes `plan`, `run`, `list_runs`, `get_run`, and `doctor` as Claude tools. Tool authentication uses the same `X-Benny-API-Key` header the HTTP API does — the MCP wrapper reads it from `$BENNY_API_KEY` (falls back to the built-in dev key).
 
+### 4.4 Knowledge enrichment (`benny enrich`)
+
+A dedicated, non-LLM-planned pipeline that bridges the knowledge graph and the code graph by creating `CORRELATES_WITH` edges — the data feeding the **ENRICH** toggle in Studio. It is a fixed 7-task DAG across 5 waves.
+
+```bash
+# Declarative mode (preferred) — loads the v2.0 manifest template from disk
+benny enrich \
+    --manifest manifests/templates/knowledge_enrichment_pipeline.json \
+    --workspace c5_test \
+    --src src/dangpy \
+    --run
+
+# Resume a partial run (skips already-completed tasks)
+benny enrich \
+    --manifest manifests/templates/knowledge_enrichment_pipeline.json \
+    --workspace c5_test \
+    --src src/dangpy \
+    --resume <prior_run_id> \
+    --run
+```
+
+Everything about each task — endpoint, HTTP method, body shape, per-task read timeout, `fire-and-poll` vs `blocking_with_task_fallback` dispatch, variable substitution — lives in `manifests/templates/knowledge_enrichment_pipeline.json` (`schema_version: "2.0"`). The full reference is in [KNOWLEDGE_ENRICHMENT_WORKFLOW.md](KNOWLEDGE_ENRICHMENT_WORKFLOW.md).
+
+**Per-task read timeouts** (from the v2.0 manifest; defend against slow Docling and LLM passes):
+
+| Task | Read timeout | Notes |
+|------|-------------:|-------|
+| `rag_ingest` | 1800s | Docling + ChromaDB embedding of multi-MB PDFs |
+| `deep_synthesis` | 1800s | LLM triple extraction over the whole ingested corpus |
+| `semantic_correlate` | 900s | Concept × CodeEntity similarity pass |
+| `code_scan` | 90s (start) + 72 × 5s (poll) | Background Tree-Sitter scan + polling `GET /api/graph/code` |
+
+**Windows-only**: `benny/api/server.py` pins `WindowsProactorEventLoopPolicy` to avoid `ValueError: too many file descriptors in select()` under heavy ingest load (the default `SelectorEventLoop` caps around 512 FDs). This takes effect on the next `benny down && benny up` cycle.
+
 ---
 
 ## 5. The LLM router (Phase 3 hardening)
@@ -274,7 +308,7 @@ curl -H "X-Benny-API-Key: benny-mesh-2026-auth" \
 | Workspace | Purpose | Graph types |
 |-----------|---------|-------------|
 | `c4_test` | RAG / retrieval test (H.G. Wells texts ingested) | Knowledge graph |
-| `c5_test` | Code analysis + architecture mapping (UML/PDF ingested; `src/dangpy` for code graph) | Knowledge + Code graph (enrichment pending) |
+| `c5_test` | Code analysis + architecture mapping (UML/PDF in `data_in/staging/`; `src/dangpy` for code graph) | Knowledge + Code graph + `CORRELATES_WITH` enrichment overlay (see §4.4) |
 
 Wiki articles live at `$BENNY_HOME/workspaces/<name>/.benny/wiki/*.md` and are served via `/api/rag/wiki/articles`.
 

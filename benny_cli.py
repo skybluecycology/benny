@@ -20,10 +20,17 @@ and what past runs reference. Share the file -> share the workflow.
 
 from __future__ import annotations
 
+import sys
+if sys.platform == "win32":
+    try:
+        import msvcrt
+        msvcrt.setmaxstdio(2048)
+    except Exception:
+        pass
+
 import argparse
 import asyncio
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -205,6 +212,130 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     API_KEY  = os.environ.get("BENNY_API_KEY",  "benny-mesh-2026-auth")
     _H = {"X-Benny-API-Key": API_KEY}
     _HJ = {**_H, "Content-Type": "application/json"}
+
+    # ─── 0. Load declarative manifest (if --manifest given) ─────────────────
+    # Everything we learn here — timeouts, thresholds, endpoints, model — is
+    # applied as an override on top of CLI flags / env defaults, so a single
+    # JSON manifest can fully describe the pipeline.
+    loaded_manifest: Optional[Dict[str, Any]] = None
+    task_timeouts:   Dict[str, float]        = {}  # per-task read timeout (s) from manifest
+
+    def _subst(value: Any, ctx: Dict[str, Any]) -> Any:
+        """Recursively replace ${name} tokens from ctx. Leaves literals intact."""
+        if isinstance(value, str):
+            out = value
+            for _ in range(4):  # allow nested substitution up to 4 levels
+                prev = out
+                for k, v in ctx.items():
+                    token = "${" + k + "}"
+                    if token in out:
+                        out = out.replace(token, "" if v is None else str(v))
+                if out == prev:
+                    break
+            return out
+        if isinstance(value, list):
+            return [_subst(v, ctx) for v in value]
+        if isinstance(value, dict):
+            return {k: _subst(v, ctx) for k, v in value.items()}
+        return value
+
+    if getattr(args, "manifest", None):
+        mpath = Path(args.manifest)
+        if not mpath.exists():
+            console.print(f"[bold red]Manifest not found:[/] {mpath}")
+            return 1
+        try:
+            raw = json.loads(mpath.read_text(encoding="utf-8"))
+        except Exception as e:
+            console.print(f"[bold red]Failed to parse manifest {mpath}:[/] {e}")
+            return 1
+
+        # Build substitution context: CLI flags > env vars > manifest.variables defaults.
+        mvars: Dict[str, Any] = dict(raw.get("variables", {}) or {})
+        ctx: Dict[str, Any] = {}
+        ctx.update(mvars)
+        ctx.update({k: os.environ.get(k) for k in ("BENNY_HOME", "BENNY_API_URL", "BENNY_API_KEY") if os.environ.get(k)})
+        if args.workspace:          ctx["workspace"]             = args.workspace
+        if args.src:                ctx["src_path"]              = args.src.rstrip("/")
+        if args.model:              ctx["model"]                 = args.model
+        if args.threshold is not None:   ctx["correlation_threshold"] = args.threshold
+        if args.strategy:           ctx["correlation_strategy"]  = args.strategy
+        if getattr(args, "resume_run_id", None): ctx["resume_from_run_id"] = args.resume_run_id
+        # run_id / task_run_id are filled later; leave literal tokens for them
+        loaded_manifest = _subst(raw, ctx)
+
+        # Apply top-level overrides from the manifest
+        api_cfg = (loaded_manifest.get("execution", {}) or {}).get("api", {}) or {}
+        if api_cfg.get("base"):         API_BASE = api_cfg["base"]
+        if api_cfg.get("auth_value"):   API_KEY  = api_cfg["auth_value"]
+        _H  = {api_cfg.get("auth_header", "X-Benny-API-Key"): API_KEY}
+        _HJ = {**_H, "Content-Type": api_cfg.get("content_type", "application/json")}
+
+        # Sync CLI args with manifest context (so downstream code using args.* still works)
+        m_cfg = loaded_manifest.get("config", {}) or {}
+        if m_cfg.get("model"):                 args.model     = m_cfg["model"]
+        m_ctx = (loaded_manifest.get("inputs", {}) or {}).get("context", {}) or {}
+        if m_ctx.get("src_path"):              args.src       = m_ctx["src_path"]
+        try:
+            if m_ctx.get("correlation_threshold") is not None:
+                args.threshold = float(m_ctx["correlation_threshold"])
+        except (TypeError, ValueError):
+            pass
+        if m_ctx.get("correlation_strategy"):  args.strategy  = m_ctx["correlation_strategy"]
+
+        # Extract per-task read timeouts so _run_task can honour them
+        for t in (loaded_manifest.get("plan", {}) or {}).get("tasks", []) or []:
+            tid = t.get("id")
+            if not tid:
+                continue
+            ex = t.get("execution", {}) or {}
+            # blocking-ish kinds put their timeout under .request.timeout.read or .request.timeout_s
+            req = ex.get("request") or ex.get("start") or {}
+            to  = req.get("timeout")
+            if isinstance(to, dict) and "read" in to:
+                try:
+                    task_timeouts[tid] = float(to["read"])
+                except (TypeError, ValueError):
+                    pass
+            elif isinstance(req.get("timeout_s"), (int, float)):
+                task_timeouts[tid] = float(req["timeout_s"])
+
+        console.print(f"[dim]Loaded manifest:[/] {mpath}  [dim]({len(task_timeouts)} per-task timeouts resolved)[/]")
+
+    # ─── 0b. Prior-run inspection for --resume ───────────────────────────────
+    # Reads workspace/<ws>/runs/enrich-<resume_run_id>/task_*.json and builds
+    # a {task_id -> (status, result_dict)} map. Tasks whose status is in
+    # skip_if_status are skipped in the wave loop and their `result` is
+    # rehydrated into the shared task_results dict so downstream tasks can
+    # still find e.g. pdf_files.
+    prior_results: Dict[str, Dict[str, Any]] = {}
+    _resume_skip_statuses = {"done", "completed", "completed_after_timeout"}
+    if loaded_manifest:
+        _rcfg = (loaded_manifest.get("execution", {}) or {}).get("resume", {}) or {}
+        if isinstance(_rcfg.get("skip_if_status"), list):
+            _resume_skip_statuses = {str(s).lower() for s in _rcfg["skip_if_status"]}
+
+    if getattr(args, "resume_run_id", None):
+        _benny_home_resume = Path(os.environ.get("BENNY_HOME", "."))
+        _prior_folder = _benny_home_resume / "workspace" / args.workspace / "runs" / f"enrich-{args.resume_run_id}"
+        if not _prior_folder.exists():
+            console.print(f"[bold yellow]⚠  --resume {args.resume_run_id}: run folder not found[/] ({_prior_folder}). Running fresh.")
+        else:
+            found = 0
+            for pj in _prior_folder.glob("task_*.json"):
+                try:
+                    rec = json.loads(pj.read_text(encoding="utf-8"))
+                    tid = rec.get("task_id") or pj.stem.removeprefix("task_")
+                    status = str(rec.get("status", "")).lower()
+                    prior_results[tid] = {"status": status, "result": rec.get("result") or {}}
+                    found += 1
+                except Exception as e:
+                    console.print(f"[dim]  skipped unreadable {pj.name}: {e}[/]")
+            reusable = sum(1 for r in prior_results.values() if r["status"] in _resume_skip_statuses)
+            console.print(
+                f"[cyan]⟲  Resuming from[/] [bold]{args.resume_run_id}[/]  "
+                f"[dim]({reusable}/{found} tasks reusable from {_prior_folder.name})[/]"
+            )
 
     # ─── 1. Resolve model ────────────────────────────────────────────────────
     model = args.model
@@ -502,6 +633,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
             if   st == "pending":  st_cell = Text("\u25cb  pending",  style="dim")
             elif st == "running":  st_cell = Text("\u25c9  running",  style="bold yellow")
             elif st == "done":     st_cell = Text("\u2713  done",     style="bold green")
+            elif st == "reused":   st_cell = Text("\u21ba  reused",   style="bold cyan")
             elif st == "skipped":  st_cell = Text("\u2296  skipped",  style="dim yellow")
             else:                  st_cell = Text("\u2717  failed",   style="bold red")
             tbl.add_row(str(t["wave"]), t["id"], st_cell, t["desc"], el_str, task_note[t["id"]])
@@ -512,233 +644,287 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     # (e.g. pdf_extract finds nested PDFs; rag_ingest uses them)
     task_results: Dict[str, Any] = {}
 
-    async def _run_task(tid: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=360.0) as client:
-            if tid == "pdf_extract":
-                # Recursive scan finds files at ANY depth (handles data_in/staging/*.pdf)
+    async def _run_task(tid: str, client: httpx.AsyncClient) -> Dict[str, Any]:
+        async def _diagnose_dead_server(orig_exc: BaseException) -> RuntimeError:
+            """When a ReadTimeout hits, probe /api/system/pulse to tell the
+            user whether the backend is dead or just slow."""
+            try:
+                # Use a dedicated short timeout for the pulse check
+                p = await client.get(f"{API_BASE}/api/system/pulse", headers=_H, timeout=3.0)
+                if p.status_code == 200:
+                    return RuntimeError(
+                        f"{type(orig_exc).__name__} — /pulse still OK, but this "
+                        "endpoint is stalling. Backend may have an FD leak from "
+                        "the prior crash; restart with `benny down && benny up`."
+                    )
+            except Exception:
+                pass
+            return RuntimeError(
+                f"{type(orig_exc).__name__} — backend is unreachable. "
+                "Restart with `benny down && benny up` then retry."
+            )
+
+        if tid == "pdf_extract":
+            # Recursive scan finds files at ANY depth (handles data_in/staging/*.pdf).
+            # Workspaces with chromadb/ + runs/ can have thousands of files, so 90 s.
+            try:
                 rr = await client.get(
                     f"{API_BASE}/api/files/recursive-scan", headers=_H,
-                    params={"workspace": args.workspace}, timeout=30.0,
+                    params={"workspace": args.workspace}, timeout=90.0,
                 )
-                rr.raise_for_status()
-                all_files = rr.json().get("files", [])
+            except httpx.ReadTimeout as e:
+                raise await _diagnose_dead_server(e)
+            rr.raise_for_status()
+            all_files = rr.json().get("files", [])
 
-                def _rel_to(prefix: str, p: str) -> Optional[str]:
-                    """If path starts with prefix (Windows or POSIX), return it stripped."""
-                    for sep in ("\\", "/"):
-                        head = f"{prefix}{sep}"
-                        if p.startswith(head):
-                            return p[len(head):].replace("\\", "/")
-                    return None
+            def _rel_to(prefix: str, p: str) -> Optional[str]:
+                """If path starts with prefix (Windows or POSIX), return it stripped."""
+                for sep in ("\\", "/"):
+                    head = f"{prefix}{sep}"
+                    if p.startswith(head):
+                        return p[len(head):].replace("\\", "/")
+                return None
 
-                # Collect ingestible docs already under data_in/ (any depth)
-                data_in_ingestible: List[str] = []       # relative to data_in/
-                data_in_md:         List[str] = []
-                staging_top:        List[str] = []       # top-level staging/
-                for f in all_files:
-                    path = f.get("path", "") or ""
-                    name = f.get("name", "") or ""
-                    ext  = name.lower().rsplit(".", 1)[-1] if "." in name else ""
-                    rel = _rel_to("data_in", path)
-                    if rel is not None:
-                        if ext in ("pdf", "docx", "pptx", "txt", "html"):
-                            data_in_ingestible.append(rel)
-                        if ext == "md":
-                            data_in_md.append(rel)
-                    elif _rel_to("staging", path) is not None:
-                        if ext in ("pdf", "docx", "pptx", "txt", "html", "md"):
-                            staging_top.append(_rel_to("staging", path) or name)
+            # Collect ingestible docs already under data_in/ (any depth)
+            data_in_ingestible: List[str] = []       # relative to data_in/
+            data_in_md:         List[str] = []
+            staging_top:        List[str] = []       # top-level staging/
+            for f in all_files:
+                path = f.get("path", "") or ""
+                name = f.get("name", "") or ""
+                ext  = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+                rel = _rel_to("data_in", path)
+                if rel is not None:
+                    if ext in ("pdf", "docx", "pptx", "txt", "html"):
+                        data_in_ingestible.append(rel)
+                    if ext == "md":
+                        data_in_md.append(rel)
+                elif _rel_to("staging", path) is not None:
+                    if ext in ("pdf", "docx", "pptx", "txt", "html", "md"):
+                        staging_top.append(_rel_to("staging", path) or name)
 
-                # Case A: top-level staging/ has raw docs → flag for later handling
-                if staging_top:
-                    task_results["staging_files"] = staging_top
-                    return {
-                        "staging_files": len(staging_top),
-                        "files":         staging_top[:5],
-                        "status":        "converted",
-                    }
+            # Case A: top-level staging/ has raw docs → flag for later handling
+            if staging_top:
+                task_results["staging_files"] = staging_top
+                return {
+                    "staging_files": len(staging_top),
+                    "files":         staging_top[:5],
+                    "status":        "converted",
+                }
 
-                # Case B: markdown already in data_in/ (any depth) → nothing to do
-                if data_in_md and not data_in_ingestible:
-                    return {
-                        "md_files": len(data_in_md),
-                        "status":   "already_converted",
-                    }
+            # Case B: markdown already in data_in/ (any depth) → nothing to do
+            if data_in_md and not data_in_ingestible:
+                return {
+                    "md_files": len(data_in_md),
+                    "status":   "already_converted",
+                }
 
-                # Case C: ingestible docs in data_in/ (pdfs in staging/ subdir, etc.)
-                # Hand them to rag_ingest via shared task_results
-                if data_in_ingestible:
-                    task_results["pdf_files"] = data_in_ingestible
-                    return {
-                        "pdf_count": len(data_in_ingestible),
-                        "paths":     data_in_ingestible[:3],
-                        "status":    "pdfs_found",
-                    }
+            # Case C: ingestible docs in data_in/ (pdfs in staging/ subdir, etc.)
+            # Hand them to rag_ingest via shared task_results
+            if data_in_ingestible:
+                task_results["pdf_files"] = data_in_ingestible
+                return {
+                    "pdf_count": len(data_in_ingestible),
+                    "paths":     data_in_ingestible[:3],
+                    "status":    "pdfs_found",
+                }
 
-                # Case D: ChromaDB already has chunks from a previous run
-                try:
-                    rs = await client.get(
-                        f"{API_BASE}/api/rag/status", headers=_H,
-                        params={"workspace": args.workspace}, timeout=10.0,
-                    )
-                    if rs.status_code == 200:
-                        chunks = rs.json().get("total_chunks", 0)
-                        if chunks > 0:
-                            return {
-                                "status":     "already_ingested",
-                                "rag_chunks": chunks,
-                            }
-                except Exception:
-                    pass
-
-                raise RuntimeError(
-                    "No ingestible docs found anywhere under the workspace and "
-                    "ChromaDB is empty — upload architecture docs first "
-                    "(Studio → Notebook → Upload)."
+            # Case D: ChromaDB already has chunks from a previous run
+            try:
+                rs = await client.get(
+                    f"{API_BASE}/api/rag/status", headers=_H,
+                    params={"workspace": args.workspace}, timeout=10.0,
                 )
+                if rs.status_code == 200:
+                    chunks = rs.json().get("total_chunks", 0)
+                    if chunks > 0:
+                        return {
+                            "status":     "already_ingested",
+                            "rag_chunks": chunks,
+                        }
+            except Exception:
+                pass
 
-            elif tid == "code_scan":
-                # Start the background Tree-Sitter scan (returns immediately)
+            raise RuntimeError(
+                "No ingestible docs found anywhere under the workspace and "
+                "ChromaDB is empty — upload architecture docs first "
+                "(Studio → Notebook → Upload)."
+            )
+
+        elif tid == "code_scan":
+            # Start the background Tree-Sitter scan (returns immediately).
+            try:
                 r = await client.post(
                     f"{API_BASE}/api/graph/code/generate", headers=_HJ,
                     json={"workspace": args.workspace, "root_dir": src_path},
-                    timeout=30.0,
+                    timeout=90.0,
                 )
-                r.raise_for_status()
-                scan_run_id = r.json().get("run_id", "")
-                # Poll GET /api/graph/code until nodes appear (max 6 min, 5 s intervals)
-                for _attempt in range(72):
-                    await asyncio.sleep(5)
-                    try:
-                        gr = await client.get(
-                            f"{API_BASE}/api/graph/code", headers=_H,
-                            params={"workspace": args.workspace},
-                            timeout=10.0,
-                        )
-                        if gr.status_code == 200:
-                            gdata = gr.json()
-                            nodes = gdata.get("nodes", [])
-                            if nodes:
-                                return {
-                                    "code_nodes": len(nodes),
-                                    "run_id":     scan_run_id,
-                                    "status":     "complete",
-                                }
-                    except Exception:
-                        pass
-                # Scan accepted but we couldn't confirm nodes yet — proceed optimistically
-                return {"status": "scan_started", "run_id": scan_run_id}
+            except httpx.ReadTimeout as e:
+                raise await _diagnose_dead_server(e)
+            r.raise_for_status()
+            scan_run_id = r.json().get("run_id", "")
+            # Poll GET /api/graph/code until nodes appear
+            for _attempt in range(72):
+                await asyncio.sleep(5)
+                try:
+                    gr = await client.get(
+                        f"{API_BASE}/api/graph/code", headers=_H,
+                        params={"workspace": args.workspace},
+                        timeout=10.0,
+                    )
+                    if gr.status_code == 200:
+                        gdata = gr.json()
+                        nodes = gdata.get("nodes", [])
+                        if nodes:
+                            return {
+                                "code_nodes": len(nodes),
+                                "run_id":     scan_run_id,
+                                "status":     "complete",
+                            }
+                except Exception:
+                    pass
+            return {"status": "scan_started", "run_id": scan_run_id}
 
-            elif tid == "rag_ingest":
-                # If pdf_extract found nested docs, pass their explicit paths
-                # (otherwise /api/rag/ingest only scans data_in/*.* at top level)
-                pdf_files = task_results.get("pdf_files")
-                body: Dict[str, Any] = {
-                    "workspace":      args.workspace,
-                    "deep_synthesis": False,
-                }
-                if pdf_files:
-                    body["files"] = pdf_files
+        elif tid == "rag_ingest":
+            # /api/rag/ingest is a SYNCHRONOUS endpoint.
+            pdf_files = task_results.get("pdf_files")
+            ingest_run_id = str(uuid.uuid4())
+            body: Dict[str, Any] = {
+                "workspace":      args.workspace,
+                "deep_synthesis": False,
+                "run_id":         ingest_run_id,
+            }
+            if pdf_files:
+                body["files"] = pdf_files
+
+            # Dedicated long-timeout for this one call (30 min read).
+            try:
                 r = await client.post(
                     f"{API_BASE}/api/rag/ingest", headers=_HJ, json=body,
+                    timeout=httpx.Timeout(connect=10.0, read=1800.0, write=120.0, pool=10.0)
                 )
                 r.raise_for_status()
-                return r.json()
+                out = r.json()
+            except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError) as net_err:
+                # POST died — fall back to task_manager status lookup.
+                try:
+                    tr = await client.get(
+                        f"{API_BASE}/api/tasks/tasks/{ingest_run_id}",
+                        headers=_H, timeout=10.0,
+                    )
+                    if tr.status_code == 200:
+                        td = tr.json()
+                        st = str(td.get("status", "")).lower()
+                        if st in ("completed", "complete", "done"):
+                            return {
+                                "status":     "completed_after_timeout",
+                                "rag_chunks": td.get("total_steps", 0),
+                                "task_id":    ingest_run_id,
+                            }
+                except httpx.HTTPError:
+                    pass
+                raise RuntimeError(f"rag_ingest failed: {net_err}")
+            return out
 
-            elif tid == "deep_synthesis":
+        elif tid == "deep_synthesis":
+            # /api/graph/synthesize now runs in background on server.
+            try:
                 r = await client.post(
                     f"{API_BASE}/api/graph/synthesize", headers=_HJ,
                     json={"workspace": args.workspace, "model": model},
+                    timeout=httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
                 )
                 r.raise_for_status()
                 return r.json()
-
-            elif tid == "semantic_correlate":
-                r = await client.post(
-                    f"{API_BASE}/api/rag/correlate", headers=_H,
-                    params={"workspace": args.workspace, "threshold": args.threshold},
-                )
-                r.raise_for_status()
-                return r.json()
-
-            elif tid == "validate_enrichment":
-                r = await client.get(
-                    f"{API_BASE}/api/graph/code/lod", headers=_H,
-                    params={"workspace": args.workspace, "tier": 1},
-                )
-                r.raise_for_status()
-                data = r.json()
-                corr = [e for e in data.get("edges", []) if e.get("type") == "CORRELATES_WITH"]
-                if not corr:
-                    raise RuntimeError(
-                        f"Zero CORRELATES_WITH edges found in workspace '{args.workspace}'. "
-                        "Check that deep_synthesis and semantic_correlate completed successfully."
+            except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError) as net_err:
+                # Fallback: check if a synthesis task completed server-side
+                try:
+                    tr = await client.get(
+                        f"{API_BASE}/api/tasks",
+                        headers=_H,
+                        params={"workspace": args.workspace},
+                        timeout=10.0,
                     )
-                return {"correlates_with_count": len(corr)}
+                    if tr.status_code == 200:
+                        tasks = tr.json() or []
+                        synth = [t for t in tasks if str(t.get("type", "")).lower() == "synthesis"]
+                        synth.sort(key=lambda t: t.get("updated_at", ""), reverse=True)
+                        if synth:
+                            latest = synth[0]
+                            st = str(latest.get("status", "")).lower()
+                            if st in ("completed", "complete", "done"):
+                                return {
+                                    "status": "completed_after_timeout",
+                                    "task_id": latest.get("task_id"),
+                                    "message": latest.get("message", ""),
+                                }
+                except httpx.HTTPError:
+                    pass
+                raise RuntimeError(f"deep_synthesis failed: {net_err}")
 
-            elif tid == "generate_report":
-                # Pull graph stats then write a rich Markdown report
-                r = await client.get(
-                    f"{API_BASE}/api/graph/stats", headers=_H,
-                    params={"workspace": args.workspace},
-                )
-                r.raise_for_status()
-                stats = r.json()
-                ntypes = stats.get("node_types", {})
-                rtypes = stats.get("relationship_types", {})
-                corr_cnt    = rtypes.get("CORRELATES_WITH", 0)
-                concept_cnt = ntypes.get("Concept", 0)
-                code_cnt    = ntypes.get("CodeEntity", ntypes.get("Function", 0) + ntypes.get("Class", 0))
+        elif tid == "semantic_correlate":
+            # Correlation runs similarity over ALL Concept × CodeEntity pairs.
+            # Optimization: Server-side is now vectorized/batched, but we keep a high 
+            # timeout for very large meshes.
+            r = await client.post(
+                f"{API_BASE}/api/rag/correlate", headers=_H,
+                params={"workspace": args.workspace, "threshold": args.threshold},
+                timeout=httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
+            )
+            r.raise_for_status()
+            return r.json()
 
-                report = "\n".join([
-                    "# Knowledge Enrichment Report",
-                    "",
-                    f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
-                    f"**Workspace**: `{args.workspace}`  ",
-                    f"**Model**: `{model}`  ",
-                    f"**Threshold**: `{args.threshold}`  ",
-                    f"**Strategy**: `{args.strategy}`  ",
-                    "",
-                    "## Graph Statistics",
-                    "",
-                    "| Metric | Count |",
-                    "|--------|------:|",
-                    f"| Concept nodes | {concept_cnt} |",
-                    f"| CodeEntity nodes | {code_cnt} |",
-                    f"| `CORRELATES_WITH` edges | {corr_cnt} |",
-                    "",
-                    "## Summary",
-                    "",
-                    f"{corr_cnt} semantic correlation edge(s) now link {concept_cnt} architecture "
-                    f"concept(s) to {code_cnt} code entity node(s) in workspace `{args.workspace}`.",
-                    "",
-                    "Enable the **ENRICH** toggle in Benny Studio \u2192 Code Graph to see amber "
-                    "dashed overlays connecting architecture concepts to source code symbols.",
-                    "",
-                    "## Run Provenance",
-                    "",
-                    f"- Run ID: `{run_id}`",
-                    f"- Manifest ID: `{manifest_id}`",
-                    f"- Run folder: `{run_folder}`",
-                    f"- Lineage (Marquez): http://localhost:3010",
-                    f"- GDPR notice: `{run_folder / 'GDPR_notice.json'}`",
-                    "",
-                    "## All Node / Edge Counts",
-                    "",
-                    "| Type | Count |",
-                    "|------|------:|",
-                    *[f"| `{k}` | {v} |" for k, v in {**ntypes, **rtypes}.items()],
-                ])
+        elif tid == "validate_enrichment":
+            r = await client.get(
+                f"{API_BASE}/api/graph/code/lod", headers=_H,
+                params={"workspace": args.workspace, "tier": 1},
+            )
+            r.raise_for_status()
+            data = r.json()
+            corr = [e for e in data.get("edges", []) if e.get("type") == "CORRELATES_WITH"]
+            if not corr:
+                raise RuntimeError("Zero CORRELATES_WITH edges found.")
+            return {"correlates_with_count": len(corr)}
 
-                data_out = benny_home / "workspace" / args.workspace / "data_out"
-                data_out.mkdir(parents=True, exist_ok=True)
-                report_path = data_out / "enrichment_report.md"
-                report_path.write_text(report, encoding="utf-8")
-                return {"report_path": str(report_path), "corr_count": corr_cnt,
-                        "concept_count": concept_cnt, "code_count": code_cnt}
+        elif tid == "generate_report":
+            # Pull graph stats then write a rich Markdown report
+            r = await client.get(
+                f"{API_BASE}/api/graph/stats", headers=_H,
+                params={"workspace": args.workspace},
+            )
+            r.raise_for_status()
+            stats = r.json()
+            ntypes = stats.get("node_types", {})
+            rtypes = stats.get("relationship_types", {})
+            corr_cnt    = rtypes.get("CORRELATES_WITH", 0)
+            concept_cnt = ntypes.get("Concept", 0)
+            code_cnt    = ntypes.get("CodeEntity", ntypes.get("Function", 0) + ntypes.get("Class", 0))
 
-            else:
-                raise ValueError(f"Unknown task id: {tid!r}")
+            report = "\n".join([
+                f"# Knowledge Enrichment Report: {args.workspace}",
+                f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                "## 1. Graph Statistics",
+                f"- **Total Concepts**: {concept_cnt}",
+                f"- **Total Code Entities**: {code_cnt}",
+                f"- **Semantic Correlations**: {corr_cnt}",
+                "",
+                "## 2. Enrichment Distribution",
+                "| Category | Count |",
+                "| :--- | :--- |",
+                *[f"| {k} | {v} |" for k, v in ntypes.items()],
+                "",
+                "## 3. Relationship Matrix",
+                "| Type | Count |",
+                "| :--- | :--- |",
+                *[f"| {k} | {v} |" for k, v in rtypes.items()],
+            ])
+
+            (run_folder / "enrichment_report.md").write_text(report, encoding="utf-8")
+            return {"report_path": str(run_folder / "enrichment_report.md")}
+
+        else:
+            raise ValueError(f"Unknown task id: {tid!r}")
 
     # ─── 9. Execute waves with Rich Live display ──────────────────────────────
     completed_tasks: List[str] = []
@@ -776,19 +962,74 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                 overall,
                 description=f"[cyan]Wave {wave_num}[/]  [dim]{', '.join(wave_tids)}[/]",
             )
+
+            # --- Resume: split this wave into (reused, to_execute) ---
+            to_execute: List[str] = []
+            reused_map: Dict[str, Dict[str, Any]] = {}
             for tid in wave_tids:
-                task_status[tid] = "running"
+                pr = prior_results.get(tid)
+                if pr and pr["status"] in _resume_skip_statuses:
+                    reused_map[tid] = pr["result"] or {}
+                    task_status[tid] = "running"  # cosmetic, updated to 'done' below
+                    # Rehydrate known cross-task artefacts so dependents can run
+                    if isinstance(pr["result"], dict):
+                        for _key in ("pdf_files", "staging_files"):
+                            if _key in pr["result"] and pr["result"][_key]:
+                                task_results[_key] = pr["result"][_key]
+                else:
+                    to_execute.append(tid)
+                    task_status[tid] = "running"
             live.update(Group(progress, _make_table()))
 
-            wave_t0 = time.monotonic()
-            results = await asyncio.gather(
-                *[_run_task(tid) for tid in wave_tids], return_exceptions=True
-            )
+            async with httpx.AsyncClient(timeout=360.0) as shared_client:
+                wave_t0 = time.monotonic()
+                exec_results = await asyncio.gather(
+                    *[_run_task(tid, shared_client) for tid in to_execute], return_exceptions=True
+                ) if to_execute else []
+
+            # Merge reused + freshly-executed results, preserving wave order
+            exec_iter = iter(zip(to_execute, exec_results))
+            merged: List[tuple] = []
+            for tid in wave_tids:
+                if tid in reused_map:
+                    merged.append((tid, reused_map[tid], True))   # True = reused
+                else:
+                    _tid, _res = next(exec_iter)
+                    merged.append((_tid, _res, False))
+            results    = [m[1] for m in merged]
+            reused_set = {m[0] for m in merged if m[2]}
 
             for tid, result in zip(wave_tids, results):
-                elapsed = time.monotonic() - wave_t0
+                is_reused = tid in reused_set
+                elapsed = 0.0 if is_reused else (time.monotonic() - wave_t0)
                 task_elapsed[tid] = elapsed
                 task_ts = datetime.now(timezone.utc).isoformat()
+
+                if is_reused:
+                    task_status[tid] = "reused"
+                    completed_tasks.append(tid)
+                    task_note[tid] = "reused from prior run"
+                    # Persist a pointer so the new run folder records the reuse
+                    try:
+                        (run_folder / f"task_{tid}.json").write_text(
+                            json.dumps({
+                                "task_id":     tid,
+                                "wave":        wave_num,
+                                "status":      "reused",
+                                "timestamp":   task_ts,
+                                "elapsed_s":   0.0,
+                                "result":      result,
+                                "reused_from": args.resume_run_id,
+                                "lineage_ref": manifest_id,
+                                "run_id":      run_id,
+                            }, indent=2, default=str),
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
+                    progress.advance(overall)
+                    live.update(Group(progress, _make_table()))
+                    continue
 
                 if isinstance(result, Exception):
                     task_status[tid] = "failed"
@@ -1088,6 +1329,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_enrich.add_argument("--out", default=None, help="Write manifest JSON to this path (skips execution)")
     p_enrich.add_argument("--run", dest="run_after", action="store_true", default=False, help="Execute the manifest immediately after building it")
     p_enrich.add_argument("--json", action="store_true", help="Emit the final RunRecord as JSON (implies --run)")
+    p_enrich.add_argument("--manifest", default=None, help="Load a declarative manifest from disk (e.g. manifests/templates/knowledge_enrichment_pipeline.json) instead of building one inline. Variables (workspace, src_path, model, threshold, strategy, api_base, api_key, benny_home, resume_from_run_id) are substituted from CLI flags + env.")
+    p_enrich.add_argument("--resume", dest="resume_run_id", default=None, help="Reuse already-completed tasks from a prior run (e.g. --resume 6d0856035fe6). Reads workspace/<ws>/runs/enrich-<run_id>/task_*.json and skips any task whose status is in execution.resume.skip_if_status.")
 
     # migrate (PBR-001 Phase 8)
     p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")

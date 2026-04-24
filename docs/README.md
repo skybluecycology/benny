@@ -62,8 +62,13 @@ benny runs ls --limit 10
 benny down --home $BENNY_HOME
 
 # Knowledge enrichment (Studio ENRICH toggle)
-benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json  # build manifest
-benny enrich --workspace c5_test --src src/dangpy --run                    # build + run
+benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json  # build manifest (inline mode)
+benny enrich --workspace c5_test --src src/dangpy --run                    # build + run (inline mode)
+benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
+             --workspace c5_test --src src/dangpy --run                    # declarative mode (preferred)
+benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
+             --workspace c5_test --src src/dangpy \
+             --resume <prior_run_id> --run                                  # resume a partial run
 benny enrich --help                                                         # full options
 
 # Observe a run in real time
