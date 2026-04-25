@@ -278,6 +278,58 @@ The generated SAD will be written to `c5_test/data_out/reports/SAD_generated.md`
 
 ---
 
+## 9.5 Pypes — Declarative Transformation Engine (third capability surface)
+
+Benny treats **documents**, **code**, and **tabular data** as first-class. Pypes is the third surface: a manifest-driven, DAG-based engine that runs bronze→silver→gold transformations with checkpoints, validations, CLP (Conceptual / Logical / Physical) lineage, and explainable financial-risk-style reports.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ benny pypes run manifests/financial_risk_pipeline.json      │
+│                                                             │
+│   ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌────────┐ │
+│   │ bronze  │ → │ silver  │ → │ silver   │ → │ gold   │ │
+│   │ trades  │    │ trades  │    │ usd      │    │ expos. │ │
+│   │ (load)  │    │ (clean) │    │ (calc)   │    │ (agg)  │ │
+│   └────┬────┘    └────┬────┘    └────┬─────┘    └───┬────┘ │
+│        │              │              │              │      │
+│        ▼              ▼              ▼              ▼      │
+│   checkpoint     checkpoint     checkpoint     checkpoint  │
+│        │              │              │              │      │
+│        └──────────────┴──────────────┴──────────────┘      │
+│                            │                                │
+│                            ▼                                │
+│              ┌─────────────────────────┐                    │
+│              │ Reports (markdown)      │                    │
+│              │  • counterparty_risk    │  ← drill_down_by   │
+│              │  • breaches             │     CLP-annotated  │
+│              │  • exposure_move        │                    │
+│              └─────────────────────────┘                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Why this matters
+The `previous_project_pain_points.md` retrospective listed four recurring failures of imperative transformation pipelines: no reproducibility, no drill-back, no inline threshold gating, no first-class lineage. A closed-DAG manifest fixes all four — the executor reads the same model that emits OpenLineage, every step writes a checkpoint that satisfies replay + drill-down, and validations are part of the contract.
+
+### Components
+| Component | Module |
+|-----------|--------|
+| Manifest schema (`PypesManifest`, `PipelineStep`, `RunReceipt`) | `benny/pypes/models.py` |
+| Operation registry (`load`, `filter`, `dedupe`, `aggregate`, …) | `benny/pypes/registry.py` |
+| Execution engines (pandas, polars) | `benny/pypes/engines/` |
+| Orchestrator (topological sort, checkpoints, sub-manifests) | `benny/pypes/orchestrator.py` |
+| Validators (completeness, uniqueness, thresholds, move-analysis) | `benny/pypes/validators.py` |
+| Report renderers (financial_risk, threshold_breaches, move_analysis) | `benny/pypes/reports.py` |
+| Checkpoint store (parquet + CSV fallback) | `benny/pypes/checkpoints.py` |
+| OpenLineage emitter | `benny/pypes/lineage.py` |
+| CLI (`benny pypes …`) | `benny/pypes/cli.py` (wired into `benny_cli.py`) |
+| HTTP API (`/api/pypes/*`) | `benny/api/pypes_routes.py` |
+| Studio surface (DAG + drill-down) | `frontend/src/components/Studio/PipelineCanvas.tsx` |
+| Demo manifest + sample trades | `manifests/templates/financial_risk_pipeline.json`, `manifests/templates/data/trades_sample.csv` |
+
+See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](../docs/operations/PYPES_TRANSFORMATION_GUIDE.md) for the full guide.
+
+---
+
 ## 10. Quality Attributes
 
 | Attribute | Mechanism |
@@ -312,6 +364,9 @@ The generated SAD will be written to `c5_test/data_out/reports/SAD_generated.md`
 | Portable home | `benny/portable/home.py` |
 | Service manager | `benny/portable/runner.py` |
 | MCP server | `benny/mcp/server.py` |
+| Pypes manifest + runtime | `benny/pypes/` (models, registry, engines, orchestrator, validators, reports, checkpoints, lineage, cli) |
+| Pypes API router | `benny/api/pypes_routes.py` |
+| Pypes Studio canvas | `frontend/src/components/Studio/PipelineCanvas.tsx` |
 
 ---
 

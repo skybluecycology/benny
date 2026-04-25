@@ -67,6 +67,7 @@ from .workflow_endpoints import router as workflow_endpoints_router
 from .audio_routes import router as audio_router
 from .ops_endpoints import router as ops_router
 from .kg3d import router as kg3d_router
+from .pypes_routes import router as pypes_router
 
 # Temporary fix for missing rbac.py module
 GOVERNANCE_WHITELIST = ["/api/health", "/api/status"]
@@ -150,6 +151,7 @@ app.include_router(a2a_router, prefix="/a2a", tags=["A2A"])
 app.include_router(audio_router, prefix="/api/audio", tags=["Audio"])
 app.include_router(ops_router, prefix="/api/ops", tags=["Ops"])
 app.include_router(kg3d_router, tags=["KG3D"])
+app.include_router(pypes_router, prefix="/api/pypes", tags=["Pypes"])
 
 @app.get("/")
 async def root():

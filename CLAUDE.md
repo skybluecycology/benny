@@ -3,13 +3,22 @@
 This is a **local-first, multi-model AI orchestration platform**. Key facts before you start:
 
 ## Architecture in one sentence
-A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangGraph swarm executor, all portable under `$BENNY_HOME`.
+A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangGraph swarm executor + **Pypes declarative transformation engine**, all portable under `$BENNY_HOME`.
+
+## Three capability surfaces
+
+Benny treats **documents**, **code**, and **tabular data** as first-class:
+
+- **Documents** → RAG / Knowledge Graph (`benny/api/rag_routes.py`, `benny/core/adaptive_rag.py`)
+- **Code** → Code Graph + Swarm execution (`benny/api/graph_routes.py`, `benny/graph/swarm.py`)
+- **Tabular data** → Pypes transformation engine (`benny/pypes/`, `benny/api/pypes_routes.py`) — manifest-driven DAG with bronze→silver→gold stages, CLP lineage, checkpoints, drill-down, and explainable financial-risk reports. See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md).
 
 ## Where things live
 
 | What | Where |
 |------|-------|
-| **Backend API** (FastAPI, 23 route modules) | `benny/api/` |
+| **Backend API** (FastAPI, 24 route modules) | `benny/api/` |
+| **Pypes transformation engine** (DAG manifests, CLP lineage, drill-down) | `benny/pypes/` + `benny/api/pypes_routes.py` |
 | **CLI entry point** | `benny_cli.py` |
 | **Frontend** (React 19, Three.js, Vite) | `frontend/src/` |
 | **Swarm executor** (LangGraph) | `benny/graph/swarm.py` |
@@ -33,6 +42,10 @@ benny enrich --workspace c5_test --src src/dangpy --run               # enrichme
 benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
              --workspace c5_test --src src/dangpy --run                # enrichment (declarative v2.0)
 benny enrich --manifest <path> --resume <prior_run_id> --run           # resume a partial run
+benny pypes inspect manifests/templates/financial_risk_pipeline.json   # validate a pypes manifest
+benny pypes run     manifests/templates/financial_risk_pipeline.json --workspace pypes_demo
+benny pypes drilldown <run_id> gold_exposure --workspace pypes_demo    # rows + CLP annotations
+benny pypes rerun    <run_id> --from silver_trades --workspace pypes_demo
 benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 ```
 
@@ -42,6 +55,7 @@ benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 - **[architecture/SAD.md](architecture/SAD.md)** — C4 diagrams, dual-graph design, swarm lifecycle
 - **[docs/operations/BENNY_OPERATING_MANUAL.md](docs/operations/BENNY_OPERATING_MANUAL.md)** — run book
 - **[docs/operations/LOG_AND_LINEAGE_GUIDE.md](docs/operations/LOG_AND_LINEAGE_GUIDE.md)** — logs, SSE, Marquez, Phoenix, AER
+- **[docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md)** — declarative DAG transformations, CLP lineage, drill-down, financial-risk reports
 - **[architecture/WORKSPACE_GUIDE.md](architecture/WORKSPACE_GUIDE.md)** — workspace structure + c4_test/c5_test guide
 - **[architecture/GRAPH_SCHEMA.md](architecture/GRAPH_SCHEMA.md)** — Neo4j schema
 

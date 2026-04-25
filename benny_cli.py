@@ -1332,6 +1332,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_enrich.add_argument("--manifest", default=None, help="Load a declarative manifest from disk (e.g. manifests/templates/knowledge_enrichment_pipeline.json) instead of building one inline. Variables (workspace, src_path, model, threshold, strategy, api_base, api_key, benny_home, resume_from_run_id) are substituted from CLI flags + env.")
     p_enrich.add_argument("--resume", dest="resume_run_id", default=None, help="Reuse already-completed tasks from a prior run (e.g. --resume 6d0856035fe6). Reads workspace/<ws>/runs/enrich-<run_id>/task_*.json and skips any task whose status is in execution.resume.skip_if_status.")
 
+    # pypes — declarative transformation engine (manifest-driven DAG)
+    from benny.pypes.cli import add_subparser as _pypes_add_subparser
+    _pypes_add_subparser(sub)
+
     # migrate (PBR-001 Phase 8)
     p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")
     p_mig.add_argument("--from-path", "--from", required=True, help="Source directory to migrate")
@@ -1376,6 +1380,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_migrate(args)
     if args.cmd == "enrich":
         return asyncio.run(cmd_enrich(args))
+    if args.cmd == "pypes":
+        from benny.pypes.cli import cmd_pypes
+        return cmd_pypes(args)
 
     parser.print_help()
     return 1

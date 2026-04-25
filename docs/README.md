@@ -19,6 +19,7 @@ New to Benny? Read in this order:
 | Document | Description |
 |----------|-------------|
 | [BENNY_OPERATING_MANUAL.md](operations/BENNY_OPERATING_MANUAL.md) | **Primary run book** — init, up, down, plan, run, doctor, migrate, uninstall, release gates, troubleshooting |
+| [PYPES_TRANSFORMATION_GUIDE.md](operations/PYPES_TRANSFORMATION_GUIDE.md) | `benny pypes` — declarative, DAG-based transformation engine with CLP lineage, checkpoints, drill-down, and financial-risk reports |
 | [KNOWLEDGE_ENRICHMENT_WORKFLOW.md](operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md) | `benny enrich` pipeline — extract docs → synthesise triples → correlate to code → enable Studio ENRICH toggle |
 | [LOG_AND_LINEAGE_GUIDE.md](operations/LOG_AND_LINEAGE_GUIDE.md) | All log files, SSE events, Marquez lineage, Phoenix tracing, AER audit records, end-to-end process trace |
 | [manifest_operating_manual.md](operations/manifest_operating_manual.md) | Manifest execution and planning detail |
@@ -60,6 +61,12 @@ benny plan "Summarise PDFs in data_in/" --workspace c4_test --save
 benny run manifests/latest.manifest.json --json
 benny runs ls --limit 10
 benny down --home $BENNY_HOME
+
+# Pypes — declarative transformation engine (bronze → silver → gold + CLP)
+benny pypes inspect manifests/templates/financial_risk_pipeline.json
+benny pypes run     manifests/templates/financial_risk_pipeline.json --workspace pypes_demo
+benny pypes drilldown <run_id> gold_exposure --workspace pypes_demo
+benny pypes rerun    <run_id> --from silver_trades --workspace pypes_demo
 
 # Knowledge enrichment (Studio ENRICH toggle)
 benny enrich --workspace c5_test --src src/dangpy --out plans/enrich.json  # build manifest (inline mode)
