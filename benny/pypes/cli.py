@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import logging
 import os
 import sys
 import time
@@ -98,6 +99,46 @@ def _status_text(status: str) -> Text:
     return Text(f" {icon} {status} ", style=style)
 
 
+# ---------------------------------------------------------------------------
+# Log capture — buffers pypes log records during Live displays so they don't
+# tear up the table, then flushes them cleanly afterward.
+# ---------------------------------------------------------------------------
+
+class _BufferingLogHandler(logging.Handler):
+    """Capture log records into a list; flush to Rich console on demand."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: List[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+    def flush_to_console(self) -> None:
+        for rec in self.records:
+            level = rec.levelname
+            style = {"WARNING": "yellow", "ERROR": "red", "CRITICAL": "bold red"}.get(level, "dim")
+            console.print(f"[{style}][{level}][/{style}] [dim]{rec.name}:[/] {rec.getMessage()}")
+        self.records.clear()
+
+
+def _capture_pypes_logs() -> _BufferingLogHandler:
+    """Attach a buffering handler to the benny.pypes root logger.
+
+    Child loggers (orchestrator, engines, etc.) propagate up here by default,
+    so one handler is enough — no double-emit.
+    """
+    handler = _BufferingLogHandler()
+    logging.getLogger("benny.pypes").addHandler(handler)
+    return handler
+
+
+def _release_pypes_logs(handler: _BufferingLogHandler) -> None:
+    """Remove the buffering handler and flush any captured messages."""
+    logging.getLogger("benny.pypes").removeHandler(handler)
+    handler.flush_to_console()
+
+
 # =============================================================================
 # SUBPARSER
 # =============================================================================
@@ -128,14 +169,18 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
     p_inspect.add_argument("manifest", help="Path to a pypes manifest.json")
 
     p_runs = pp.add_parser("runs", help="List prior pypes runs in a workspace")
-    p_runs_sub = p_runs.add_subparsers(dest="runs_cmd", required=True)
+    # --workspace / --limit at the top level so `benny pypes runs --workspace W` works
+    p_runs.add_argument("--workspace", default="default")
+    p_runs.add_argument("--limit", type=int, default=20)
+    p_runs.set_defaults(runs_cmd="ls")          # default sub-action is ls
+    p_runs_sub = p_runs.add_subparsers(dest="runs_cmd")
     p_runs_ls = p_runs_sub.add_parser("ls")
-    p_runs_ls.add_argument("--workspace", default="default")
-    p_runs_ls.add_argument("--limit", type=int, default=20)
+    p_runs_ls.add_argument("--workspace", default=None, help="Override parent --workspace")
+    p_runs_ls.add_argument("--limit", type=int, default=None, help="Override parent --limit")
 
     p_runs_show = p_runs_sub.add_parser("show")
     p_runs_show.add_argument("run_id")
-    p_runs_show.add_argument("--workspace", default="default")
+    p_runs_show.add_argument("--workspace", default=None)
 
     p_drill = pp.add_parser("drilldown", help="Inspect a step's checkpoint with CLP annotations")
     p_drill.add_argument("run_id")
@@ -243,13 +288,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
             rows_cell = Text(f"{rows:,}" if rows is not None else "-", style="white" if rows else "muted")
             chk_cell  = Text("-" if not fails else f"[red]{fails} fail[/]", style="muted") if not fails else Text(f"{fails} fail", style="bold red")
-            dur_cell  = Text(f"{ms/1000:.2f}s" if ms is not None else "…", style="muted")
+            dur_cell  = Text(f"{ms/1000:.2f}s" if ms is not None else "...", style="muted")
 
             tbl.add_row(stage_badge, s.id, status_cell, s.engine.value, rows_cell, chk_cell, dur_cell)
         return tbl
 
     console.print()
     receipt: Optional[RunReceipt] = None
+
+    # Capture pypes log output so it doesn't tear up the live table
+    _log_handler = _capture_pypes_logs()
 
     with Live(console=console, refresh_per_second=10, transient=False) as live:
         def _tick(sid: str, status: str, rows: Optional[int] = None, ms: Optional[float] = None, fails: int = 0) -> None:
@@ -261,20 +309,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
             step_checks[sid] = fails
             live.update(_build_live_table())
 
-        # Mark all as pending initially
         live.update(_build_live_table())
-
-        # ── Monkey-patch orchestrator progress callback ──────────────────────
-        # Orchestrator.run() is synchronous; we wrap it to stream step events
-        # by hooking the orchestrator's internal step executor via a progress CB.
-        t0 = time.monotonic()
-        for sid in step_ids:
-            step_status[sid] = "PENDING"
-
-        # Run with a progress hook
         orch = Orchestrator()
         receipt = _run_with_progress(orch, manifest, variables, args.resume_run_id, args.only or None, _tick)
         live.update(_build_live_table())
+
+    # Release log handler and flush any captured warnings below the table
+    _release_pypes_logs(_log_handler)
 
     # ── Final summary ───────────────────────────────────────────────────────
     console.print()
@@ -416,11 +457,14 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def _cmd_runs_ls(args: argparse.Namespace) -> int:
-    ws_root = _workspace_root(args.workspace)
-    runs_dir = ws_root / "runs"
+    # Sub-parser overrides parent; fall back to parent-level values when None
+    workspace = getattr(args, "workspace", None) or "default"
+    limit     = getattr(args, "limit",     None) or 20
+    ws_root   = _workspace_root(workspace)
+    runs_dir  = ws_root / "runs"
 
     console.print()
-    console.print(Rule(f"[bold cyan] Pypes Run History — workspace: {args.workspace} [/]"))
+    console.print(Rule(f"[bold cyan] Pypes Run History — workspace: {workspace} [/]"))
     console.print()
 
     if not runs_dir.exists():
@@ -429,7 +473,7 @@ def _cmd_runs_ls(args: argparse.Namespace) -> int:
         return 0
 
     entries = sorted(runs_dir.glob("pypes-*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    entries = entries[: args.limit]
+    entries = entries[:limit]
 
     tbl = Table(
         box=box.ROUNDED, show_header=True, header_style="bold cyan",
@@ -469,7 +513,8 @@ def _cmd_runs_ls(args: argparse.Namespace) -> int:
 
 
 def _cmd_runs_show(args: argparse.Namespace) -> int:
-    receipt_path = _workspace_root(args.workspace) / "runs" / f"pypes-{args.run_id}" / "receipt.json"
+    workspace    = getattr(args, "workspace", None) or "default"
+    receipt_path = _workspace_root(workspace) / "runs" / f"pypes-{args.run_id}" / "receipt.json"
     if not receipt_path.exists():
         console.print(f"[bold red]Run not found:[/] {args.run_id}")
         return 1
@@ -633,9 +678,11 @@ def _cmd_rerun(args: argparse.Namespace) -> int:
                 Text(f" {s.stage.value.upper()} ", style=stage_style),
                 s.id, _status_text(st),
                 Text(f"{rows:,}" if rows is not None else "-", style="muted"),
-                Text(f"{ms/1000:.2f}s" if ms is not None else "…", style="muted"),
+                Text(f"{ms/1000:.2f}s" if ms is not None else "...", style="muted"),
             )
         return tbl
+
+    _log_handler = _capture_pypes_logs()
 
     with Live(console=console, refresh_per_second=10) as live:
         live.update(_build_live_table())
@@ -649,6 +696,8 @@ def _cmd_rerun(args: argparse.Namespace) -> int:
             step_ms[sid] = total_ms / max(len(receipt.step_results), 1)
             step_checks[sid] = fails
         live.update(_build_live_table())
+
+    _release_pypes_logs(_log_handler)
 
     console.print()
     _print_receipt_panel(receipt)
@@ -673,7 +722,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
     receipt = RunReceipt.model_validate_json(receipt_path.read_text(encoding="utf-8"))
     store = CheckpointStore(run_dir)
 
-    with console.status(f"[cyan]Rendering report[/] [bold white]{args.report_id}[/]…"):
+    with console.status(f"[cyan]Rendering report[/] [bold white]{args.report_id}[/]..."):
         path = render_report(
             engine=get_engine(EngineType.PANDAS),
             manifest=manifest,
