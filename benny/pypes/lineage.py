@@ -23,6 +23,21 @@ log = logging.getLogger(__name__)
 
 _NAMESPACE = "benny-pypes"
 
+# OpenLineage requires runId to be a valid UUID. Pypes uses a short 12-char
+# hex run id (e.g. "3c66acae71a2") for human-readable folders, so we deterministically
+# inflate it to a UUID per-emit. uuid5 in this fixed namespace yields a stable
+# UUID for the same short id, so START/COMPLETE events correlate in Marquez.
+_RUN_ID_NAMESPACE = uuid.UUID("c1b00d12-3c4f-5a6b-8d9e-bcd0c1c2c3c4")
+
+
+def _uuid_for(short_id: str) -> str:
+    """Return a stable UUID string for any input id (UUID-safe or short hex)."""
+    try:
+        # If it's already a valid UUID, pass through.
+        return str(uuid.UUID(short_id))
+    except (ValueError, AttributeError, TypeError):
+        return str(uuid.uuid5(_RUN_ID_NAMESPACE, short_id or ""))
+
 
 def _safe_import_client() -> Optional[Any]:
     try:
@@ -66,7 +81,9 @@ class LineageEmitter:
         self._emit_pipeline("COMPLETE" if status == "SUCCESS" else "FAIL")
 
     def step_start(self, step: PipelineStep) -> None:
-        self._step_run_ids[step.id] = str(uuid.uuid4())
+        # Stable per-step UUID derived from (run_id, step.id) so START/COMPLETE
+        # events correlate even if the orchestrator restarts mid-run.
+        self._step_run_ids[step.id] = _uuid_for(f"{self.run_id}:{step.id}")
         self._emit_step(step, "START", validation=None)
 
     def step_complete(self, step: PipelineStep, validation: ValidationResult) -> None:
@@ -90,7 +107,7 @@ class LineageEmitter:
             event = RunEvent(
                 eventType=getattr(RunState, state.upper(), RunState.COMPLETE),
                 eventTime=_now(),
-                run=Run(runId=self.run_id),
+                run=Run(runId=_uuid_for(self.run_id)),
                 job=Job(namespace=_NAMESPACE, name=f"pypes.{self.manifest.id}"),
                 producer="benny.pypes",
                 inputs=[],
@@ -116,7 +133,7 @@ class LineageEmitter:
             RunEvent = self._bridge["RunEvent"]
             RunState = self._bridge["RunState"]
 
-            step_run_id = self._step_run_ids.get(step.id) or str(uuid.uuid4())
+            step_run_id = self._step_run_ids.get(step.id) or _uuid_for(f"{self.run_id}:{step.id}")
             self._step_run_ids[step.id] = step_run_id
 
             inputs: List[Any] = [

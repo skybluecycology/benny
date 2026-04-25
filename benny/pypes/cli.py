@@ -126,8 +126,15 @@ def _capture_pypes_logs() -> _BufferingLogHandler:
     """Attach a buffering handler to the benny.pypes root logger.
 
     Child loggers (orchestrator, engines, etc.) propagate up here by default,
-    so one handler is enough — no double-emit.
+    so one handler is enough — no double-emit. We also silence OpenLineage's
+    transport startup chatter ("Couldn't find any OpenLineage transport...")
+    because it bypasses our buffer otherwise.
     """
+    # OpenLineage prints "Couldn't find any OpenLineage transport configuration..."
+    # from openlineage.client.transport at WARNING level. Pin to ERROR so it stays quiet.
+    for noisy in ("openlineage", "openlineage.client", "openlineage.client.transport"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
+
     handler = _BufferingLogHandler()
     logging.getLogger("benny.pypes").addHandler(handler)
     return handler
