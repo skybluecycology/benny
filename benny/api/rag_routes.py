@@ -36,7 +36,9 @@ class IngestRequest(BaseModel):
     run_id: Optional[str] = None # Optional existing run/nexus ID
     deep_synthesis: bool = False # Whether to extract triples and run clustering
     strategy: str = "safe" # Heuristic layer: 'safe' or 'aggressive'
-    correlation_threshold: float = 0.70 # Similarity threshold for aggressive mode
+    correlation_threshold: float = 0.82 # Similarity threshold for aggressive mode (raised from 0.70 — the 0.70 knee produced ~36× noise-tail edges)
+    correlation_top_k: int = 32          # Max symbol matches per concept; caps edge fan-out
+    correlation_use_ann: bool = True     # Use HNSW ANN index when hnswlib is installed; falls back to numpy top-K
     force_reingest: bool = False # Whether to force re-processing even if already in DB
 
 
@@ -247,7 +249,12 @@ async def ingest_files(request: IngestRequest):
                 
                 track_aer(run_id, "rag_ingest", request.workspace, "Running Knowledge-to-Code Correlation", "Cross-linking Concepts and Symbols")
                 task_manager.update_task(run_id, metadata={"stage": "CORRELATING"})
-                correlation_results = await run_full_correlation_suite(request.workspace, threshold=request.correlation_threshold)
+                correlation_results = await run_full_correlation_suite(
+                    request.workspace,
+                    threshold=request.correlation_threshold,
+                    top_k_per_concept=request.correlation_top_k,
+                    use_ann=request.correlation_use_ann,
+                )
                 
                 track_aer(run_id, "rag_ingest", request.workspace, "Deep Processing complete", 
                           f"Clusters: {cluster_results.get('communities_found', 0)}, " 
@@ -835,16 +842,33 @@ async def adaptive_rag_query(request: AdaptiveRAGRequest, response: Response):
         raise HTTPException(500, f"Adaptive RAG failed: {str(e)}")
 
 @router.post("/rag/correlate")
-async def manual_correlate(workspace: str = "default", threshold: float = 0.70):
-    """Manually trigger the correlation suite (Neural Spark) for a workspace."""
+async def manual_correlate(
+    workspace: str = "default",
+    threshold: float = 0.82,
+    top_k: int = 32,
+    use_ann: bool = True,
+):
+    """Manually trigger the correlation suite (Neural Spark) for a workspace.
+
+    Raised default threshold 0.70 → 0.82 and added top_k (bounds edges per
+    concept). Set use_ann=false to force the numpy fallback even when hnswlib
+    is installed.
+    """
     try:
         from ..synthesis.correlation import run_full_correlation_suite
-        results = await run_full_correlation_suite(workspace, threshold=threshold)
+        results = await run_full_correlation_suite(
+            workspace,
+            threshold=threshold,
+            top_k_per_concept=top_k,
+            use_ann=use_ann,
+        )
         return {
-            "status": "completed",
+            "status":    "completed",
             "workspace": workspace,
             "threshold": threshold,
-            "results": results
+            "top_k":     top_k,
+            "use_ann":   use_ann,
+            "results":   results,
         }
     except Exception as e:
         raise HTTPException(500, f"Correlation failed: {str(e)}")

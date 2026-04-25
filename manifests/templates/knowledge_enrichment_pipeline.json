@@ -19,8 +19,10 @@
     "staging_dir":           "staging",
     "data_in_dir":           "data_in",
     "data_out_dir":          "data_out",
-    "correlation_threshold": 0.70,
+    "correlation_threshold": 0.82,
     "correlation_strategy":  "aggressive",
+    "correlation_top_k":     32,
+    "correlation_use_ann":   true,
     "model":                 "lemonade/qwen3-tk-4b-FLM",
     "resume_from_run_id":    "",
     "api_base":              "http://127.0.0.1:8005",
@@ -76,7 +78,8 @@
       "strategy":         "prior_run_folder",
       "from_run_id":      "${resume_from_run_id}",
       "scan_glob":        "task_*.json",
-      "skip_if_status":   ["done", "completed", "completed_after_timeout"],
+      "skip_if_status":   ["done", "completed", "completed_after_timeout", "reused"],
+      "always_rerun":     ["generate_report"],
       "rehydrate_emits":  true
     },
 
@@ -230,16 +233,27 @@
         "complexity": "medium",
         "node_type": "task",
         "execution": {
-          "kind": "blocking",
+          "kind": "blocking_with_task_fallback",
           "request": {
             "method": "POST",
             "path":   "/api/rag/correlate",
             "params": {
               "workspace": "${workspace}",
               "threshold": "${correlation_threshold}",
-              "strategy":  "${correlation_strategy}"
+              "strategy":  "${correlation_strategy}",
+              "top_k":     "${correlation_top_k}",
+              "use_ann":   "${correlation_use_ann}"
             },
-            "timeout": { "connect": 10, "read": 900, "write": 60, "pool": 10 }
+            "timeout": { "connect": 10, "read": 1800, "write": 60, "pool": 10 }
+          },
+          "fallback": {
+            "task_list_filter": ["correlat", "spark", "link"],
+            "graph_probe": {
+              "method": "GET",
+              "path":   "/api/graph/code/lod",
+              "params": { "workspace": "${workspace}", "tier": 1 },
+              "accept_when": "$.edges[?(@.type == 'CORRELATES_WITH')] | length > 0"
+            }
           }
         }
       },

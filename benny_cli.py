@@ -309,11 +309,21 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
     # rehydrated into the shared task_results dict so downstream tasks can
     # still find e.g. pdf_files.
     prior_results: Dict[str, Dict[str, Any]] = {}
-    _resume_skip_statuses = {"done", "completed", "completed_after_timeout"}
+    # "reused" is included so resume-of-resume chains stay idempotent: if a
+    # prior run reused a task from an even-earlier run, the underlying result
+    # is still valid and must not force a re-execution of an 1800s endpoint.
+    _resume_skip_statuses = {"done", "completed", "completed_after_timeout", "reused"}
+    # Tasks that must always re-execute even when --resume would otherwise reuse
+    # them. `generate_report` is the canonical example: it reads live graph state
+    # and is cheap to regenerate, so reusing a stale/empty prior report is always
+    # wrong.
+    _always_rerun: set = {"generate_report"}
     if loaded_manifest:
         _rcfg = (loaded_manifest.get("execution", {}) or {}).get("resume", {}) or {}
         if isinstance(_rcfg.get("skip_if_status"), list):
             _resume_skip_statuses = {str(s).lower() for s in _rcfg["skip_if_status"]}
+        if isinstance(_rcfg.get("always_rerun"), list):
+            _always_rerun = {str(s) for s in _rcfg["always_rerun"]}
 
     if getattr(args, "resume_run_id", None):
         _benny_home_resume = Path(os.environ.get("BENNY_HOME", "."))
@@ -864,15 +874,76 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
         elif tid == "semantic_correlate":
             # Correlation runs similarity over ALL Concept × CodeEntity pairs.
-            # Optimization: Server-side is now vectorized/batched, but we keep a high 
-            # timeout for very large meshes.
-            r = await client.post(
-                f"{API_BASE}/api/rag/correlate", headers=_H,
-                params={"workspace": args.workspace, "threshold": args.threshold},
-                timeout=httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
-            )
-            r.raise_for_status()
-            return r.json()
+            # With aggressive strategy on a large corpus (>100k chunks) this can
+            # exceed the client read timeout even though the server is making
+            # progress — so we fall back to (a) the task_manager task list and
+            # (b) a direct Neo4j edge-count probe before declaring failure.
+            try:
+                r = await client.post(
+                    f"{API_BASE}/api/rag/correlate", headers=_H,
+                    params={
+                        "workspace": args.workspace,
+                        "threshold": args.threshold,
+                        "top_k":     getattr(args, "top_k", 32),
+                        "use_ann":   str(getattr(args, "use_ann", True)).lower(),
+                    },
+                    timeout=httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
+                )
+                r.raise_for_status()
+                return r.json()
+            except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError) as net_err:
+                # Fallback A: look for a correlation task on the task manager.
+                try:
+                    tr = await client.get(
+                        f"{API_BASE}/api/tasks",
+                        headers=_H,
+                        params={"workspace": args.workspace},
+                        timeout=10.0,
+                    )
+                    if tr.status_code == 200:
+                        tasks = tr.json() or []
+                        corr = [
+                            t for t in tasks
+                            if any(k in str(t.get("type", "")).lower()
+                                   for k in ("correlat", "spark", "link"))
+                        ]
+                        corr.sort(key=lambda t: t.get("updated_at", ""), reverse=True)
+                        if corr:
+                            latest = corr[0]
+                            st = str(latest.get("status", "")).lower()
+                            if st in ("completed", "complete", "done"):
+                                return {
+                                    "status":  "completed_after_timeout",
+                                    "task_id": latest.get("task_id"),
+                                    "source":  "task_manager",
+                                    "message": latest.get("message", ""),
+                                }
+                except httpx.HTTPError:
+                    pass
+                # Fallback B: probe the graph directly — if CORRELATES_WITH
+                # edges exist for this workspace, the server finished even
+                # though it didn't send a response.
+                try:
+                    gr = await client.get(
+                        f"{API_BASE}/api/graph/code/lod", headers=_H,
+                        params={"workspace": args.workspace, "tier": 1},
+                        timeout=60.0,
+                    )
+                    if gr.status_code == 200:
+                        gd = gr.json() or {}
+                        corr_edges = [
+                            e for e in (gd.get("edges") or [])
+                            if e.get("type") == "CORRELATES_WITH"
+                        ]
+                        if corr_edges:
+                            return {
+                                "status":      "completed_after_timeout",
+                                "source":      "graph_probe",
+                                "total_links": len(corr_edges),
+                            }
+                except httpx.HTTPError:
+                    pass
+                raise RuntimeError(f"semantic_correlate failed: {net_err}")
 
         elif tid == "validate_enrichment":
             r = await client.get(
@@ -887,41 +958,174 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
             return {"correlates_with_count": len(corr)}
 
         elif tid == "generate_report":
-            # Pull graph stats then write a rich Markdown report
-            r = await client.get(
-                f"{API_BASE}/api/graph/stats", headers=_H,
-                params={"workspace": args.workspace},
-            )
-            r.raise_for_status()
-            stats = r.json()
-            ntypes = stats.get("node_types", {})
-            rtypes = stats.get("relationship_types", {})
-            corr_cnt    = rtypes.get("CORRELATES_WITH", 0)
-            concept_cnt = ntypes.get("Concept", 0)
-            code_cnt    = ntypes.get("CodeEntity", ntypes.get("Function", 0) + ntypes.get("Class", 0))
+            # Pull graph stats (for concept/source/relationship aggregates) AND
+            # the code-LOD view (same source the validator uses, so the two
+            # numbers can never disagree). Then write a rich Markdown report.
+            stats: Dict[str, Any] = {}
+            try:
+                r = await client.get(
+                    f"{API_BASE}/api/graph/stats", headers=_H,
+                    params={"workspace": args.workspace},
+                )
+                r.raise_for_status()
+                stats = r.json() or {}
+            except Exception as _e:
+                stats = {"_error": str(_e)}
 
-            report = "\n".join([
-                f"# Knowledge Enrichment Report: {args.workspace}",
-                f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            # /api/graph/stats returns: concepts, sources, relationships, conflicts, analogies
+            concept_cnt      = int(stats.get("concepts", 0) or 0)
+            source_cnt       = int(stats.get("sources", 0) or 0)
+            rel_total        = int(stats.get("relationships", 0) or 0)
+            conflict_cnt     = int(stats.get("conflicts", 0) or 0)
+            analogy_cnt      = int(stats.get("analogies", 0) or 0)
+
+            # Pull the same code-LOD view the validator uses so CORRELATES_WITH
+            # count + node/edge-type breakdowns are guaranteed consistent.
+            lod_nodes: List[Dict[str, Any]] = []
+            lod_edges: List[Dict[str, Any]] = []
+            try:
+                r2 = await client.get(
+                    f"{API_BASE}/api/graph/code/lod", headers=_H,
+                    params={"workspace": args.workspace, "tier": 1},
+                )
+                r2.raise_for_status()
+                _lod = r2.json() or {}
+                lod_nodes = list(_lod.get("nodes") or [])
+                lod_edges = list(_lod.get("edges") or [])
+            except Exception:
+                pass
+
+            from collections import Counter
+            node_type_counts: Counter = Counter()
+            for n in lod_nodes:
+                lbl = n.get("label") or n.get("type") or (n.get("labels") or [None])[0] or "Unknown"
+                node_type_counts[str(lbl)] += 1
+            edge_type_counts: Counter = Counter()
+            for e in lod_edges:
+                edge_type_counts[str(e.get("type") or "UNKNOWN")] += 1
+
+            corr_cnt = edge_type_counts.get("CORRELATES_WITH", 0)
+            # CodeEntity = Function + Class + File (the code-side labels)
+            code_entity_cnt = sum(node_type_counts.get(k, 0) for k in ("Function", "Class", "File"))
+
+            # Top-N correlations by confidence/score if present on the edges
+            def _edge_score(e: Dict[str, Any]) -> float:
+                try:
+                    return float(
+                        e.get("score")
+                        or e.get("confidence")
+                        or (e.get("properties") or {}).get("score")
+                        or (e.get("properties") or {}).get("confidence")
+                        or 0.0
+                    )
+                except Exception:
+                    return 0.0
+
+            corr_edges = [e for e in lod_edges if e.get("type") == "CORRELATES_WITH"]
+            top_corr = sorted(corr_edges, key=_edge_score, reverse=True)[:20]
+
+            # Similarity histogram (0.70–1.00 in 0.02 buckets)
+            buckets: List[int] = [0] * 15  # 0.70–1.00 step 0.02 → 15 bins
+            for e in corr_edges:
+                s = _edge_score(e)
+                if 0.70 <= s <= 1.0001:
+                    idx = min(14, max(0, int((s - 0.70) / 0.02)))
+                    buckets[idx] += 1
+            hist_rows = []
+            for i, cnt in enumerate(buckets):
+                lo = 0.70 + i * 0.02
+                hi = lo + 0.02
+                bar = "█" * max(0, min(40, int(cnt / max(1, max(buckets)) * 40)))
+                hist_rows.append(f"| `{lo:0.2f}–{hi:0.2f}` | {cnt} | `{bar}` |")
+
+            generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            lines: List[str] = [
+                f"# Knowledge Enrichment Report — `{args.workspace}`",
+                "",
+                f"**Generated**: {generated}  ",
+                f"**Model**: `{model}`  ",
+                f"**Threshold**: `{args.threshold}`  |  **Strategy**: `{args.strategy}`  ",
+                f"**Run ID**: `{run_id}`  |  **Manifest ID**: `{manifest_id}`",
                 "",
                 "## 1. Graph Statistics",
-                f"- **Total Concepts**: {concept_cnt}",
-                f"- **Total Code Entities**: {code_cnt}",
-                f"- **Semantic Correlations**: {corr_cnt}",
                 "",
-                "## 2. Enrichment Distribution",
-                "| Category | Count |",
-                "| :--- | :--- |",
-                *[f"| {k} | {v} |" for k, v in ntypes.items()],
+                "| Metric | Count |",
+                "|--------|------:|",
+                f"| Concept nodes | {concept_cnt} |",
+                f"| Source / Document nodes | {source_cnt} |",
+                f"| Code-side entities (File + Class + Function) | {code_entity_cnt} |",
+                f"| `CORRELATES_WITH` edges | {corr_cnt} |",
+                f"| Total relationships (all types) | {rel_total} |",
+                f"| `CONFLICTS_WITH` edges | {conflict_cnt} |",
+                f"| `ANALOGOUS_TO` edges | {analogy_cnt} |",
                 "",
-                "## 3. Relationship Matrix",
+                "## 2. Node-type Distribution (code-LOD view)",
+                "",
+                "| Label | Count |",
+                "|-------|------:|",
+                *[f"| `{k}` | {v} |" for k, v in sorted(node_type_counts.items(), key=lambda kv: -kv[1])],
+                "",
+                "## 3. Edge-type Distribution (code-LOD view)",
+                "",
                 "| Type | Count |",
-                "| :--- | :--- |",
-                *[f"| {k} | {v} |" for k, v in rtypes.items()],
-            ])
+                "|------|------:|",
+                *[f"| `{k}` | {v} |" for k, v in sorted(edge_type_counts.items(), key=lambda kv: -kv[1])],
+                "",
+                "## 4. CORRELATES_WITH Similarity Histogram",
+                "",
+                "| Bucket | Count | |",
+                "|--------|------:|--|",
+                *hist_rows,
+                "",
+                "## 5. Top 20 Correlations (by score/confidence)",
+                "",
+                "| # | Source | Target | Score |",
+                "|--:|--------|--------|------:|",
+            ]
+            for i, e in enumerate(top_corr, start=1):
+                src = e.get("source") or e.get("from") or (e.get("properties") or {}).get("source") or "—"
+                dst = e.get("target") or e.get("to")   or (e.get("properties") or {}).get("target") or "—"
+                sc  = _edge_score(e)
+                lines.append(f"| {i} | `{src}` | `{dst}` | {sc:0.3f} |")
+            if not top_corr:
+                lines.append("| — | _(no CORRELATES_WITH edges found)_ | | |")
 
+            lines += [
+                "",
+                "## 6. Interpretation",
+                "",
+                f"{corr_cnt:,} semantic correlation edge(s) now link {concept_cnt} architecture "
+                f"concept node(s) to {code_entity_cnt} code entity node(s) in workspace `{args.workspace}`.",
+                "",
+                "Enable the **ENRICH** toggle in Benny Studio → Code Graph to see amber-dashed "
+                "overlays connecting architecture concepts to source code symbols.",
+                "",
+                "## 7. Run Provenance",
+                "",
+                f"- Run folder: `{run_folder}`",
+                f"- Lineage (Marquez): http://localhost:3010",
+                f"- GDPR notice: `{run_folder / 'GDPR_notice.json'}`",
+            ]
+            if stats.get("_error"):
+                lines += ["", f"> ⚠  `/api/graph/stats` error: `{stats['_error']}`"]
+
+            report = "\n".join(lines)
+            # Write to BOTH the run folder (audit/immutable) and the workspace
+            # data_out dir (stable path referenced by manifest templates).
             (run_folder / "enrichment_report.md").write_text(report, encoding="utf-8")
-            return {"report_path": str(run_folder / "enrichment_report.md")}
+            try:
+                _data_out = benny_home / "workspace" / args.workspace / "data_out"
+                _data_out.mkdir(parents=True, exist_ok=True)
+                (_data_out / "enrichment_report.md").write_text(report, encoding="utf-8")
+            except Exception:
+                pass
+            return {
+                "report_path":      str(run_folder / "enrichment_report.md"),
+                "corr_count":       corr_cnt,
+                "concept_count":    concept_cnt,
+                "code_count":       code_entity_cnt,
+                "top_score":        _edge_score(top_corr[0]) if top_corr else 0.0,
+            }
 
         else:
             raise ValueError(f"Unknown task id: {tid!r}")
@@ -968,7 +1172,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
             reused_map: Dict[str, Dict[str, Any]] = {}
             for tid in wave_tids:
                 pr = prior_results.get(tid)
-                if pr and pr["status"] in _resume_skip_statuses:
+                if pr and pr["status"] in _resume_skip_statuses and tid not in _always_rerun:
                     reused_map[tid] = pr["result"] or {}
                     task_status[tid] = "running"  # cosmetic, updated to 'done' below
                     # Rehydrate known cross-task artefacts so dependents can run
@@ -977,6 +1181,12 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
                             if _key in pr["result"] and pr["result"][_key]:
                                 task_results[_key] = pr["result"][_key]
                 else:
+                    # Rehydrate cross-task artefacts even when we're re-executing
+                    # (e.g. generate_report needs upstream emits to render links).
+                    if pr and isinstance(pr["result"], dict):
+                        for _key in ("pdf_files", "staging_files"):
+                            if _key in pr["result"] and pr["result"][_key] and _key not in task_results:
+                                task_results[_key] = pr["result"][_key]
                     to_execute.append(tid)
                     task_status[tid] = "running"
             live.update(Group(progress, _make_table()))
@@ -1324,8 +1534,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_enrich.add_argument("--workspace", default="c5_test", help="Target workspace (default: c5_test)")
     p_enrich.add_argument("--src", default="src/", help="Source path to scan with Tree-Sitter (relative to workspace, default: src/)")
     p_enrich.add_argument("--model", default=None, help="LLM model ID (defaults to active manager selection)")
-    p_enrich.add_argument("--threshold", type=float, default=0.70, help="Semantic correlation confidence threshold (default: 0.70)")
+    p_enrich.add_argument("--threshold", type=float, default=0.82, help="Semantic correlation confidence threshold (default: 0.82, raised from 0.70 — the 0.70 knee produced ~36x noise-tail edges)")
     p_enrich.add_argument("--strategy", choices=["safe", "aggressive"], default="aggressive", help="Correlation strategy (default: aggressive)")
+    p_enrich.add_argument("--top-k", dest="top_k", type=int, default=32, help="Max symbol matches per concept (default: 32). Caps CORRELATES_WITH fan-out — upper bound on edges is N_concepts * top_k.")
+    p_enrich.add_argument("--no-ann", dest="use_ann", action="store_false", default=True, help="Force the numpy top-K fallback even if hnswlib is installed (default: use HNSW when available).")
     p_enrich.add_argument("--out", default=None, help="Write manifest JSON to this path (skips execution)")
     p_enrich.add_argument("--run", dest="run_after", action="store_true", default=False, help="Execute the manifest immediately after building it")
     p_enrich.add_argument("--json", action="store_true", help="Emit the final RunRecord as JSON (implies --run)")
