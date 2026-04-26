@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 MANIFEST_SCHEMA_VERSION = "1.0"
+# AOS-001 Phase 0: additive v1.1 extension — all new fields optional for back-compat
+AOS_SCHEMA_VERSION = "1.1"
 
 
 class OutputFormat(str, Enum):
@@ -89,6 +91,9 @@ class ManifestConfig(BaseModel):
         description="If False, planner emits a linear sequence only (no fan-out).",
     )
     skills_allowed: List[str] = Field(default_factory=list)
+    # AOS-001 OQ-1: per-persona model overrides.  Resolution order:
+    #   task.assigned_model → model_per_persona[persona] → model → registry default
+    model_per_persona: Dict[str, str] = Field(default_factory=dict)
 
 
 class ManifestTask(BaseModel):
@@ -212,6 +217,12 @@ class SwarmManifest(BaseModel):
 
     # Runs are stored separately but referenced here for convenience
     latest_run: Optional[RunRecord] = None
+
+    # AOS-001 v1.1 extension fields — all Optional so v1.0 payloads still parse.
+    # Values are stored as plain dicts; use benny.sdlc.contracts for typed access.
+    sdlc: Optional[Dict[str, Any]] = None    # SdlcConfig
+    policy: Optional[Dict[str, Any]] = None  # PolicyConfig
+    memory: Optional[Dict[str, Any]] = None  # MemoryConfig
 
     # Reproducibility contract (PBR-001 Phase 2).
     # `content_hash` is SHA-256 of the canonical JSON (sorted keys, volatile

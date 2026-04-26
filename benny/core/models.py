@@ -91,6 +91,16 @@ MODEL_REGISTRY = {
         "provider": "lemonade",
         "cost_per_1k": 0.0,
         "use_for": ["voice", "speed", "high_speed", "low_latency"]
+    },
+    # AOS-001 OQ-1 (2026-04-26): default model for all AOS personas.
+    # Exact Lemonade model name confirmed at Phase 0 wire-up — adjust the
+    # "model" string below if the Lemonade catalogue uses a different slug.
+    # Fallback: alias resolves to "local_lemonade" if qwen3_5_9b is absent.
+    "qwen3_5_9b": {
+        "model": "openai/Qwen3-8B-Instruct-FLM",
+        "provider": "lemonade",
+        "cost_per_1k": 0.0,
+        "use_for": ["sdlc", "offline", "planner", "architect", "aos_default"]
     }
 }
 

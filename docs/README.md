@@ -48,6 +48,7 @@ New to Benny? Read in this order:
 |----------|-------------|
 | [PBR-001_CONTINUATION_PLAN.md](requirements/PBR-001_CONTINUATION_PLAN.md) | Phase roadmap and history (Phases 0–8) |
 | [PORTABLE_BENNY_REQUIREMENTS.md](requirements/PORTABLE_BENNY_REQUIREMENTS.md) | Full Phase 0–8 technical specification |
+| [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC (Phase 10).** Six-sigma normative spec + acceptance matrix + project plan. Integrates the architectural brief into existing Benny (manifest 1.1, PBR, progressive disclosure, Mermaid, durable resume, BDD pipeline, TOGAF mapping, JSON-LD lineage, policy-as-code, sandbox runner). |
 
 ---
 
