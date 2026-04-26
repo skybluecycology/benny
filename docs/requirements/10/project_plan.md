@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-26
-**Active phase:** Phase 1 — Pass-by-reference store (READY TO START)
-**Next decision needed:** none — Phase 0 complete (SHA `2f6819b`)
+**Active phase:** Phase 2 — Progressive disclosure (READY TO START)
+**Next decision needed:** none — Phase 1 complete (SHA `b2259f0`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 1 — Pass-by-reference store |
-| Status | `[IN-PROGRESS]` — Phase 0 complete at `2f6819b`; Phase 1 ready to open |
-| Active workstream | Phase 1: `benny/core/artifact_store.py` |
+| Phase | 2 — Progressive disclosure |
+| Status | `[IN-PROGRESS]` — Phase 1 complete at `b2259f0`; Phase 2 ready to open |
+| Active workstream | Phase 2: `benny/core/disclosure.py` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,16 +26,15 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phase 0 is **complete** (`2f6819b`). Next:
+Phases 0 and 1 are **complete** (`2f6819b`, `b2259f0`). Next:
 
-1. Open Phase 1 — Pass-by-reference store.
+1. Open Phase 2 — Progressive disclosure.
 2. Write red tests first:
-   - `tests/sdlc/test_pbr_token_budget.py` (AOS-NFR1 ≥ 80 % reduction)
-   - `tests/sdlc/test_pbr_artifact_store.py` (AOS-F5 put/get round-trip, AOS-F6 auto-promote, AOS-F7 URI substitution)
-   - `tests/safety/test_aos_sec5_artifact_path_escape.py` (R3 mitigation)
-3. Implement `benny/core/artifact_store.py` (put/get/gc/path_for).
-4. Extend `benny/graph/swarm.py` to auto-promote outputs above `pbr_threshold_tokens`.
-5. Update §1, §4, §6 in this file + acceptance matrix when Phase 1 gate is green.
+   - `tests/sdlc/test_disclosure_budget.py` (AOS-NFR12: Layer 1 ≤ 500 tokens)
+   - `tests/sdlc/test_disclosure_layers.py` (AOS-F8, AOS-F9, AOS-F10)
+3. Implement `benny/core/disclosure.py` (3-layer registry: `layer1`/`layer2`/`layer3`).
+4. Refactor tool-registry exposure in `benny/api/llm_routes.py` to use Layer 1 by default.
+5. Update §1, §4, §6 + acceptance matrix when Phase 2 gate is green.
 
 ---
 
@@ -140,13 +139,13 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 1 — Pass-by-reference store
 
-- [ ] `benny/core/artifact_store.py` (`put`, `get`, `gc`, `path_for`)
-- [ ] `benny/graph/swarm.py` auto-promotes large tool outputs above `pbr_threshold_tokens`
-- [ ] `aos.pbr.enabled` default flips `true`
-- [ ] Tests green: `test_aos_f5_*`, `test_aos_f6_*`, `test_aos_f7_*`, `test_aos_sec5_artifact_path_escape`
-- [ ] AOS-NFR1 ≥ 80 % token reduction on fixture
-- [ ] Acceptance rows AOS-F5–F7, AOS-NFR1, AOS-SEC5 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/core/artifact_store.py` (`put`, `get`, `gc`, `path_for`, `maybe_promote`, `resolve_uri`, `resolve_uris_in_args`)
+- [x] `benny/graph/swarm.py` auto-promotes large tool outputs + resolves artifact:// URIs in args
+- [ ] `aos.pbr.enabled` feature-flag default flip (deferred to Phase 10 cutover)
+- [x] Tests green: 14 × `test_aos_f5/f6/f7_*`, 3 × `test_pbr_token_budget`, 4 × `test_aos_sec5_*` (21 total)
+- [x] AOS-NFR1 ≥ 80 % token reduction on fixture (≈ 96 % measured)
+- [x] Acceptance rows AOS-F5–F7, AOS-NFR1, AOS-SEC5 → `PASS`
+- Evidence SHA: `b2259f0`
 
 ### Phase 2 — Progressive disclosure
 
@@ -310,7 +309,7 @@ G-* gates.
 | Coverage on AOS modules | ≥ 85 % | measured @ Ph10 | — | — | — | — | — | — | — | — | — | — |
 | SR-1 path violations | ≤ 408 | **≤ 408** ✓ | — | — | — | — | — | — | — | — | — | — |
 | G-LAT (existing) | < 300 ms | unchanged | — | — | — | — | — | — | — | — | — | — |
-| AOS-NFR1 token reduction | ≥ 80 % | n/a | — | — | — | — | — | — | — | — | — | — |
+| AOS-NFR1 token reduction | ≥ 80 % | n/a | **≈ 96 %** ✓ | — | — | — | — | — | — | — | — | — |
 | AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | — | — | — | — | — | — | — |
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | — | — | — | — | — | — | — | — |
 | AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
@@ -390,12 +389,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 0 committed — SHA `2f6819b` |
-| Current in-progress step | Phase 1 — Pass-by-reference store (not yet started) |
+| Last completed step | Phase 1 committed — SHA `b2259f0` |
+| Current in-progress step | Phase 2 — Progressive disclosure (not yet started) |
 | Open files / scratch | — |
-| Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug matches live catalogue before Phase 1 wire-up |
-| Last green CI run | 18 sdlc + 42 portability PASS @ `2f6819b` |
-| Notes for next agent | Phase 1 starts with red tests in `tests/sdlc/test_pbr_*.py` and `tests/safety/test_aos_sec5_artifact_path_escape.py`. Implement `benny/core/artifact_store.py` then extend `benny/graph/swarm.py`. |
+| Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
+| Last green CI run | 97 PASS (39 sdlc + 4 safety + 54 portability) @ `b2259f0` |
+| Notes for next agent | Phase 2 starts with red tests in `tests/sdlc/test_disclosure_budget.py` and `tests/sdlc/test_disclosure_layers.py`. Implement `benny/core/disclosure.py` 3-layer registry then expose Layer 1 in `benny/api/llm_routes.py`. |
 
 Update this section at the end of every working session.
 

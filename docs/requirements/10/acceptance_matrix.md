@@ -19,9 +19,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F2  | 0   | `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation` | PASS | `2f6819b` |
 | AOS-F3  | 7   | `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure` | TODO | |
 | AOS-F4  | 7   | `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic` | TODO | |
-| AOS-F5  | 1   | `test_aos_f5_artifact_put_get_roundtrip`, `test_aos_f5_content_addressed` | TODO | |
-| AOS-F6  | 1   | `test_aos_f6_auto_promote_above_threshold`, `test_aos_f6_summary_clamp_200` | TODO | |
-| AOS-F7  | 1   | `test_aos_f7_uri_substitution_in_tool_call` | TODO | |
+| AOS-F5  | 1   | `test_aos_f5_artifact_put_get_roundtrip`, `test_aos_f5_content_addressed` | PASS | `b2259f0` |
+| AOS-F6  | 1   | `test_aos_f6_auto_promote_above_threshold`, `test_aos_f6_summary_clamp_200` | PASS | `b2259f0` |
+| AOS-F7  | 1   | `test_aos_f7_uri_substitution_in_tool_call` | PASS | `b2259f0` |
 | AOS-F8  | 2   | `test_aos_f8_layer1_token_budget` (≤ 500 tokens) | TODO | |
 | AOS-F9  | 2   | `test_aos_f9_activate_returns_schema`, `test_aos_f9_lazy_load` | TODO | |
 | AOS-F10 | 2   | `test_aos_f10_examples_layer3_optional` | TODO | |
@@ -51,7 +51,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-NFR1  | 1     | `tests/sdlc/test_pbr_token_budget.py` | TODO | |
+| AOS-NFR1  | 1     | `tests/sdlc/test_pbr_token_budget.py` | PASS | `b2259f0` |
 | AOS-NFR2  | 4     | `tests/sdlc/test_resume_latency.py`   | TODO | |
 | AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | TODO | |
 | AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | TODO | |
@@ -72,7 +72,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-SEC2 | 9 | `tests/safety/test_aos_no_unexpected_egress.py` | TODO | |
 | AOS-SEC3 | 9 | `test_aos_sec3_path_traversal_rejected` | TODO | |
 | AOS-SEC4 | 10 | `test_aos_sec4_doctor_reports_sandbox` | TODO | |
-| AOS-SEC5 | 1 | `test_aos_sec5_artifact_path_escape` | TODO | |
+| AOS-SEC5 | 1 | `test_aos_sec5_artifact_path_escape` | PASS | `b2259f0` |
 | AOS-SEC6 | 9 | `test_aos_sec6_ledger_rewind_detected` | TODO | |
 
 ## Compliance — SOX 404 + BCBS 239 (from [requirement.md §9](requirement.md#9-compliance--sox-404--bcbs-239-brief-9))
