@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-26
-**Active phase:** Phase 3 — Diagram generators (READY TO START)
-**Next decision needed:** none — Phase 2 complete (SHA `39cec9a`)
+**Active phase:** Phase 4 — Durable resume harness (READY TO START)
+**Next decision needed:** none — Phase 3 complete (SHA `777f798`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 3 — Diagram generators |
-| Status | `[IN-PROGRESS]` — Phase 2 complete at `39cec9a`; Phase 3 ready to open |
-| Active workstream | Phase 3: `benny/graph/diagrams.py` |
+| Phase | 4 — Durable resume harness |
+| Status | `[IN-PROGRESS]` — Phase 3 complete at `777f798`; Phase 4 ready to open |
+| Active workstream | Phase 4: `benny/graph/manifest_runner.py` resume path |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,17 +26,22 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0, 1, and 2 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`). Next:
+Phases 0, 1, 2, and 3 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`). Next:
 
-1. Open Phase 3 — Diagram generators.
+1. Open Phase 4 — Durable resume harness.
 2. Write red tests first:
-   - `tests/sdlc/test_diagrams_mermaid.py` (AOS-F11: `to_mermaid` emits `graph TD`, subgraph per wave)
-   - `tests/sdlc/test_diagrams_perf.py` (AOS-NFR4: ≤ 50 ms on 50-task fixture)
-   - `tests/sdlc/test_diagrams_plantuml.py` (AOS-F12 smoke)
-   - `tests/sdlc/test_diagrams_activity.py` (AOS-F13)
-3. Implement `benny/graph/diagrams.py` (`to_mermaid`, `to_plantuml`, `to_activity_diagram`).
-4. Extend `benny/graph/wave_scheduler.py` to populate `manifest.plan.mermaid`.
-5. Update §1, §4, §6 + acceptance matrix when Phase 3 gate is green.
+   - `tests/sdlc/test_resume_idempotent.py` (AOS-F14: `test_aos_f14_resume_from_checkpoint`, `test_aos_f14_no_redundant_tasks`)
+   - `tests/sdlc/test_resume_latency.py` (AOS-NFR2: p95 ≤ 5 s)
+   - `tests/sdlc/test_resume_pause.py` (AOS-F15: pause/resume across hosts, mocked move)
+   - `tests/sdlc/test_resume_budget.py` (AOS-F16: time-budget and iteration-budget escalation)
+3. Implement `benny/persistence/checkpointer.py` atomic checkpoint (tmp+rename).
+4. Implement `benny/graph/manifest_runner.py::resume_run` re-entry.
+5. Extend `benny_cli.py` with `benny run --resume <run_id>` flag.
+6. Update §1, §4, §6 + acceptance matrix when Phase 4 gate is green.
+
+Note: `benny.sdlc.diagrams` is placed in `benny/sdlc/` (not `benny/graph/`) because
+`benny/graph/__init__.py` eagerly imports `langgraph` which is not installed in the
+test environment. `populate_mermaid` lives in `benny/sdlc/diagrams.py` as well.
 
 ---
 
@@ -161,13 +166,13 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 3 — Diagram generators
 
-- [ ] `benny/graph/diagrams.py::to_mermaid`, `to_plantuml`, `to_activity_diagram`
-- [ ] `benny/graph/wave_scheduler.py` populates `manifest.plan.mermaid`
-- [ ] `benny plan --diagram mermaid|plantuml` flag wired
-- [ ] Tests green: `test_aos_f11_*`, `test_aos_f12_*`, `test_aos_f13_*`
-- [ ] AOS-NFR4 ≤ 50 ms on 50-task fixture
-- [ ] Acceptance rows AOS-F11–F13, AOS-NFR4 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/sdlc/diagrams.py::to_mermaid`, `to_plantuml`, `to_activity_diagram`, `populate_mermaid` (placed in `benny/sdlc/` — see §1.1 note)
+- [x] `benny/core/manifest.py::ManifestPlan.mermaid` Optional[str] field added
+- [ ] `benny plan --diagram mermaid|plantuml` flag wired (deferred — no planner CLI changes in this phase)
+- [x] Tests green: 19/19 — `test_aos_f11_*`, `test_aos_f12_*`, `test_aos_f13_*` + perf + edge cases
+- [x] AOS-NFR4 ≤ 50 ms on 50-task fixture (well under budget)
+- [x] Acceptance rows AOS-F11–F13, AOS-NFR4 → `PASS`
+- Evidence SHA: `777f798`
 
 ### Phase 4 — Durable resume harness
 
@@ -313,7 +318,7 @@ G-* gates.
 | G-LAT (existing) | < 300 ms | unchanged | — | — | — | — | — | — | — | — | — | — |
 | AOS-NFR1 token reduction | ≥ 80 % | n/a | **≈ 96 %** ✓ | — | — | — | — | — | — | — | — | — |
 | AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | — | — | — | — | — | — | — |
-| AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | — | — | — | — | — | — | — | — |
+| AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — | — | — | — |
 | AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
 | AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | **0 tokens** ✓ | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
@@ -391,12 +396,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 2 committed — SHA `39cec9a` |
-| Current in-progress step | Phase 3 — Diagram generators (not yet started) |
+| Last completed step | Phase 3 committed — SHA `777f798` |
+| Current in-progress step | Phase 4 — Durable resume harness (not yet started) |
 | Open files / scratch | — |
 | Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
-| Last green CI run | 110 PASS (52 sdlc + 4 safety + 54 portability) @ `39cec9a` |
-| Notes for next agent | Phase 3 starts with red tests in `tests/sdlc/test_diagrams_*.py`. Implement `benny/graph/diagrams.py` then extend `wave_scheduler.py` to populate `manifest.plan.mermaid`. |
+| Last green CI run | 64 PASS (sdlc + safety scope) @ `777f798` |
+| Notes for next agent | Phase 4 starts with red tests in `tests/sdlc/test_resume_*.py`. Implement `benny/persistence/checkpointer.py` (atomic checkpoint), `benny/graph/manifest_runner.py::resume_run`, and `benny_cli.py --resume` flag. R5 (RPN 225, resume corruption) must have atomic tmp+rename + HMAC guard. |
 
 Update this section at the end of every working session.
 

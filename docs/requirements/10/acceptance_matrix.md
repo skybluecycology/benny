@@ -25,9 +25,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F8  | 2   | `test_aos_f8_layer1_token_budget` (≤ 500 tokens) | PASS | `39cec9a` |
 | AOS-F9  | 2   | `test_aos_f9_activate_returns_schema`, `test_aos_f9_lazy_load` | PASS | `39cec9a` |
 | AOS-F10 | 2   | `test_aos_f10_examples_layer3_optional` | PASS | `39cec9a` |
-| AOS-F11 | 3   | `test_aos_f11_to_mermaid_emits_graph_td`, `test_aos_f11_subgraph_per_wave` | TODO | |
-| AOS-F12 | 3   | `test_aos_f12_to_plantuml_smoke` | TODO | |
-| AOS-F13 | 3   | `test_aos_f13_activity_diagram_per_scenario` | TODO | |
+| AOS-F11 | 3   | `test_aos_f11_to_mermaid_emits_graph_td`, `test_aos_f11_subgraph_per_wave` | PASS | `777f798` |
+| AOS-F12 | 3   | `test_aos_f12_to_plantuml_smoke` | PASS | `777f798` |
+| AOS-F13 | 3   | `test_aos_f13_activity_diagram_per_scenario` | PASS | `777f798` |
 | AOS-F14 | 4   | `test_aos_f14_resume_from_checkpoint`, `test_aos_f14_no_redundant_tasks` | TODO | |
 | AOS-F15 | 4   | `test_aos_f15_pause_resume_across_hosts` (mocked move) | TODO | |
 | AOS-F16 | 4   | `test_aos_f16_time_budget_escalates`, `test_aos_f16_iteration_budget_escalates` | TODO | |
@@ -54,7 +54,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR1  | 1     | `tests/sdlc/test_pbr_token_budget.py` | PASS | `b2259f0` |
 | AOS-NFR2  | 4     | `tests/sdlc/test_resume_latency.py`   | TODO | |
 | AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | TODO | |
-| AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | TODO | |
+| AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | PASS | `777f798` |
 | AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | TODO | |
 | AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | TODO | |
 | AOS-NFR7  | all   | existing `tests/portability/test_no_absolute_paths.py` | TODO | |
