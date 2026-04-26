@@ -145,6 +145,8 @@ class ManifestPlan(BaseModel):
         default_factory=list, description="Computed: [[task_ids in wave 0], ...]"
     )
     ascii_dag: Optional[str] = None
+    # AOS-001 Phase 3: Mermaid diagram populated by benny.sdlc.diagrams.populate_mermaid
+    mermaid: Optional[str] = None
 
 
 # =============================================================================
