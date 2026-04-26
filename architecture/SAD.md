@@ -325,8 +325,56 @@ The `previous_project_pain_points.md` retrospective listed four recurring failur
 | HTTP API (`/api/pypes/*`) | `benny/api/pypes_routes.py` |
 | Studio surface (DAG + drill-down) | `frontend/src/components/Studio/PipelineCanvas.tsx` |
 | Demo manifest + sample trades | `manifests/templates/financial_risk_pipeline.json`, `manifests/templates/data/trades_sample.csv` |
+| Multi-date counterparty market risk demo (pandas) | `manifests/templates/counterparty_market_risk_pipeline.json` + `data/cmr_trades_2026-04-{22,23,24}.csv` |
+| Same DAG, polars backend (for `pypes bench`)      | `manifests/templates/counterparty_market_risk_pipeline_polars.json` |
 
-See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](../docs/operations/PYPES_TRANSFORMATION_GUIDE.md) for the full guide.
+### 9.5.1 Sandbox layer (advisory, non-deterministic)
+
+Above the deterministic flow (`run` / `inspect` / `rerun` / `report`) sit four
+**sandbox** subcommands. They are deliberately advisory and side-effect-free
+relative to run audit data — none of them mutate checkpoints, the manifest
+snapshot, or OpenLineage emissions. Their job is to let users **design with
+an agent**, **get a narrative**, **compare backends**, and **interrogate a
+finished run** without contaminating the audit trail.
+
+```
+                     ╔═══════════════════════════════════╗
+                     ║   DETERMINISTIC CORE (signed)     ║
+                     ║                                   ║
+   manifest.json ──► ║  inspect / run / rerun / report   ║ ──► receipt + checkpoints + reports
+                     ║                                   ║      + OpenLineage events
+                     ╚═══════════════════════════════════╝
+                                  │              ▲
+                          (reads gold)   (writes draft only)
+                                  │              │
+                     ┌────────────┴──────────────┴────────────────┐
+                     │            SANDBOX LAYER                   │
+                     │                                            │
+                     │  pypes plan          → draft manifest      │
+                     │  pypes agent-report  → risk_narrative.md   │
+                     │  pypes bench         → side-by-side perf   │
+                     │  pypes chat          → multi-turn REPL     │
+                     │                                            │
+                     │  All call_model()-routed (offline-aware).  │
+                     │  None ever mutate the deterministic core.  │
+                     └────────────────────────────────────────────┘
+```
+
+| Subcommand | Module | Behaviour |
+|------------|--------|-----------|
+| `pypes plan` | `benny/pypes/planner.py` | LLM authors a `PypesManifest` from English; output validated against the Pydantic schema as a hard gate; CLI `id` and `workspace` flags are authoritative |
+| `pypes agent-report` | `benny/pypes/agent_report.py` | `RiskAnalystAgent` persona + 8 named skills; reads only gold checkpoints + receipt breaches; writes a separate `risk_narrative.md` |
+| `pypes bench` | `benny/pypes/bench.py` | Wraps `Orchestrator().run()` with a `psutil` resource sampler; emits wall-time, CPU s, CPU %, peak RSS, RSS delta, cost, and a parity-diff panel when row counts disagree across runs |
+| `pypes chat` | `benny/pypes/agent_chat.py` | Multi-turn REPL bound to one finished run; loads gold facts once, sends sliding history window each turn; slash commands `/facts`, `/receipt`, `/history`, `/clear`, `/save`, `/help`, `/exit` |
+
+**Why split?** Three properties matter and would fight each other in one
+path: **determinism** (auditors need byte-identical replay), **designability**
+(an engineer needs to iterate on a manifest without ceremony), and
+**explainability** (a risk officer needs a narrative on top of the numbers).
+Splitting them keeps the deterministic core small, signed, and testable
+while the agent surfaces evolve quickly.
+
+See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](../docs/operations/PYPES_TRANSFORMATION_GUIDE.md) for the full guide, including the pandas-vs-polars bench protocol and the chat slash-command reference.
 
 ---
 

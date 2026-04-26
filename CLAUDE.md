@@ -11,7 +11,7 @@ Benny treats **documents**, **code**, and **tabular data** as first-class:
 
 - **Documents** → RAG / Knowledge Graph (`benny/api/rag_routes.py`, `benny/core/adaptive_rag.py`)
 - **Code** → Code Graph + Swarm execution (`benny/api/graph_routes.py`, `benny/graph/swarm.py`)
-- **Tabular data** → Pypes transformation engine (`benny/pypes/`, `benny/api/pypes_routes.py`) — manifest-driven DAG with bronze→silver→gold stages, CLP lineage, checkpoints, drill-down, and explainable financial-risk reports. See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md).
+- **Tabular data** → Pypes transformation engine (`benny/pypes/`, `benny/api/pypes_routes.py`) — manifest-driven DAG with bronze→silver→gold stages, CLP lineage, checkpoints, drill-down, and explainable financial-risk reports. Plus a **sandbox layer** (`pypes plan` / `agent-report` / `bench` / `chat`) for LLM manifest authoring, agent narratives, pandas-vs-polars benchmarks, and multi-turn drill-down — all advisory and side-effect-free relative to the deterministic core. See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md).
 
 ## Where things live
 
@@ -46,6 +46,12 @@ benny pypes inspect manifests/templates/financial_risk_pipeline.json   # validat
 benny pypes run     manifests/templates/financial_risk_pipeline.json --workspace pypes_demo
 benny pypes drilldown <run_id> gold_exposure --workspace pypes_demo    # rows + CLP annotations
 benny pypes rerun    <run_id> --from silver_trades --workspace pypes_demo
+# --- pypes sandbox layer (advisory; never mutates run audit data) ---
+benny pypes plan         "<requirement>" --workspace W [--save] [--run]   # LLM-author a draft manifest
+benny pypes agent-report <run_id>        --workspace W                    # one-shot risk-analyst Markdown narrative
+benny pypes bench        pandas=<m1> polars=<m2> --workspace W [--repeats N]   # head-to-head wall/CPU/RSS/cost
+benny pypes model-bench  manifests/templates/model_comparison_planner.json --workspace W [--judge] [--save-report out.md]   # cross-model time/cost/tokens/accuracy/quality
+benny pypes chat         <run_id>        --workspace W                    # multi-turn risk-analyst REPL grounded on the run
 benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 ```
 

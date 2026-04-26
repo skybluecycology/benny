@@ -11,6 +11,13 @@ Subcommands:
     benny pypes rerun <run_id> --from <step>    (re-execute from step onward)
     benny pypes report <run_id> <report_id>     (re-render a single report)
     benny pypes registry                        (list registered operations)
+
+Sandbox / agent extensions (do NOT alter the deterministic flow):
+    benny pypes plan "<requirement>"            (LLM -> draft manifest)
+    benny pypes agent-report <run_id>           (risk-analyst narrative on a prior run)
+    benny pypes bench <m1> <m2> [...]           (head-to-head perf comparison)
+    benny pypes model-bench <spec.json>         (cross-model planner/agent/QA: time/cost/tokens/accuracy/quality)
+    benny pypes chat <run_id>                   (multi-turn risk-analyst REPL)
 """
 
 from __future__ import annotations
@@ -209,6 +216,66 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
 
     pp.add_parser("registry", help="List every registered operation")
 
+    # ── plan: LLM-author a manifest from a plain-English requirement ─────────
+    p_plan = pp.add_parser(
+        "plan",
+        help="LLM-generate a pypes manifest from a requirement (sandbox; does not run by default)",
+    )
+    p_plan.add_argument("requirement", help="Plain-English description of the pipeline you want")
+    p_plan.add_argument("--workspace", default="default", help="Workspace to bake into the manifest")
+    p_plan.add_argument("--model", default=None, help="Override LLM model id (defaults to BENNY_DEFAULT_MODEL or active local model)")
+    p_plan.add_argument("--id", dest="manifest_id", default=None, help="Force a specific manifest id")
+    p_plan.add_argument("--notes", default=None, help="Extra steering text appended to the prompt")
+    p_plan.add_argument("--save", action="store_true", help="Persist the draft to manifests/drafts/<id>.json")
+    p_plan.add_argument("--out", default=None, help="Explicit output path (overrides --save)")
+    p_plan.add_argument("--run", action="store_true", help="Execute the draft immediately after generation")
+    p_plan.add_argument("--json", action="store_true", help="Emit the draft as JSON to stdout (disables Rich UI)")
+
+    # ── agent-report: risk-analyst persona narrative over a finished run ─────
+    p_ar = pp.add_parser(
+        "agent-report",
+        help="Generate an agent-authored risk narrative from a completed pypes run (sandbox; advisory)",
+    )
+    p_ar.add_argument("run_id", help="Pypes run id (the part after 'pypes-' in the run folder)")
+    p_ar.add_argument("--workspace", default="default")
+    p_ar.add_argument("--model", default=None, help="Override LLM model id")
+    p_ar.add_argument("--out", default=None, help="Path to write risk_narrative.md (defaults to runs/pypes-<id>/reports/)")
+
+    # ── bench: head-to-head performance comparison ───────────────────────────
+    p_bench = pp.add_parser(
+        "bench",
+        help="Run two or more manifests sequentially and compare wall time / CPU / RSS / cost",
+    )
+    p_bench.add_argument("manifests", nargs="+", help="Two or more manifest paths. Optionally prefix a label like 'pandas=path.json'.")
+    p_bench.add_argument("--workspace", default=None, help="Force a workspace for every run")
+    p_bench.add_argument("--repeats", type=int, default=1, help="Run each manifest N times; best wall time wins (default 1)")
+    p_bench.add_argument("--sample-interval", type=float, default=0.05, help="Seconds between resource samples (default 0.05)")
+    p_bench.add_argument("--json", action="store_true", help="Emit a JSON report to stdout (disables Rich UI)")
+
+    # ── model-bench: cross-model planner / agent / chat-qa comparison ────────
+    p_mb = pp.add_parser(
+        "model-bench",
+        help="Run the same task (plan / agent_report / chat_qa) through N LLMs and compare cost / time / tokens / accuracy / quality",
+    )
+    p_mb.add_argument("spec", help="Path to a model-comparison JSON spec (see manifests/templates/model_comparison_planner.json)")
+    p_mb.add_argument("--workspace", default=None, help="Override the workspace baked into the spec")
+    p_mb.add_argument("--repeats", type=int, default=None, help="Override spec.repeats")
+    p_mb.add_argument("--judge", action="store_true", help="Force-enable the LLM judge even if the spec disabled it")
+    p_mb.add_argument("--no-judge", action="store_true", help="Force-disable the LLM judge even if the spec enabled it")
+    p_mb.add_argument("--json", action="store_true", help="Emit results JSON to stdout (disables Rich UI)")
+    p_mb.add_argument("--save-report", default=None, help="Write a Markdown scorecard to the given path")
+
+    # ── chat: multi-turn risk-analyst REPL ───────────────────────────────────
+    p_chat = pp.add_parser(
+        "chat",
+        help="Open a multi-turn conversation with the risk-analyst agent over a finished run",
+    )
+    p_chat.add_argument("run_id", help="Pypes run id to load gold facts from")
+    p_chat.add_argument("--workspace", default="default")
+    p_chat.add_argument("--model", default=None, help="Override LLM model id")
+    p_chat.add_argument("--system", default=None, help="Override system prompt entirely (advanced)")
+    p_chat.add_argument("--max-history", type=int, default=20, help="Max prior turns to send back to the model (default 20)")
+
 
 # =============================================================================
 # DISPATCH
@@ -234,6 +301,16 @@ def cmd_pypes(args: argparse.Namespace) -> int:
         return _cmd_report(args)
     if cmd == "registry":
         return _cmd_registry(args)
+    if cmd == "plan":
+        return _cmd_plan(args)
+    if cmd == "agent-report":
+        return _cmd_agent_report(args)
+    if cmd == "bench":
+        return _cmd_bench(args)
+    if cmd == "model-bench":
+        return _cmd_model_bench(args)
+    if cmd == "chat":
+        return _cmd_chat(args)
     console.print(f"[bold red]unknown pypes subcommand:[/] {cmd}")
     return 1
 
@@ -866,6 +943,591 @@ def _print_receipt_panel(receipt: RunReceipt) -> None:
         ))
 
     console.print()
+
+
+# =============================================================================
+# SANDBOX EXTENSIONS — planner + agent-report
+#
+# Both commands sit OUTSIDE the deterministic flow. The declarative pipeline
+# (run/inspect/rerun/report) remains the source of truth. ``plan`` only emits
+# a draft manifest the user reviews; ``agent-report`` only reads finished gold
+# artifacts and writes a separate narrative file. Neither can mutate run data.
+# =============================================================================
+
+
+def _cmd_plan(args: argparse.Namespace) -> int:
+    from .planner import plan_pypes_manifest
+
+    # ── Header ───────────────────────────────────────────────────────────────
+    if not args.json:
+        console.print()
+        console.print(Panel.fit(
+            f"[bold white]Requirement[/]\n[white]{args.requirement}[/]\n\n"
+            f"[bold white]Workspace[/]   [accent]{args.workspace}[/]\n"
+            f"[bold white]Model[/]       [accent]{args.model or 'auto'}[/]\n"
+            f"[bold white]Mode[/]        [muted]sandbox  ·  draft only (no execution unless --run)[/]",
+            title="[bold cyan]  Benny Pypes — Planner [/]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+        console.print()
+
+    # ── LLM call ─────────────────────────────────────────────────────────────
+    try:
+        if args.json:
+            manifest, meta = plan_pypes_manifest(
+                requirement=args.requirement,
+                workspace=args.workspace,
+                model=args.model,
+                manifest_id=args.manifest_id,
+                extra_notes=args.notes,
+            )
+        else:
+            with console.status("[cyan]Calling LLM to draft manifest...[/]", spinner="dots"):
+                manifest, meta = plan_pypes_manifest(
+                    requirement=args.requirement,
+                    workspace=args.workspace,
+                    model=args.model,
+                    manifest_id=args.manifest_id,
+                    extra_notes=args.notes,
+                )
+    except Exception as exc:
+        console.print(Panel(
+            f"[red]{exc}[/]",
+            title="[bold red] Planner Failed [/]",
+            border_style="red",
+            padding=(0, 1),
+        ))
+        return 1
+
+    # ── JSON mode: dump and exit ─────────────────────────────────────────────
+    if args.json:
+        print(manifest.model_dump_json(indent=2))
+        return 0
+
+    # ── Render the draft summary panel ───────────────────────────────────────
+    bronze = sum(1 for s in manifest.steps if s.stage.value == "bronze")
+    silver = sum(1 for s in manifest.steps if s.stage.value == "silver")
+    gold   = sum(1 for s in manifest.steps if s.stage.value == "gold")
+
+    console.print(Panel.fit(
+        f"[bold white]Draft id[/]    [accent]{manifest.id}[/]\n"
+        f"[bold white]Name[/]        [white]{manifest.name}[/]\n"
+        f"[bold white]Steps[/]       [white]{len(manifest.steps)}[/]  "
+        f"[muted]bronze={bronze}  silver={silver}  gold={gold}[/]\n"
+        f"[bold white]Reports[/]     [white]{len(manifest.reports)}[/]\n"
+        f"[bold white]Resolved model[/] [muted]{meta.get('model')}[/]",
+        title="[bold green]  Draft Manifest [/]",
+        border_style="green",
+        padding=(0, 2),
+    ))
+    console.print()
+
+    # Compact step table
+    step_tbl = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan",
+                     border_style="dim", expand=True, title="[bold]Generated Pipeline DAG[/]")
+    step_tbl.add_column("Stage",   width=8,  justify="center")
+    step_tbl.add_column("Step ID", min_width=22, style="bold white")
+    step_tbl.add_column("Engine",  width=8,  justify="center", style="muted")
+    step_tbl.add_column("Inputs",  ratio=1,  style="muted")
+    step_tbl.add_column("Outputs", ratio=1)
+    for s in manifest.steps:
+        stage_style = _STAGE_STYLE.get(s.stage.value, "white")
+        step_tbl.add_row(
+            Text(f" {s.stage.value.upper()} ", style=stage_style),
+            s.id, s.engine.value,
+            ", ".join(s.inputs) if s.inputs else "[source]",
+            ", ".join(s.outputs) if s.outputs else "-",
+        )
+    console.print(step_tbl)
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+    out_path: Optional[Path] = None
+    if args.out:
+        out_path = Path(args.out)
+    elif args.save:
+        drafts_dir = Path.cwd() / "manifests" / "drafts"
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        out_path = drafts_dir / f"{manifest.id}.json"
+
+    if out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        console.print()
+        console.print(Panel.fit(
+            f"[bold white]Saved draft[/]  [link=file://{out_path}]{out_path}[/link]",
+            title="[bold green]  Persisted [/]",
+            border_style="green",
+            padding=(0, 2),
+        ))
+
+    # ── Optional immediate run ───────────────────────────────────────────────
+    if args.run:
+        console.print()
+        console.print(Rule("[bold cyan] Executing draft manifest [/]"))
+        run_args = argparse.Namespace(
+            manifest=str(out_path) if out_path else None,
+            workspace=args.workspace,
+            resume_run_id=None,
+            only=[],
+            var=[],
+            json=False,
+        )
+        # If the caller didn't ask to save, materialise a temp file so the
+        # orchestrator's manifest snapshot path stays intact.
+        if not out_path:
+            tmp_dir = Path.cwd() / "manifests" / "drafts"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = tmp_dir / f"{manifest.id}.json"
+            tmp_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+            run_args.manifest = str(tmp_path)
+            console.print(f"[muted](draft persisted to {tmp_path} for execution)[/]")
+        return _cmd_run(run_args)
+
+    console.print()
+    console.print("[muted]Tip: re-run with [/][accent]--run[/][muted] to execute, or pass the saved file to[/] [accent]benny pypes run[/]")
+    console.print()
+    return 0
+
+
+def _cmd_agent_report(args: argparse.Namespace) -> int:
+    from .agent_report import RiskAnalystAgent, generate_risk_narrative
+
+    ws_root = _workspace_root(args.workspace)
+    run_dir = ws_root / "runs" / f"pypes-{args.run_id}"
+    if not run_dir.exists():
+        console.print(f"[bold red]Run not found:[/] {args.run_id}  [muted](looked in {run_dir})[/]")
+        return 1
+
+    agent = RiskAnalystAgent()
+
+    console.print()
+    console.print(Panel.fit(
+        f"[bold white]Run[/]         [accent]{args.run_id}[/]\n"
+        f"[bold white]Workspace[/]   [accent]{args.workspace}[/]\n"
+        f"[bold white]Agent[/]       [accent]{agent.name}[/]  [muted](v2 sandbox; advisory only)[/]\n"
+        f"[bold white]Skills[/]      [muted]{', '.join(agent.skills[:4])}...[/]",
+        title="[bold cyan]  Benny Pypes — Agent Risk Report (v2) [/]",
+        border_style="cyan",
+        padding=(0, 2),
+    ))
+    console.print()
+
+    out_path = Path(args.out) if args.out else None
+    try:
+        with console.status("[cyan]Risk-analyst agent reasoning over gold artifacts...[/]", spinner="dots"):
+            markdown, written, meta = generate_risk_narrative(
+                workspace_root=ws_root,
+                run_id=args.run_id,
+                model=args.model,
+                agent=agent,
+                out_path=out_path,
+            )
+    except Exception as exc:
+        console.print(Panel(
+            f"[red]{exc}[/]",
+            title="[bold red] Agent Report Failed [/]",
+            border_style="red",
+            padding=(0, 1),
+        ))
+        return 1
+
+    # Compact preview (first 2k chars) so the user sees the narrative inline
+    preview = markdown if len(markdown) <= 2400 else markdown[:2400] + "\n\n... [truncated — full narrative in file]"
+    console.print(Panel(
+        preview,
+        title=f"[bold green]  Risk Narrative — preview [/]",
+        border_style="green",
+        padding=(1, 2),
+    ))
+
+    console.print()
+    console.print(Panel.fit(
+        f"[bold white]Written[/]   [link=file://{written}]{written}[/link]\n"
+        f"[bold white]Model[/]     [muted]{meta.get('model')}[/]\n"
+        f"[bold white]Tables[/]    [muted]{', '.join(meta.get('tables_consumed', []))}[/]",
+        title="[bold green]  Narrative Saved [/]",
+        border_style="green",
+        padding=(0, 2),
+    ))
+    console.print()
+    return 0
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from .bench import parity_diff, run_bench, speedup_vs
+
+    # Parse "label=path" or bare path (auto-label from filename stem).
+    pairs: List[tuple] = []
+    seen_labels: set = set()
+    for item in args.manifests:
+        if "=" in item:
+            label, path = item.split("=", 1)
+        else:
+            path = item
+            label = Path(path).stem
+        # Disambiguate duplicates so the comparison table stays readable.
+        base = label
+        n = 2
+        while label in seen_labels:
+            label = f"{base}-{n}"
+            n += 1
+        seen_labels.add(label)
+        pairs.append((label, path))
+
+    if len(pairs) < 2:
+        console.print("[bold red]bench requires at least two manifests[/]")
+        return 2
+
+    if not args.json:
+        console.print()
+        console.print(Panel.fit(
+            f"[bold white]Manifests[/]   [white]{len(pairs)}[/]  [muted]({', '.join(p[0] for p in pairs)})[/]\n"
+            f"[bold white]Workspace[/]   [accent]{args.workspace or '(per-manifest)'}[/]\n"
+            f"[bold white]Repeats[/]     [white]{args.repeats}[/]  [muted](best wall time per label wins)[/]\n"
+            f"[bold white]Sampler[/]     [muted]{args.sample_interval}s interval, psutil RSS+CPU[/]",
+            title="[bold cyan]  Benny Pypes — Performance Bench [/]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+        console.print()
+
+    # Capture pypes log noise so per-run output doesn't tear up the report.
+    _log_handler = _capture_pypes_logs()
+    try:
+        if args.json:
+            results = run_bench(pairs, workspace=args.workspace, repeats=args.repeats,
+                                sample_interval=args.sample_interval)
+        else:
+            with console.status("[cyan]Running benchmarks...[/]", spinner="dots"):
+                results = run_bench(pairs, workspace=args.workspace, repeats=args.repeats,
+                                    sample_interval=args.sample_interval)
+    finally:
+        _release_pypes_logs(_log_handler)
+
+    if args.json:
+        import json as _json
+        payload = []
+        for r in results:
+            payload.append({
+                "label": r.label, "manifest_id": r.manifest_id, "engine": r.engine,
+                "status": r.status, "wall_seconds": r.wall_seconds,
+                "cpu_seconds": r.cpu_seconds, "cpu_percent_mean": r.cpu_percent_mean,
+                "cpu_percent_max": r.cpu_percent_max, "rss_mb_baseline": r.rss_mb_baseline,
+                "rss_mb_peak": r.rss_mb_peak, "rss_mb_delta": r.rss_mb_delta,
+                "samples": r.samples, "cost_usd": r.cost_usd,
+                "total_rows": r.total_rows, "error": r.error,
+            })
+        print(_json.dumps(payload, indent=2))
+        return 0 if all(r.status != "FAILED" for r in results) else 1
+
+    # ── Headline comparison table ───────────────────────────────────────────
+    fastest = min(results, key=lambda r: r.wall_seconds if not r.error else float("inf"))
+    cheapest = min(results, key=lambda r: r.cost_usd if not r.error else float("inf"))
+    smallest = min(results, key=lambda r: r.rss_mb_peak if not r.error else float("inf"))
+
+    bench_tbl = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan",
+                      border_style="dim", expand=False, title="[bold]Head-to-Head Results[/]",
+                      pad_edge=False)
+    bench_tbl.add_column("Label",       min_width=10, style="bold white")
+    bench_tbl.add_column("Engine",      min_width=7,  justify="center", style="muted")
+    bench_tbl.add_column("Status",      min_width=10, justify="center")
+    bench_tbl.add_column("Wall s",      justify="right")
+    bench_tbl.add_column("CPU s",       justify="right", style="muted")
+    bench_tbl.add_column("CPU%avg",     justify="right", style="muted")
+    bench_tbl.add_column("CPU%max",     justify="right", style="muted")
+    bench_tbl.add_column("RSS MB",      justify="right")
+    bench_tbl.add_column("RSS Δ",       justify="right", style="muted")
+    bench_tbl.add_column("Cost $",      justify="right")
+    bench_tbl.add_column("Rows",        justify="right", style="muted")
+
+    for r in results:
+        wall_cell = Text(f"{r.wall_seconds:.3f}", style="bold green") if r is fastest else Text(f"{r.wall_seconds:.3f}")
+        rss_cell  = Text(f"{r.rss_mb_peak:,.1f}", style="bold green") if r is smallest else Text(f"{r.rss_mb_peak:,.1f}")
+        cost_cell = Text(f"{r.cost_usd:.6f}", style="bold green") if r is cheapest else Text(f"{r.cost_usd:.6f}")
+        bench_tbl.add_row(
+            r.label, r.engine, _status_text(r.status),
+            wall_cell, f"{r.cpu_seconds:.2f}",
+            f"{r.cpu_percent_mean:.0f}%", f"{r.cpu_percent_max:.0f}%",
+            rss_cell, f"{r.rss_mb_delta:+,.1f}",
+            cost_cell, f"{r.total_rows:,}",
+        )
+    console.print(bench_tbl)
+
+    # ── Verdict panel ────────────────────────────────────────────────────────
+    if len(results) == 2 and not any(r.error for r in results):
+        a, b = results[0], results[1]
+        speedup_b = speedup_vs(a, b)
+        rss_ratio = round(a.rss_mb_peak / b.rss_mb_peak, 3) if b.rss_mb_peak else 0
+        cost_ratio = round(a.cost_usd / b.cost_usd, 3) if b.cost_usd else 0
+        verdict = (
+            f"[bold white]Wall speed[/]   [accent]{b.label}[/] is "
+            f"[bold green]{speedup_b}x[/] vs [accent]{a.label}[/]\n"
+            f"[bold white]Peak RSS[/]     [accent]{a.label}[/] / [accent]{b.label}[/] = [bold]{rss_ratio}[/]\n"
+            f"[bold white]Cost ratio[/]   [accent]{a.label}[/] / [accent]{b.label}[/] = [bold]{cost_ratio}[/]\n"
+            f"[bold white]Fastest[/]      [bold green]{fastest.label}[/]\n"
+            f"[bold white]Cheapest[/]     [bold green]{cheapest.label}[/]\n"
+            f"[bold white]Smallest mem[/] [bold green]{smallest.label}[/]"
+        )
+        console.print()
+        console.print(Panel.fit(verdict, title="[bold cyan]  Verdict [/]",
+                                border_style="cyan", padding=(0, 2)))
+
+    # ── Parity diff (only if engines disagree) ──────────────────────────────
+    diffs = parity_diff(results)
+    if diffs:
+        console.print()
+        diff_tbl = Table(box=box.SIMPLE, show_header=True, header_style="bold yellow",
+                         border_style="dim", expand=False, title="[bold yellow]Parity Disagreement[/]")
+        diff_tbl.add_column("Step", style="bold white")
+        for r in results:
+            diff_tbl.add_column(r.label, justify="right")
+        for d in diffs:
+            row = [d["step"]]
+            for r in results:
+                row.append(str(d.get(r.label, "?")))
+            diff_tbl.add_row(*row)
+        console.print(Panel(diff_tbl, title="[bold yellow]  Engines disagree on row counts — investigate before trusting the headline  [/]",
+                            border_style="yellow", padding=(0, 1)))
+    elif len(results) >= 2 and all(not r.error for r in results):
+        console.print()
+        console.print(Panel.fit(
+            f"[bold green]Row-count parity confirmed across {len(results)} runs.[/]",
+            border_style="green", padding=(0, 2),
+        ))
+
+    console.print()
+    return 0 if all(r.status != "FAILED" for r in results) else 1
+
+
+def _cmd_model_bench(args: argparse.Namespace) -> int:
+    """Cross-model planner / agent / chat-qa head-to-head.
+
+    Reads a JSON spec, runs every (model, repeat) trial sequentially, then
+    renders a Rich scorecard covering wall time, tokens in/out, content size,
+    cost, auto-rubric accuracy, and (optional) LLM-judge quality.
+    """
+    from .model_compare import (
+        load_spec, run_model_comparison,
+    )
+
+    try:
+        spec = load_spec(args.spec)
+    except Exception as exc:
+        console.print(f"[bold red]Bad spec:[/] {exc}")
+        return 2
+
+    if args.workspace:
+        spec.workspace = args.workspace
+    if args.repeats is not None:
+        spec.repeats = max(1, args.repeats)
+    if args.judge:
+        spec.judge.enabled = True
+    if args.no_judge:
+        spec.judge.enabled = False
+
+    if not args.json:
+        models_str = ", ".join(m.label for m in spec.models)
+        console.print()
+        console.print(Panel.fit(
+            f"[bold white]Spec[/]         [accent]{spec.id}[/]  [muted]({spec.name})[/]\n"
+            f"[bold white]Task[/]         [accent]{spec.task}[/]\n"
+            f"[bold white]Workspace[/]    [accent]{spec.workspace}[/]\n"
+            f"[bold white]Models[/]       [white]{len(spec.models)}[/]  [muted]({models_str})[/]\n"
+            f"[bold white]Repeats[/]      [white]{spec.repeats}[/]  [muted](best wall time per model wins)[/]\n"
+            f"[bold white]Judge[/]        " + (
+                f"[accent]{spec.judge.model}[/]" if spec.judge.enabled else "[muted]disabled[/]"
+            ),
+            title="[bold cyan]  Benny Pypes — Model Comparison [/]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+        console.print()
+
+    _log_handler = _capture_pypes_logs()
+    try:
+        if args.json:
+            result = run_model_comparison(spec)
+        else:
+            with console.status("[cyan]Running trials...[/]", spinner="dots"):
+                result = run_model_comparison(spec)
+    finally:
+        _release_pypes_logs(_log_handler)
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, default=str))
+        return 0 if all(t.status == "OK" for t in result.trials) else 1
+
+    best = result.best_per_model()
+    ok_trials = [t for t in best if not t.error]
+
+    # Highlight winners per metric
+    fastest  = min(ok_trials, key=lambda t: t.wall_seconds, default=None)
+    cheapest = min(ok_trials, key=lambda t: t.cost_usd,     default=None)
+    leanest  = min(ok_trials, key=lambda t: t.total_tokens, default=None)
+    sharpest = max(ok_trials, key=lambda t: t.quality_score, default=None)
+
+    tbl = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan",
+                border_style="dim", expand=False, title="[bold]Cross-Model Scorecard[/]",
+                pad_edge=False)
+    tbl.add_column("Label",        min_width=12, style="bold white")
+    tbl.add_column("Status",       min_width=8,  justify="center")
+    tbl.add_column("Wall s",       justify="right")
+    tbl.add_column("Tok in",       justify="right", style="muted")
+    tbl.add_column("Tok out",      justify="right", style="muted")
+    tbl.add_column("Resp chars",   justify="right", style="muted")
+    tbl.add_column("Cost $",       justify="right")
+    tbl.add_column("CPU%avg",      justify="right", style="muted")
+    tbl.add_column("RSS MB",       justify="right", style="muted")
+    tbl.add_column("Auto",         justify="right")
+    tbl.add_column("Judge",        justify="right")
+    tbl.add_column("Quality",      justify="right")
+
+    def _hl(t, win, fmt):
+        cell = fmt(t)
+        if win is not None and t is win and not t.error:
+            return Text(cell, style="bold green")
+        return Text(cell)
+
+    for t in best:
+        judge_cell = "-" if t.judge_score is None else f"{t.judge_score.total:.1f}/10"
+        tbl.add_row(
+            t.label,
+            _status_text(t.status),
+            _hl(t, fastest,  lambda x: f"{x.wall_seconds:.2f}"),
+            f"{t.prompt_tokens:,}",
+            f"{t.completion_tokens:,}",
+            f"{t.response_chars:,}",
+            _hl(t, cheapest, lambda x: f"{x.cost_usd:.6f}"),
+            f"{t.cpu_percent_mean:.0f}%",
+            f"{t.rss_mb_peak:,.0f}",
+            f"{t.auto_scores.total:.2f}",
+            judge_cell,
+            _hl(t, sharpest, lambda x: f"{x.quality_score:.2f}"),
+        )
+    console.print(tbl)
+
+    # Verdict panel
+    if ok_trials:
+        lines = [
+            f"[bold white]Fastest[/]        [bold green]{fastest.label}[/]   [muted]{fastest.wall_seconds:.2f}s[/]",
+            f"[bold white]Cheapest[/]       [bold green]{cheapest.label}[/]  [muted]${cheapest.cost_usd:.6f}[/]",
+            f"[bold white]Fewest tokens[/]  [bold green]{leanest.label}[/]   [muted]{leanest.total_tokens:,} tok total[/]",
+            f"[bold white]Best quality[/]   [bold green]{sharpest.label}[/]  [muted]{sharpest.quality_score:.2f} blended[/]",
+        ]
+        console.print()
+        console.print(Panel.fit("\n".join(lines), title="[bold cyan]  Winners [/]",
+                                border_style="cyan", padding=(0, 2)))
+
+    # Failures panel — surface upstream errors so the user knows what to fix.
+    failed = [t for t in best if t.error]
+    if failed:
+        console.print()
+        f_tbl = Table(box=box.SIMPLE, show_header=True, header_style="bold red",
+                      border_style="dim", expand=False)
+        f_tbl.add_column("Label", style="bold white")
+        f_tbl.add_column("Error",  style="red")
+        for t in failed:
+            f_tbl.add_row(t.label, (t.error or "")[:140])
+        console.print(Panel(f_tbl, title="[bold red]  Trials that failed [/]",
+                            border_style="red", padding=(0, 1)))
+
+    # Pointer to artifacts
+    console.print()
+    console.print(
+        f"[muted]Per-trial outputs:[/] [accent]{result.output_dir}[/]\n"
+        f"[muted]Structured results:[/] [accent]{result.output_dir}/results.json[/]"
+    )
+
+    if args.save_report:
+        md = _render_compare_markdown(result)
+        try:
+            Path(args.save_report).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.save_report).write_text(md, encoding="utf-8")
+            console.print(f"[muted]Markdown scorecard:[/] [accent]{args.save_report}[/]")
+        except Exception as exc:
+            console.print(f"[red]Failed to write report:[/] {exc}")
+
+    console.print()
+    return 0 if all(t.status == "OK" for t in result.trials) else 1
+
+
+def _render_compare_markdown(result) -> str:
+    """Stand-alone Markdown scorecard suitable for sharing in PRs / docs."""
+    best = result.best_per_model()
+    lines: List[str] = [
+        f"# Model comparison — {result.spec_name}",
+        "",
+        f"- Spec id: `{result.spec_id}`",
+        f"- Task: `{result.task}`",
+        f"- Workspace: `{result.workspace}`",
+        f"- Started:  {result.started_at}",
+        f"- Finished: {result.finished_at}",
+        f"- Output dir: `{result.output_dir}`",
+        "",
+        "## Scorecard (best run per model)",
+        "",
+        "| Label | Status | Wall s | Tok in | Tok out | Resp chars | Cost $ | CPU%avg | RSS MB | Auto | Judge | Quality |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for t in best:
+        judge_cell = "-" if t.judge_score is None else f"{t.judge_score.total:.1f}/10"
+        lines.append(
+            f"| {t.label} | {t.status} | {t.wall_seconds:.2f} | "
+            f"{t.prompt_tokens:,} | {t.completion_tokens:,} | {t.response_chars:,} | "
+            f"{t.cost_usd:.6f} | {t.cpu_percent_mean:.0f}% | {t.rss_mb_peak:.0f} | "
+            f"{t.auto_scores.total:.2f} | {judge_cell} | {t.quality_score:.2f} |"
+        )
+    lines += ["", "## Per-trial detail", ""]
+    for t in result.trials:
+        lines += [
+            f"### {t.label}  (repeat {t.repeat_idx})",
+            "",
+            f"- model id: `{t.model_id}`",
+            f"- status: **{t.status}**" + (f"  — error: `{t.error}`" if t.error else ""),
+            f"- wall: {t.wall_seconds:.3f}s   cpu: {t.cpu_seconds:.3f}s   cpu%avg: {t.cpu_percent_mean:.0f}",
+            f"- tokens: {t.prompt_tokens:,} in / {t.completion_tokens:,} out  ({t.total_tokens:,} total)",
+            f"- response: {t.response_chars:,} chars  -> `{t.response_path}`",
+            f"- cost: ${t.cost_usd:.6f}",
+            f"- auto-rubric: {t.auto_scores.total:.2f}  detail: `{json.dumps(t.auto_scores.detail, default=str)[:200]}`",
+        ]
+        if t.judge_score is not None:
+            lines.append(
+                f"- judge: completeness={t.judge_score.completeness} "
+                f"faithfulness={t.judge_score.faithfulness} "
+                f"usability={t.judge_score.usability}  -> {t.judge_score.total:.1f}/10"
+            )
+            if t.judge_score.rationale:
+                lines.append(f"- judge rationale: {t.judge_score.rationale}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _cmd_chat(args: argparse.Namespace) -> int:
+    from .agent_chat import ChatHarness
+
+    ws_root = _workspace_root(args.workspace)
+    run_dir = ws_root / "runs" / f"pypes-{args.run_id}"
+    if not run_dir.exists():
+        console.print(f"[bold red]Run not found:[/] {args.run_id}  [muted]({run_dir})[/]")
+        return 1
+
+    try:
+        harness = ChatHarness(
+            workspace_root=ws_root,
+            run_id=args.run_id,
+            model=args.model,
+            system_override=args.system,
+            max_history=args.max_history,
+            console=console,
+        )
+    except Exception as exc:
+        console.print(Panel(f"[red]{exc}[/]", title="[bold red] Chat init failed [/]",
+                            border_style="red", padding=(0, 1)))
+        return 1
+
+    harness.run_loop()
+    return 0
 
 
 # =============================================================================

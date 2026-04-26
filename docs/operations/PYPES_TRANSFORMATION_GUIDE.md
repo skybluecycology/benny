@@ -208,6 +208,245 @@ The signed `receipt.json` plus the `manifest_snapshot.json` give you a tamper-ev
 
 ---
 
+## Sandbox layer — planner, agent reports, bench, chat
+
+Above the deterministic flow (`run` / `inspect` / `rerun` / `report`) sit four
+**sandbox** subcommands that are deliberately advisory and side-effect-free.
+They never mutate run data, never alter the manifest snapshot, and never
+appear in OpenLineage. They exist so a user can *design with an agent*,
+*get a narrative*, *compare backends*, and *interrogate a finished run*
+without contaminating the audit trail.
+
+| Subcommand | Purpose | Mutates run data? |
+|------------|---------|-------------------|
+| `pypes plan "<requirement>"` | LLM-generates a draft `PypesManifest` from English | No — writes a draft JSON only |
+| `pypes agent-report <run_id>` | Persona-driven Markdown narrative on top of gold reports | No — writes `risk_narrative.md` next to existing reports |
+| `pypes bench <m1> <m2> [...]` | Sequentially runs N manifests over the same workspace and compares wall-time, CPU, RSS, cost | The runs are real (each gets its own `pypes-<id>/`); the comparison itself is read-only |
+| `pypes model-bench <spec.json>` | Runs the **same task** (planner / agent-report / chat-qa) through N LLMs and scores each on time, cost, tokens, content size, accuracy, quality | No — writes to `${benny_home}/runs/model-compare/<id>/` only |
+| `pypes chat <run_id>` | Multi-turn risk-analyst REPL grounded against a finished run's gold facts | No — optional `/save` writes a transcript file |
+
+### `pypes plan` — LLM authors a draft manifest
+
+```bash
+benny pypes plan "ingest 3 days of options trades, mark by delta bucket, and produce a gold view by underlier" \
+  --workspace pypes_demo --save
+# review manifests/drafts/<id>.json, then:
+benny pypes run manifests/drafts/<id>.json --workspace pypes_demo
+
+# Or one-shot:
+benny pypes plan "..." --workspace pypes_demo --save --run
+```
+
+The planner routes through `call_model()` (offline-aware, never touches
+LiteLLM directly per CLAUDE.md rule #1). The system prompt embeds the live
+operation registry plus a minimal valid example. Output is parsed (handles
+raw JSON, fenced ` ```json ` blocks, or chatty wrappers) and validated
+against the `PypesManifest` Pydantic model as a hard gate. The CLI flag wins
+for `id` and `workspace` so successive `--save` attempts diff cleanly.
+
+Default model: `--model` → `$BENNY_DEFAULT_MODEL` → `get_active_model()`
+(probes local providers) → `ollama/llama3.1`.
+
+### `pypes agent-report` — risk-analyst narrative
+
+```bash
+benny pypes agent-report <run_id> --workspace pypes_demo
+```
+
+A `RiskAnalystAgent` persona ("15-yr senior market-risk analyst") with eight
+named skills (counterparty concentration, country/sovereign, DV01/Vega
+attribution, BCBS-239 / FRTB framing, etc.) reads **only** gold checkpoints
+and the breach roll-up from the receipt — never raw CSVs. It writes a
+separate `runs/pypes-<id>/reports/risk_narrative.md` with seven mandatory
+sections (Headline, Top exposures, Concentration callouts, Top risk drivers,
+Day-over-day movement, Threshold breaches, Recommended actions) — each
+required to cite specific counterparty ids / ISINs / USD values from the
+JSON, never to invent them.
+
+### `pypes bench` — head-to-head performance
+
+```bash
+# Compare engines on the same DAG (one each — minimum two manifests)
+benny pypes bench \
+  pandas=manifests/templates/counterparty_market_risk_pipeline.json \
+  polars=manifests/templates/counterparty_market_risk_pipeline_polars.json \
+  --workspace pypes_demo
+
+# Repeat each manifest 3 times, best wall-clock wins (defends against OS hiccups)
+benny pypes bench pandas=... polars=... --workspace pypes_demo --repeats 3
+
+# Emit a JSON report instead of the Rich UI
+benny pypes bench pandas=... polars=... --workspace pypes_demo --json
+```
+
+The harness wraps each `Orchestrator().run()` call with a `psutil`-driven
+sampler (50 ms by default) and reports:
+
+| Column | Meaning |
+|--------|---------|
+| `Wall s`     | End-to-end wall-clock seconds |
+| `CPU s`      | Process user+system CPU time consumed during the run |
+| `CPU%avg`    | Mean of non-zero process CPU% samples |
+| `CPU%max`    | Peak process CPU% sample (can exceed 100% on multi-core) |
+| `RSS MB`     | Peak resident set size of the Python process |
+| `RSS Δ`      | RSS growth from start to end (proxy for retained allocations) |
+| `Cost $`     | `wall_seconds × $/hr / 3600` (default $0.20/hr; override `BENNY_COMPUTE_COST_USD_PER_HOUR`) |
+| `Rows`       | Sum of all step row counts — should match across runs (parity check) |
+
+The verdict panel highlights **fastest**, **cheapest**, and **smallest mem**
+labels; a **parity diff** table appears only when row counts disagree
+between runs (so the headline number is never silently misleading).
+
+### `pypes model-bench` — same task, N models, head-to-head scorecard
+
+Where `pypes bench` compares two **manifests** (e.g. pandas vs polars on the
+same DAG), `pypes model-bench` compares two **models** on the same prompt —
+useful when you're picking which local LLM to standardise on for the planner,
+risk-narrative, or chat workflows.
+
+```bash
+# Cross-model planner comparison (4 local models authoring the same pipeline)
+benny pypes model-bench manifests/templates/model_comparison_planner.json \
+  --workspace pypes_demo
+
+# Repeat each model 3 times (best wall time per model wins) + LLM judge
+benny pypes model-bench manifests/templates/model_comparison_planner.json \
+  --workspace pypes_demo --repeats 3 --judge
+
+# Headless: structured JSON + Markdown scorecard for PRs / docs
+benny pypes model-bench manifests/templates/model_comparison_planner.json \
+  --workspace pypes_demo --json
+benny pypes model-bench manifests/templates/model_comparison_planner.json \
+  --workspace pypes_demo --save-report ./model_compare.md
+```
+
+**Spec schema** (`ModelCompareSpec` — see
+`manifests/templates/model_comparison_planner.json`):
+
+| Field | Purpose |
+|-------|---------|
+| `task`                  | `plan` \| `agent_report` \| `chat_qa` — picks the prompt-builder + auto-rubric |
+| `requirement` / `run_id` / `question` | Task-specific inputs (planner needs `requirement`; agent-report + chat-qa need `run_id`; chat-qa also needs `question`) |
+| `models[].id`           | Routable model id passed to `call_model()` (`lemonade/...`, `ollama/...`, `openai/gpt-4o`, …) |
+| `models[].cost_per_1k_in` / `cost_per_1k_out` | Set for paid models → token-based pricing. Unset for local → falls back to compute pricing (`$BENNY_COMPUTE_COST_USD_PER_HOUR`) |
+| `repeats`               | N runs per model; best wall-time wins (defends against OS hiccups) |
+| `rubric_required_ops`   | (planner only) Operations the manifest MUST use to score full points |
+| `rubric_min_steps` / `rubric_min_gold_steps` | (planner only) Minimum DAG shape thresholds |
+| `judge.enabled` / `judge.model` | Optional: a second LLM scores each candidate 0-10 on completeness / faithfulness / usability |
+| `output_dir`            | `${benny_home}/runs/model-compare` by default — portable per SR-1 |
+
+**Scorecard columns** (best run per model is the headline; full per-trial
+detail lands in `results.json`):
+
+| Column | Meaning |
+|--------|---------|
+| `Wall s`     | End-to-end wall-clock for the LLM call |
+| `Tok in / Tok out` | Counted via `cl100k_base` (tiktoken) — provider-agnostic |
+| `Resp chars` | Raw response size (whitespace + JSON / Markdown payload) |
+| `Cost $`     | Token-priced when `cost_per_1k_*` set; else compute-priced from wall time |
+| `CPU%avg` / `RSS MB` | Process resource envelope during the call (psutil sampler) |
+| `Auto`       | Auto-rubric score in [0, 1] — schema validity, required-ops coverage, step count, gold-presence, validations, reports, non-empty response |
+| `Judge`      | (Optional) blended 0-10 judge rating — completeness, faithfulness, usability + rationale |
+| `Quality`    | Blended quality score: 60% auto-rubric + 40% normalised judge |
+
+The verdict panel highlights **fastest**, **cheapest**, **fewest tokens**, and
+**best quality**. Failed trials surface in a separate red panel with their
+upstream error (e.g. `Max length reached!` if the model's context window
+isn't big enough — see `BENNY_PYPES_FACTS_CHAR_BUDGET`).
+
+Per-trial raw output (manifest JSON for `plan`, Markdown for
+`agent_report` / `chat_qa`) is written to
+`${benny_home}/runs/model-compare/<spec.id>/<label>__r<N>.<ext>` so you can
+diff candidate manifests by hand.
+
+### `pypes chat` — drill-down conversation
+
+```bash
+benny pypes chat <run_id> --workspace pypes_demo
+```
+
+Opens a multi-turn REPL bound to one finished run. The system prompt is
+built once from the run's gold facts (top 12 rows per gold table + breach
+roll-up); each user turn is sent with a sliding window of conversation
+history (capped by `--max-history`, default 20). Slash commands:
+
+| Command | Action |
+|---------|--------|
+| `/facts`   | Show loaded gold tables (rows × cols × stage) |
+| `/receipt` | Print the run's `receipt.json` |
+| `/history` | Show the current conversation history |
+| `/clear`   | Reset history (facts stay loaded) |
+| `/save <path>` | Persist transcript as Markdown |
+| `/help`    | Show available commands |
+| `/exit` \| `/quit` | Leave the harness |
+
+The agent is forbidden by its own system prompt from inventing rows or
+recommending pipeline edits — it stays advisory, citing exact USD values
+and counterparty ids from the loaded JSON facts.
+
+### Why a sandbox layer at all?
+
+Three properties matter and they would fight each other if everything lived
+in one path:
+
+1. **Determinism** — auditors need byte-identical replay of any prior run.
+   The declarative flow (run / rerun) provides that.
+2. **Designability** — an engineer needs to iterate on a manifest without
+   ceremony. The planner provides that.
+3. **Explainability** — a risk officer needs a narrative on top of the
+   numbers. The agent-report and chat harness provide that.
+
+Splitting them keeps the deterministic core small, signed, and testable
+while letting the agent surfaces evolve quickly.
+
+---
+
+## Two backends, same DAG — `pandas` vs `polars`
+
+Every step declares `engine: pandas | polars` independently. Two paired
+manifests ship for direct comparison:
+
+| Manifest | Engine | Notes |
+|----------|--------|-------|
+| `manifests/templates/counterparty_market_risk_pipeline.json`        | `pandas`  | Reference implementation |
+| `manifests/templates/counterparty_market_risk_pipeline_polars.json` | `polars`  | Identical DAG, identical reports — only the per-step `engine` is swapped |
+
+Use `pypes bench` (above) to measure on your machine. On the bundled 49-row
+demo data, polars typically wins wall-clock by ~10-20% but loses on peak
+RSS by ~30-40% because the polars engine eagerly materialises columns;
+results swing the other way on larger datasets. **Always bench on data
+shaped like your real workload** before picking a backend for production.
+
+The two engines must produce **byte-identical row counts** per step — the
+bench harness emits a yellow "Parity Disagreement" panel if they diverge.
+
+---
+
+## Expanded test data — counterparty market risk
+
+`manifests/templates/data/cmr_trades_2026-04-{22,23,24}.csv` — three daily
+front-office snapshots (49 trades total) with the columns a real
+counterparty-market-risk pack needs:
+
+| Column | Why it matters |
+|--------|----------------|
+| `as_of_date` | Drives day-over-day move analysis |
+| `counterparty_id`, `counterparty_name` | Headline grouping |
+| `product_type` | Equity / Bond / Swap / Option / FX (concentration view) |
+| `segment` | Tech / Financials / Energy / Auto / Consumer / Materials / Government |
+| `country` | Sovereign-risk lens (US / DE / GB / JP / CH / FR / SA / AU / BR) |
+| `isin` | Security-level concentration (real-format codes) |
+| `notional`, `ccy`, `fx_rate`, `mtm_usd` | Currency-normalised exposure |
+| `dv01`, `delta`, `vega` | Greeks → top-risk-drivers view |
+| `maturity_date` | Maturity profile / ALM lens |
+| `status` | Cleansing filter (drops `cancelled` / `pending`) |
+
+The CMR manifest deliberately includes a 250M Tesla trade that breaches the
+200M notional threshold on day 1 — gives the breach-report a real row to
+narrate and the day-over-day move analysis a real swing to flag.
+
+---
+
 ## Where the source lives
 
 | File | Role |
@@ -221,10 +460,18 @@ The signed `receipt.json` plus the `manifest_snapshot.json` give you a tamper-ev
 | `benny/pypes/reports.py`        | Markdown renderers for the four report kinds |
 | `benny/pypes/checkpoints.py`    | Parquet + CSV fallback checkpoint store |
 | `benny/pypes/lineage.py`        | OpenLineage emitter |
+| `benny/pypes/planner.py`        | **Sandbox** — LLM-driven `PypesManifest` generator (`benny pypes plan`) |
+| `benny/pypes/agent_report.py`   | **Sandbox** — risk-analyst persona for one-shot narratives (`benny pypes agent-report`) |
+| `benny/pypes/agent_chat.py`     | **Sandbox** — multi-turn risk-analyst REPL (`benny pypes chat`) |
+| `benny/pypes/bench.py`          | **Sandbox** — psutil-instrumented head-to-head perf harness (`benny pypes bench`) |
+| `benny/pypes/model_compare.py`  | **Sandbox** — cross-model planner/agent/QA scorecard (`benny pypes model-bench`) |
 | `benny/pypes/cli.py`            | argparse subcommands wired into `benny_cli.py` |
 | `benny/api/pypes_routes.py`     | FastAPI router mounted at `/api/pypes` |
-| `manifests/templates/financial_risk_pipeline.json` | The investment-bank demo manifest |
-| `manifests/templates/data/trades_sample.csv`       | Demo trades (intentionally includes threshold breaches) |
+| `manifests/templates/financial_risk_pipeline.json` | Original investment-bank demo manifest |
+| `manifests/templates/counterparty_market_risk_pipeline.json` | Multi-date counterparty market risk pipeline (pandas) |
+| `manifests/templates/counterparty_market_risk_pipeline_polars.json` | Same DAG, polars backend (for `pypes bench`) |
+| `manifests/templates/data/trades_sample.csv`       | Original demo trades |
+| `manifests/templates/data/cmr_trades_2026-04-{22,23,24}.csv` | Three-day rich CMR test data |
 | `frontend/src/components/Studio/PipelineCanvas.tsx`| Studio DAG visualisation + drill-down panel |
 
 ---

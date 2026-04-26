@@ -116,8 +116,33 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
             )
             resp.raise_for_status()
             data = resp.json()
+            # Defensive: some local servers (notably Lemonade with the FLM
+            # recipe) return HTTP 200 with an error envelope instead of an
+            # OpenAI ``choices`` payload — e.g. ``{"error": {"details":
+            # {"response": {"error": {"message": "Max length reached!"}}}}}``.
+            # Surface that upstream message instead of leaking ``KeyError:
+            # 'choices'`` to the caller.
+            if "choices" not in data:
+                upstream = ""
+                err = data.get("error") if isinstance(data, dict) else None
+                if isinstance(err, dict):
+                    inner = (
+                        err.get("details", {}).get("response", {}).get("error", {})
+                        if isinstance(err.get("details"), dict) else {}
+                    )
+                    upstream = (
+                        (inner.get("message") if isinstance(inner, dict) else None)
+                        or err.get("message")
+                        or json.dumps(err)[:300]
+                    )
+                else:
+                    upstream = json.dumps(data)[:300]
+                raise RuntimeError(
+                    f"{self.provider_name}/{self.model_id}: upstream returned no 'choices' "
+                    f"(likely context-window or model error): {upstream}"
+                )
             content = data["choices"][0]["message"]["content"]
-            
+
             self._emit_usage(run_id, prompt, content, int((time.time() - start_ts) * 1000))
             return content
 

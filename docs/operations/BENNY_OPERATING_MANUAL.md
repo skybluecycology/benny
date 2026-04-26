@@ -203,6 +203,64 @@ Everything about each task — endpoint, HTTP method, body shape, per-task read 
 
 **Windows-only**: `benny/api/server.py` pins `WindowsProactorEventLoopPolicy` to avoid `ValueError: too many file descriptors in select()` under heavy ingest load (the default `SelectorEventLoop` caps around 512 FDs). This takes effect on the next `benny down && benny up` cycle.
 
+### 4.5 Pypes — declarative tabular transformations
+
+Pypes is the third capability surface (alongside docs/RAG and code/swarm). Run book in [PYPES_TRANSFORMATION_GUIDE.md](PYPES_TRANSFORMATION_GUIDE.md). The CLI splits cleanly into a **deterministic core** and a **sandbox layer**.
+
+**Deterministic core — signed, replayable, audit-bound**
+
+```bash
+# Inspect, run, drill, rerun, re-render
+benny pypes inspect    manifests/templates/financial_risk_pipeline.json
+benny pypes run        manifests/templates/financial_risk_pipeline.json --workspace pypes_demo
+benny pypes runs       --workspace pypes_demo                          # default sub-action: ls
+benny pypes drilldown  <run_id> gold_exposure --workspace pypes_demo
+benny pypes rerun      <run_id> --from silver_trades --workspace pypes_demo
+benny pypes report     <run_id> counterparty_risk  --workspace pypes_demo
+```
+
+Outputs live under `${BENNY_HOME}/workspace/<ws>/runs/pypes-<run_id>/`:
+`receipt.json` (signed), `manifest_snapshot.json`, `checkpoints/<step>.parquet`, `reports/*.md`.
+
+**Sandbox layer — agent-driven, advisory, non-mutating**
+
+```bash
+# 1. LLM-author a draft manifest (does not execute unless --run)
+benny pypes plan "ingest 3 days of options trades and produce a delta-bucket gold view" \
+    --workspace pypes_demo --save              # writes manifests/drafts/<id>.json
+benny pypes plan "..." --workspace pypes_demo --save --run     # author and execute
+
+# 2. Risk-analyst Markdown narrative on a finished run
+benny pypes agent-report <run_id> --workspace pypes_demo
+# → writes runs/pypes-<id>/reports/risk_narrative.md
+
+# 3. Head-to-head perf bench (pandas vs polars on the same DAG)
+benny pypes bench \
+    pandas=manifests/templates/counterparty_market_risk_pipeline.json \
+    polars=manifests/templates/counterparty_market_risk_pipeline_polars.json \
+    --workspace pypes_demo --repeats 3
+# Reports wall-time, CPU s, CPU% mean/max, peak RSS, RSS Δ, cost ($), row parity.
+# Override the cost rate: BENNY_COMPUTE_COST_USD_PER_HOUR=0.45 benny pypes bench ...
+
+# 4. Multi-turn risk-analyst REPL grounded on a finished run
+benny pypes chat <run_id> --workspace pypes_demo
+#   you > Which counterparty has the largest day-3 exposure?
+#   you > /facts            # show loaded gold tables
+#   you > /save C:/risk/transcript.md
+#   you > /exit
+```
+
+**Sandbox guarantees** — none of these subcommands mutates run audit data:
+
+| Subcommand | What it writes | What it never touches |
+|------------|----------------|------------------------|
+| `pypes plan`         | `manifests/drafts/<id>.json` (or `--out` path) | Existing runs, manifest snapshots, OpenLineage |
+| `pypes agent-report` | `runs/pypes-<id>/reports/risk_narrative.md`     | Receipts, checkpoints, deterministic reports |
+| `pypes bench`        | New runs (each manifest gets its own `pypes-<id>/`) for the durations being measured; no writes to *prior* runs | Comparison itself is read-only |
+| `pypes chat`         | Optional `/save <path>` writes a transcript     | Receipts, checkpoints, reports |
+
+All four sandbox commands route LLM calls through `call_model()` (CLAUDE.md rule #1) so offline mode, the structured LLM log, and lineage all fire correctly.
+
 ---
 
 ## 5. The LLM router (Phase 3 hardening)
