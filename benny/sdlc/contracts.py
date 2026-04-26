@@ -89,6 +89,8 @@ class ArtifactRef(BaseModel):
     content_type: str = "application/octet-stream"
     byte_size: Optional[int] = None
     sha256: Optional[str] = None
+    # ≤ 200-char human-readable preview (AOS-F6)
+    summary: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

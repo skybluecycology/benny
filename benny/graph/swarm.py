@@ -50,6 +50,11 @@ from ..core.skill_registry import registry
 from ..core.task_manager import task_manager
 from ..core.event_bus import event_bus
 from ..core.reasoning import extract_reasoning
+from ..core.artifact_store import (
+    maybe_promote,
+    resolve_uris_in_args,
+    DEFAULT_PBR_THRESHOLD_TOKENS,
+)
 
 
 
@@ -784,6 +789,8 @@ Do this sparingly and only for significant knowledge gaps."""
                 messages.append(message)
 
                 if hasattr(message, "tool_calls") and message.tool_calls:
+                    workspace_path = get_workspace_path(workspace_id)
+                    pbr_threshold = state.get("pbr_threshold_tokens") or DEFAULT_PBR_THRESHOLD_TOKENS
                     for tc in message.tool_calls:
                         func_name = tc.function.name
                         call_id = tc.id
@@ -792,19 +799,34 @@ Do this sparingly and only for significant knowledge gaps."""
                         except Exception:
                             args = {}
 
+                        # AOS-F7: resolve any artifact:// URIs in tool args before dispatch
+                        args = resolve_uris_in_args(args, workspace_path=workspace_path)
+
                         result_str = await registry.execute_skill(
                             func_name,
                             workspace_id,
                             agent_id=execution_id,
                             **args
                         )
+
+                        # AOS-F6: auto-promote large tool outputs above threshold
+                        promoted = maybe_promote(
+                            result_str,
+                            workspace_path=workspace_path,
+                            threshold_tokens=pbr_threshold,
+                            task_id=task_id,
+                        )
+                        content_for_llm = (
+                            json.dumps(promoted) if isinstance(promoted, dict) else promoted
+                        )
+
                         executed_tools.append({"name": func_name, "args": args})
                         task_manager.add_tool_event(execution_id, func_name, args, result_str, nodeId="executor")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": call_id,
                             "name": func_name,
-                            "content": result_str
+                            "content": content_for_llm
                         })
                     continue
                 else:
