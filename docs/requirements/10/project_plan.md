@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-26
-**Active phase:** Phase 4 — Durable resume harness (READY TO START)
-**Next decision needed:** none — Phase 3 complete (SHA `777f798`)
+**Active phase:** Phase 5 — Worker pool & backpressure (READY TO START)
+**Next decision needed:** none — Phase 4 complete (SHA `3be752a`)
 
 ---
 
@@ -15,33 +15,35 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 4 — Durable resume harness |
-| Status | `[IN-PROGRESS]` — Phase 3 complete at `777f798`; Phase 4 ready to open |
-| Active workstream | Phase 4: `benny/graph/manifest_runner.py` resume path |
+| Phase | 5 — Worker pool & backpressure |
+| Status | `[IN-PROGRESS]` — Phase 4 complete at `3be752a`; Phase 5 ready to open |
+| Active workstream | Phase 5: `benny/graph/worker_pool.py` + swarm backpressure |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
 | Cumulative coverage on AOS modules | Phase 0 modules present; measured at Phase 10 gate |
-| Open critical risks (RPN ≥ 200) | R5 (resume integrity), R10 (policy false-positives), R11 (ledger HMAC secret) |
+| Open critical risks (RPN ≥ 200) | R10 (policy false-positives), R11 (ledger HMAC secret) — R5 MITIGATED by `3be752a` |
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0, 1, 2, and 3 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`). Next:
+Phases 0, 1, 2, 3, and 4 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`). Next:
 
-1. Open Phase 4 — Durable resume harness.
+1. Open Phase 5 — Worker pool & backpressure.
 2. Write red tests first:
-   - `tests/sdlc/test_resume_idempotent.py` (AOS-F14: `test_aos_f14_resume_from_checkpoint`, `test_aos_f14_no_redundant_tasks`)
-   - `tests/sdlc/test_resume_latency.py` (AOS-NFR2: p95 ≤ 5 s)
-   - `tests/sdlc/test_resume_pause.py` (AOS-F15: pause/resume across hosts, mocked move)
-   - `tests/sdlc/test_resume_budget.py` (AOS-F16: time-budget and iteration-budget escalation)
-3. Implement `benny/persistence/checkpointer.py` atomic checkpoint (tmp+rename).
-4. Implement `benny/graph/manifest_runner.py::resume_run` re-entry.
-5. Extend `benny_cli.py` with `benny run --resume <run_id>` flag.
-6. Update §1, §4, §6 + acceptance matrix when Phase 4 gate is green.
+   - `tests/sdlc/test_worker_pool_oom.py` (AOS-F17: `test_aos_f17_vram_aware_capacity`)
+   - `tests/sdlc/test_backpressure.py` (AOS-F18: `test_aos_f18_backpressure_blocks_dispatcher`)
+   - `tests/sdlc/test_iteration_budget.py` (AOS-F19: `test_aos_f19_iteration_budget_raises`)
+3. Implement `benny/graph/worker_pool.py` VRAM-aware semaphore (mocked VRAM in tests).
+4. Extend `benny/graph/swarm.py::dispatcher_node` to block on queue depth.
+5. Wire per-task time-budget + iteration-budget enforcement using `check_time_budget` / `check_iteration_budget` from `benny.sdlc.checkpoint`.
+6. Update §1, §4, §6 + acceptance matrix when Phase 5 gate is green.
 
-Note: `benny.sdlc.diagrams` is placed in `benny/sdlc/` (not `benny/graph/`) because
-`benny/graph/__init__.py` eagerly imports `langgraph` which is not installed in the
-test environment. `populate_mermaid` lives in `benny/sdlc/diagrams.py` as well.
+Notes:
+- `benny.sdlc.checkpoint` (Phase 4) is stdlib+pydantic only — safe to import from anywhere.
+- `benny.sdlc.diagrams` placed in `benny/sdlc/` (not `benny/graph/`) because
+  `benny/graph/__init__.py` eagerly imports `langgraph` (not installed in test env).
+- R5 (resume integrity, RPN 225) is now MITIGATED: atomic tmp+rename write + HMAC-SHA256
+  chain over each checkpoint payload is live in `benny/sdlc/checkpoint.py`.
 
 ---
 
@@ -176,14 +178,16 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 4 — Durable resume harness
 
-- [ ] `benny run --resume <run_id>` CLI flag
-- [ ] `benny/graph/manifest_runner.py::resume_run` re-enters checkpoint state
-- [ ] HITL pause writes `pause.json`; resume hydrates artefact refs
-- [ ] `aos.resume.enabled` default flips `true`
-- [ ] Tests green: `test_aos_f14_*`, `test_aos_f15_*`, `test_aos_f16_*`
-- [ ] AOS-NFR2 p95 ≤ 5 s
-- [ ] Acceptance rows AOS-F14–F16, AOS-NFR2 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/sdlc/checkpoint.py::save_checkpoint` / `load_checkpoint` — atomic tmp+rename write; HMAC-SHA256 chain (R5 mitigation). Placed in `benny/sdlc/` to avoid langgraph import chain.
+- [x] `benny/sdlc/checkpoint.py::write_pause` — HITL pause writes `pause.json`; resume hydrates artifact refs via `load_checkpoint` (prefers `pause.json`)
+- [x] `benny/sdlc/checkpoint.py::resume_run` — re-enters checkpoint state; RUNNING→PENDING re-queue; no redundant task re-execution
+- [x] `benny/sdlc/checkpoint.py::check_time_budget` / `check_iteration_budget` — raises `TimeBudgetExceededError` / `IterationBudgetExceededError`
+- [ ] `benny run --resume <run_id>` CLI flag (deferred — no planner CLI changes in this phase)
+- [ ] `aos.resume.enabled` default flip (deferred to Phase 10 cutover)
+- [x] Tests green: 23/23 — `test_aos_f14_*`, `test_aos_f15_*`, `test_aos_f16_*`, `test_aos_nfr2_*`
+- [x] AOS-NFR2 p95 ≤ 5 s (measured ~0.3 ms, well under budget)
+- [x] Acceptance rows AOS-F14–F16, AOS-NFR2 → `PASS`
+- Evidence SHA: `3be752a`
 
 ### Phase 5 — Worker pool & backpressure
 
@@ -299,7 +303,7 @@ opens. RPN 100–199 = high → mitigation must land in the same phase. RPN < 10
 
 | RPN bucket | Count | Action required |
 |------------|-------|-----------------|
-| ≥ 200 (critical) | 3 (R5, R10, R11) | Mitigation **must** be in flight before the gating phase opens. |
+| ≥ 200 (critical) | 2 open (R10, R11); R5 **MITIGATED** `3be752a` | Mitigation **must** be in flight before the gating phase opens. |
 | 100–199 (high) | 4 (R6, R12 watch, R14, R16) | Mitigation must land in the same phase. |
 | < 100 (acceptable) | 9 | Track but no special action. |
 
@@ -317,13 +321,13 @@ G-* gates.
 | SR-1 path violations | ≤ 408 | **≤ 408** ✓ | — | — | — | — | — | — | — | — | — | — |
 | G-LAT (existing) | < 300 ms | unchanged | — | — | — | — | — | — | — | — | — | — |
 | AOS-NFR1 token reduction | ≥ 80 % | n/a | **≈ 96 %** ✓ | — | — | — | — | — | — | — | — | — |
-| AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | — | — | — | — | — | — | — |
+| AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | **~0.3 ms** ✓ | — | — | — | — | — | — |
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — | — | — | — |
 | AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
 | AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | **0 tokens** ✓ | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
 | Open OQs | 0 by Phase 1 | **0** ✓ | — | — | — | — | — | — | — | — | — | — |
-| Critical risks (RPN ≥ 200) open | 0 by gate | 3 (R5/R10/R11 open) | — | — | — | — | — | — | — | — | — | — |
+| Critical risks (RPN ≥ 200) open | 0 by gate | 3 (R5/R10/R11 open) | — | — | — | **2 (R5 mitigated)** ✓ | — | — | — | — | — | — |
 
 (Fill `—` cells with the measured value as each phase closes. `n/a` cells are
 not applicable until the phase that introduces the metric.)
@@ -396,12 +400,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 3 committed — SHA `777f798` |
-| Current in-progress step | Phase 4 — Durable resume harness (not yet started) |
+| Last completed step | Phase 4 committed — SHA `3be752a` |
+| Current in-progress step | Phase 5 — Worker pool & backpressure (not yet started) |
 | Open files / scratch | — |
 | Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
-| Last green CI run | 64 PASS (sdlc + safety scope) @ `777f798` |
-| Notes for next agent | Phase 4 starts with red tests in `tests/sdlc/test_resume_*.py`. Implement `benny/persistence/checkpointer.py` (atomic checkpoint), `benny/graph/manifest_runner.py::resume_run`, and `benny_cli.py --resume` flag. R5 (RPN 225, resume corruption) must have atomic tmp+rename + HMAC guard. |
+| Last green CI run | 110 PASS (sdlc + safety scope) @ `3be752a` |
+| Notes for next agent | Phase 5 starts with red tests: `test_aos_f17_vram_aware_capacity` (mocked VRAM), `test_aos_f18_backpressure_blocks_dispatcher`, `test_aos_f19_iteration_budget_raises`. Implement `benny/graph/worker_pool.py` — but note `benny/graph/__init__.py` imports langgraph; consider placing worker pool logic in `benny/sdlc/` if langgraph import chain is still a problem. The budget check helpers `check_time_budget` / `check_iteration_budget` from `benny.sdlc.checkpoint` are reusable for F19. |
 
 Update this section at the end of every working session.
 
