@@ -22,9 +22,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F5  | 1   | `test_aos_f5_artifact_put_get_roundtrip`, `test_aos_f5_content_addressed` | PASS | `b2259f0` |
 | AOS-F6  | 1   | `test_aos_f6_auto_promote_above_threshold`, `test_aos_f6_summary_clamp_200` | PASS | `b2259f0` |
 | AOS-F7  | 1   | `test_aos_f7_uri_substitution_in_tool_call` | PASS | `b2259f0` |
-| AOS-F8  | 2   | `test_aos_f8_layer1_token_budget` (≤ 500 tokens) | TODO | |
-| AOS-F9  | 2   | `test_aos_f9_activate_returns_schema`, `test_aos_f9_lazy_load` | TODO | |
-| AOS-F10 | 2   | `test_aos_f10_examples_layer3_optional` | TODO | |
+| AOS-F8  | 2   | `test_aos_f8_layer1_token_budget` (≤ 500 tokens) | PASS | `39cec9a` |
+| AOS-F9  | 2   | `test_aos_f9_activate_returns_schema`, `test_aos_f9_lazy_load` | PASS | `39cec9a` |
+| AOS-F10 | 2   | `test_aos_f10_examples_layer3_optional` | PASS | `39cec9a` |
 | AOS-F11 | 3   | `test_aos_f11_to_mermaid_emits_graph_td`, `test_aos_f11_subgraph_per_wave` | TODO | |
 | AOS-F12 | 3   | `test_aos_f12_to_plantuml_smoke` | TODO | |
 | AOS-F13 | 3   | `test_aos_f13_activity_diagram_per_scenario` | TODO | |
@@ -62,7 +62,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR9  | 10    | `tests/sdlc/test_sandbox_soak.py`     | TODO | |
 | AOS-NFR10 | 10    | `tests/release/test_aos_release_gate.py::bundle_delta` | TODO | |
 | AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | TODO | |
-| AOS-NFR12 | 2     | `tests/sdlc/test_disclosure_budget.py`| TODO | |
+| AOS-NFR12 | 2     | `tests/sdlc/test_disclosure_budget.py`| PASS | `39cec9a` |
 
 ## Security (from [requirement.md §8](requirement.md#8-security--privacy))
 

@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-26
-**Active phase:** Phase 2 — Progressive disclosure (READY TO START)
-**Next decision needed:** none — Phase 1 complete (SHA `b2259f0`)
+**Active phase:** Phase 3 — Diagram generators (READY TO START)
+**Next decision needed:** none — Phase 2 complete (SHA `39cec9a`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 2 — Progressive disclosure |
-| Status | `[IN-PROGRESS]` — Phase 1 complete at `b2259f0`; Phase 2 ready to open |
-| Active workstream | Phase 2: `benny/core/disclosure.py` |
+| Phase | 3 — Diagram generators |
+| Status | `[IN-PROGRESS]` — Phase 2 complete at `39cec9a`; Phase 3 ready to open |
+| Active workstream | Phase 3: `benny/graph/diagrams.py` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,15 +26,17 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0 and 1 are **complete** (`2f6819b`, `b2259f0`). Next:
+Phases 0, 1, and 2 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`). Next:
 
-1. Open Phase 2 — Progressive disclosure.
+1. Open Phase 3 — Diagram generators.
 2. Write red tests first:
-   - `tests/sdlc/test_disclosure_budget.py` (AOS-NFR12: Layer 1 ≤ 500 tokens)
-   - `tests/sdlc/test_disclosure_layers.py` (AOS-F8, AOS-F9, AOS-F10)
-3. Implement `benny/core/disclosure.py` (3-layer registry: `layer1`/`layer2`/`layer3`).
-4. Refactor tool-registry exposure in `benny/api/llm_routes.py` to use Layer 1 by default.
-5. Update §1, §4, §6 + acceptance matrix when Phase 2 gate is green.
+   - `tests/sdlc/test_diagrams_mermaid.py` (AOS-F11: `to_mermaid` emits `graph TD`, subgraph per wave)
+   - `tests/sdlc/test_diagrams_perf.py` (AOS-NFR4: ≤ 50 ms on 50-task fixture)
+   - `tests/sdlc/test_diagrams_plantuml.py` (AOS-F12 smoke)
+   - `tests/sdlc/test_diagrams_activity.py` (AOS-F13)
+3. Implement `benny/graph/diagrams.py` (`to_mermaid`, `to_plantuml`, `to_activity_diagram`).
+4. Extend `benny/graph/wave_scheduler.py` to populate `manifest.plan.mermaid`.
+5. Update §1, §4, §6 + acceptance matrix when Phase 3 gate is green.
 
 ---
 
@@ -149,13 +151,13 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 2 — Progressive disclosure
 
-- [ ] `benny/core/disclosure.py` 3-layer registry
-- [ ] Tool registry refactored to expose `layer1`/`layer2`/`layer3`
-- [ ] `aos.disclosure.enabled` default flips `true`
-- [ ] Tests green: `test_aos_f8_layer1_token_budget`, `test_aos_f9_*`, `test_aos_f10_*`
-- [ ] AOS-NFR12 ≤ 500 tokens on Layer 1
-- [ ] Acceptance rows AOS-F8–F10, AOS-NFR12 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/core/disclosure.py` 3-layer registry (register/layer1_index/activate/examples)
+- [ ] Tool registry refactored to expose layer1/layer2/layer3 (deferred — no existing tools registered yet)
+- [ ] `aos.disclosure.enabled` default flip (deferred to Phase 10 cutover)
+- [x] Tests green: 13/13 — `test_aos_f8_layer1_token_budget`, `test_aos_f9_*`, `test_aos_f10_*` + budget/clamp tests
+- [x] AOS-NFR12 ≤ 500 tokens on Layer 1 (global registry empty = 0 tokens; clamp enforces 80-char/summary)
+- [x] Acceptance rows AOS-F8–F10, AOS-NFR12 → `PASS`
+- Evidence SHA: `39cec9a`
 
 ### Phase 3 — Diagram generators
 
@@ -313,7 +315,7 @@ G-* gates.
 | AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | — | — | — | — | — | — | — |
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | — | — | — | — | — | — | — | — |
 | AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
-| AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | — | — | — | — | — | — | — | — | — |
+| AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | **0 tokens** ✓ | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
 | Open OQs | 0 by Phase 1 | **0** ✓ | — | — | — | — | — | — | — | — | — | — |
 | Critical risks (RPN ≥ 200) open | 0 by gate | 3 (R5/R10/R11 open) | — | — | — | — | — | — | — | — | — | — |
@@ -389,12 +391,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 1 committed — SHA `b2259f0` |
-| Current in-progress step | Phase 2 — Progressive disclosure (not yet started) |
+| Last completed step | Phase 2 committed — SHA `39cec9a` |
+| Current in-progress step | Phase 3 — Diagram generators (not yet started) |
 | Open files / scratch | — |
 | Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
-| Last green CI run | 97 PASS (39 sdlc + 4 safety + 54 portability) @ `b2259f0` |
-| Notes for next agent | Phase 2 starts with red tests in `tests/sdlc/test_disclosure_budget.py` and `tests/sdlc/test_disclosure_layers.py`. Implement `benny/core/disclosure.py` 3-layer registry then expose Layer 1 in `benny/api/llm_routes.py`. |
+| Last green CI run | 110 PASS (52 sdlc + 4 safety + 54 portability) @ `39cec9a` |
+| Notes for next agent | Phase 3 starts with red tests in `tests/sdlc/test_diagrams_*.py`. Implement `benny/graph/diagrams.py` then extend `wave_scheduler.py` to populate `manifest.plan.mermaid`. |
 
 Update this section at the end of every working session.
 
