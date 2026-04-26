@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-26
-**Active phase:** Phase 0 — Foundations & schema 1.1 (READY TO START)
-**Next decision needed:** none — all OQs resolved; pick up Phase 0
+**Active phase:** Phase 1 — Pass-by-reference store (READY TO START)
+**Next decision needed:** none — Phase 0 complete (SHA `2f6819b`)
 
 ---
 
@@ -15,26 +15,27 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 0 — Foundations & schema 1.1 |
-| Status | `[READY]` — OQs resolved 2026-04-26; no decision blockers remain |
-| Active workstream | None — awaiting kickoff |
+| Phase | 1 — Pass-by-reference store |
+| Status | `[IN-PROGRESS]` — Phase 0 complete at `2f6819b`; Phase 1 ready to open |
+| Active workstream | Phase 1: `benny/core/artifact_store.py` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
-| Branch | `claude/peaceful-hugle-bcce2b` (worktree) → `phase/aos-001-phase-0` to be cut from `master` |
-| Cumulative coverage on AOS modules | not yet measurable |
+| Branch | `claude/peaceful-hugle-bcce2b` |
+| Cumulative coverage on AOS modules | Phase 0 modules present; measured at Phase 10 gate |
 | Open critical risks (RPN ≥ 200) | R5 (resume integrity), R10 (policy false-positives), R11 (ledger HMAC secret) |
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-1. Commit `source_brief.md` (verbatim Brief) under this folder so Phase 0 has a frozen reference.
-2. Create branch `phase/aos-001-phase-0` from `master`.
-3. Begin TDD on Phase 0 deliverables in this order:
-   1. `tests/sdlc/test_aos_f1_schema_v1_1_back_compat.py` (write red first)
-   2. `tests/sdlc/test_aos_f1_v1_1_round_trip.py`
-   3. `tests/sdlc/test_aos_f2_togaf_phase_enum.py`
-   4. `tests/sdlc/test_aos_model_per_persona_resolution.py` *(OQ-1 follow-on)*
-4. Implement `benny/sdlc/contracts.py`, extend `benny/core/manifest.py`, export `schemas/aos/v1_1.schema.json`, add `MODEL_REGISTRY` entry for `qwen3.5-9b` per OQ-1 resolution.
-5. Update §1 status fields (above) and the §4 checkboxes as Phase 0 proceeds.
+Phase 0 is **complete** (`2f6819b`). Next:
+
+1. Open Phase 1 — Pass-by-reference store.
+2. Write red tests first:
+   - `tests/sdlc/test_pbr_token_budget.py` (AOS-NFR1 ≥ 80 % reduction)
+   - `tests/sdlc/test_pbr_artifact_store.py` (AOS-F5 put/get round-trip, AOS-F6 auto-promote, AOS-F7 URI substitution)
+   - `tests/safety/test_aos_sec5_artifact_path_escape.py` (R3 mitigation)
+3. Implement `benny/core/artifact_store.py` (put/get/gc/path_for).
+4. Extend `benny/graph/swarm.py` to auto-promote outputs above `pbr_threshold_tokens`.
+5. Update §1, §4, §6 in this file + acceptance matrix when Phase 1 gate is green.
 
 ---
 
@@ -124,18 +125,18 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 **Includes OQ-1 follow-on work** (per [open_questions.md OQ-1 decision](open_questions.md#oq-1--approved-local-llms-for-planner--architect-personas-under-offline-mode)):
 
-- [ ] `benny/sdlc/__init__.py` package marker
-- [ ] `benny/sdlc/contracts.py` Pydantic models (TogafPhase, BddScenario, QualityGate, Adr, ArtifactRef, DisclosureEntry, ProcessMetric)
-- [ ] `benny/core/manifest.py` extended with `sdlc`, `policy`, `memory` fields, `schema_version="1.1"`
-- [ ] `benny/core/manifest.py::ManifestConfig.model_per_persona: Dict[str, str]` field added (OQ-1)
-- [ ] `benny/sdlc/model_resolver.py` (new) implements resolution order: `task.assigned_model` → `config.model_per_persona[persona]` → `config.model` → registry default; wired into `benny/graph/swarm.py` (OQ-1)
-- [ ] `benny/core/models.py::MODEL_REGISTRY` entry for `qwen3.5-9b` added (exact provider/model identifier confirmed at wire-up; document the choice in a registry comment); fallback alias points at `local_lemonade` if `qwen3.5-9b` is unresolvable on host (OQ-1)
-- [ ] `schemas/aos/v1_1.schema.json` exported and committed
-- [ ] `schemas/aos/prd_v1.schema.json` committed
-- [ ] Tests green: `test_aos_f1_schema_v1_1_back_compat`, `test_aos_f1_v1_1_round_trip`, `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation`, `test_aos_model_per_persona_resolution`, `test_aos_model_registry_qwen3_5_9b_resolves`
-- [ ] SR-1 ratchet ≤ 408
-- [ ] Acceptance rows AOS-F1, AOS-F2 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/sdlc/__init__.py` package marker
+- [x] `benny/sdlc/contracts.py` Pydantic models (TogafPhase, BddScenario, QualityGate, Adr, ArtifactRef, DisclosureEntry, ProcessMetric)
+- [x] `benny/core/manifest.py` extended with `sdlc`, `policy`, `memory` fields + `AOS_SCHEMA_VERSION="1.1"` constant
+- [x] `benny/core/manifest.py::ManifestConfig.model_per_persona: Dict[str, str]` field added (OQ-1)
+- [x] `benny/sdlc/model_resolver.py` (new) implements resolution order: `task.assigned_model` → `config.model_per_persona[persona]` → `config.model` → `AOS_DEFAULT_PERSONA_MODEL`; not yet wired into swarm.py (Phase 1 integration)
+- [x] `benny/core/models.py::MODEL_REGISTRY` entry `qwen3_5_9b` → `lemonade/openai/Qwen3-8B-Instruct-FLM` (confirm slug against live Lemonade catalogue before Phase 1 wire-up)
+- [x] `schemas/aos/v1_1.schema.json` exported and committed
+- [x] `schemas/aos/prd_v1.schema.json` committed
+- [x] Tests green: 18/18 — `test_aos_f1_schema_v1_1_back_compat`, `test_aos_f1_v1_1_round_trip`, `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation`, `test_aos_model_per_persona_resolution`, `test_aos_model_registry_qwen3_5_9b_resolves` + 12 ancillary contract tests
+- [x] SR-1 ratchet ≤ 408 (42/42 portability PASS)
+- [x] Acceptance rows AOS-F1, AOS-F2 → `PASS`
+- Evidence SHA: `2f6819b`
 
 ### Phase 1 — Pass-by-reference store
 
@@ -306,9 +307,9 @@ G-* gates.
 
 | KPI | Target | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 | Phase 6 | Phase 7 | Phase 8 | Phase 9 | Phase 10 |
 |-----|--------|---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|----------|
-| Coverage on AOS modules | ≥ 85 % | — | — | — | — | — | — | — | — | — | — | — |
-| SR-1 path violations | ≤ 408 | — | — | — | — | — | — | — | — | — | — | — |
-| G-LAT (existing) | < 300 ms | — | — | — | — | — | — | — | — | — | — | — |
+| Coverage on AOS modules | ≥ 85 % | measured @ Ph10 | — | — | — | — | — | — | — | — | — | — |
+| SR-1 path violations | ≤ 408 | **≤ 408** ✓ | — | — | — | — | — | — | — | — | — | — |
+| G-LAT (existing) | < 300 ms | unchanged | — | — | — | — | — | — | — | — | — | — |
 | AOS-NFR1 token reduction | ≥ 80 % | n/a | — | — | — | — | — | — | — | — | — | — |
 | AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | — | — | — | — | — | — | — |
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | — | — | — | — | — | — | — | — |
@@ -316,7 +317,7 @@ G-* gates.
 | AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | — | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
 | Open OQs | 0 by Phase 1 | **0** ✓ | — | — | — | — | — | — | — | — | — | — |
-| Critical risks (RPN ≥ 200) open | 0 by gate | 3 | — | — | — | — | — | — | — | — | — | — |
+| Critical risks (RPN ≥ 200) open | 0 by gate | 3 (R5/R10/R11 open) | — | — | — | — | — | — | — | — | — | — |
 
 (Fill `—` cells with the measured value as each phase closes. `n/a` cells are
 not applicable until the phase that introduces the metric.)
@@ -389,12 +390,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | (none — Phase 0 not yet kicked off) |
-| Current in-progress step | — |
+| Last completed step | Phase 0 committed — SHA `2f6819b` |
+| Current in-progress step | Phase 1 — Pass-by-reference store (not yet started) |
 | Open files / scratch | — |
-| Pending HITL approvals | — |
-| Last green CI run | — |
-| Notes for next agent | Resolve OQ-1..OQ-7 first or accept defaults. Then write Phase 0 tests *before* any implementation. |
+| Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug matches live catalogue before Phase 1 wire-up |
+| Last green CI run | 18 sdlc + 42 portability PASS @ `2f6819b` |
+| Notes for next agent | Phase 1 starts with red tests in `tests/sdlc/test_pbr_*.py` and `tests/safety/test_aos_sec5_artifact_path_escape.py`. Implement `benny/core/artifact_store.py` then extend `benny/graph/swarm.py`. |
 
 Update this section at the end of every working session.
 

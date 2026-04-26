@@ -15,8 +15,8 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-F1  | 0   | `test_aos_f1_schema_v1_1_back_compat`, `test_aos_f1_v1_1_round_trip` | TODO | |
-| AOS-F2  | 0   | `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation` | TODO | |
+| AOS-F1  | 0   | `test_aos_f1_schema_v1_1_back_compat`, `test_aos_f1_v1_1_round_trip` | PASS | `2f6819b` |
+| AOS-F2  | 0   | `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation` | PASS | `2f6819b` |
 | AOS-F3  | 7   | `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure` | TODO | |
 | AOS-F4  | 7   | `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic` | TODO | |
 | AOS-F5  | 1   | `test_aos_f5_artifact_put_get_roundtrip`, `test_aos_f5_content_addressed` | TODO | |
