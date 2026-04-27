@@ -19,6 +19,7 @@
 9. [Offline / local-only mode](#9-offline--local-only-mode)
 10. [Adding another machine](#10-adding-another-machine)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Hybrid setup — models and Docker on C:, workspaces on F:](#12-hybrid-setup--models-and-docker-on-c-workspaces-on-f)
 
 ---
 
@@ -588,4 +589,164 @@ F:\optimus\benny.cmd doctor --audit
 │    <new>\optimus\benny.cmd migrate --from <old>\optimus\home   │
 │      --to <new>\optimus\home --dry-run   then --apply           │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 12. Hybrid setup — models and Docker on C:, workspaces on F:
+
+The full portable install (§2) puts everything — Python, code, and data — on
+this drive. If you prefer to keep Python, Docker images, and LLM model weights
+on your laptop's C: drive and only store workspace data on this drive, that is
+fully supported and actually simpler. This section explains how.
+
+### 12.1 What lives where (by design)
+
+Before choosing an option, it helps to know where Benny actually stores things:
+
+| Item | Where it lives | Moveable? |
+|------|---------------|-----------|
+| Python / conda | `C:\Users\nsdha\miniconda3\` | Yes (but rarely worth it) |
+| Benny source code | `C:\Users\nsdha\OneDrive\code\benny\` | Yes |
+| Docker images | Docker's own data root (`C:\ProgramData\Docker\` or WSL2) | No — Docker controls this |
+| LLM model weights | Lemonade: `C:\Users\nsdha\.lemonade\models\` — Ollama: `C:\Users\nsdha\.ollama\` | Yes, but requires reconfiguring the server |
+| **BENNY_HOME** (workspaces, runs, logs, manifests, config) | Wherever `BENNY_HOME` points | **Yes — this is the key lever** |
+
+The `models\` folder that `benny init` creates inside BENNY_HOME is a staging
+hint only. Lemonade and Ollama store actual weights in their **own** directories
+on C: — BENNY_HOME has nothing to do with that. Docker images always live in
+Docker's data root, regardless of where BENNY_HOME is. So the only thing you
+need to move is BENNY_HOME itself.
+
+### 12.2 Option A — Minimal BENNY_HOME on F: (recommended)
+
+Runtime (Python, Docker, models) stays on C:. Only the data home moves to F:.
+
+```powershell
+# Step 1 — ensure benny is installed on C: from your existing checkout
+pip install -e "C:\Users\nsdha\OneDrive\code\benny[dev,mcp]"
+
+# Step 2 — scaffold the data home on the external drive
+python -m benny_cli init --home "F:\optimus\home" --profile native
+
+# Step 3 — point benny at it permanently (user-level, no admin required)
+[Environment]::SetEnvironmentVariable("BENNY_HOME", "F:\optimus\home", "User")
+$env:BENNY_HOME = "F:\optimus\home"   # also apply to current shell
+
+# Step 4 — verify
+benny doctor
+```
+
+From this point on, every `benny` command on your PATH uses Python from
+C:\miniconda3, Docker from C:, and Lemonade weights from C: — but writes all
+workspace data, run history, logs, and manifests to `F:\optimus\home`.
+
+**What happens when you unplug the drive:**
+- The laptop boots normally.
+- `benny doctor` reports `BENNY_HOME: MISSING` (drive not mounted).
+- All other laptop software is unaffected.
+
+**What happens when you plug the drive into a different machine:**
+- The drive contains all your workspace data.
+- That machine needs benny installed (`pip install -e ...`) and `BENNY_HOME` set.
+- See §10 for the full multi-machine setup.
+
+---
+
+### 12.3 Option B — BENNY_HOME on C:, workspaces directory junctioned to F:
+
+Use this when you already have a working C: install and want **only the
+workspace data** folder redirected to F: without disturbing anything else.
+A Windows directory junction makes `workspaces\` inside BENNY_HOME transparently
+point to `F:\optimus\workspaces\`. Benny never knows the difference.
+
+```powershell
+# Step 1 — create the target directory on the external drive
+New-Item -ItemType Directory -Force "F:\optimus\workspaces"
+
+# Step 2 — remove the existing workspaces dir from BENNY_HOME
+#           (skip if it is already empty or does not exist)
+Remove-Item "$env:BENNY_HOME\workspaces" -Recurse -Force -ErrorAction SilentlyContinue
+
+# Step 3 — create the junction (reads and writes go transparently to F:)
+cmd /c mklink /J "$env:BENNY_HOME\workspaces" "F:\optimus\workspaces"
+
+# Step 4 — verify — benny sees a normal directory
+benny doctor
+dir "$env:BENNY_HOME\workspaces"   # shows F:\optimus\workspaces contents
+```
+
+**What happens when you unplug the drive:**
+- BENNY_HOME is intact on C: — benny starts normally.
+- The `workspaces\` junction becomes a broken link; benny will create a fresh
+  empty `workspaces\` on the next `benny init` or workspace access.
+- No data is lost — everything is still on F:.
+
+**To extend the junction to runs and logs as well:**
+```powershell
+foreach ($dir in @("runs", "logs", "workflows")) {
+    New-Item -ItemType Directory -Force "F:\optimus\$dir"
+    Remove-Item "$env:BENNY_HOME\$dir" -Recurse -Force -ErrorAction SilentlyContinue
+    cmd /c mklink /J "$env:BENNY_HOME\$dir" "F:\optimus\$dir"
+}
+```
+
+---
+
+### 12.4 Comparison
+
+| | Full portable (§2) | Option A — data home only | Option B — junction |
+|--|-------------------|--------------------------|---------------------|
+| BENNY_HOME | `F:\optimus\home` | `F:\optimus\home` | C: (unchanged) |
+| Python | `F:\optimus\runtime\python\` | C: miniconda | C: miniconda |
+| Docker images | C: Docker root | C: Docker root | C: Docker root |
+| Model weights | C: Lemonade/Ollama dirs | C: Lemonade/Ollama dirs | C: Lemonade/Ollama dirs |
+| Workspace data | `F:\optimus\home\workspaces\` | `F:\optimus\home\workspaces\` | `F:\optimus\workspaces\` (via junction) |
+| Benny on PATH | `F:\optimus\benny.cmd` | C: `benny` (pip-installed) | C: `benny` (pip-installed) |
+| Drive unplugged | laptop `benny` command gone | `BENNY_HOME: MISSING` warning | benny works, no workspace data |
+| New machine setup | run `install.ps1` | `pip install` + set `BENNY_HOME` | `pip install` + recreate junction |
+| Best for | maximum portability, demo drive | data isolation, keep C: setup | minimal disruption to existing install |
+
+---
+
+### 12.5 Checking where things actually are
+
+At any time you can see the live resolved paths:
+
+```powershell
+# Where is BENNY_HOME right now?
+[Environment]::GetEnvironmentVariable("BENNY_HOME","User")
+$env:BENNY_HOME
+
+# What is benny reporting?
+benny doctor --json | python -m json.tool
+
+# Is the workspaces dir a real dir or a junction?
+(Get-Item "$env:BENNY_HOME\workspaces").LinkType   # prints "Junction" or empty
+
+# Where are Lemonade weights?
+Get-ChildItem "$env:USERPROFILE\.lemonade\models" -ErrorAction SilentlyContinue
+
+# Where is Docker's data root?
+docker info --format "{{.DockerRootDir}}" 2>$null
+```
+
+---
+
+### 12.6 Updating the manual's quick reference card
+
+The quick reference at the bottom of this manual reflects the full portable
+setup (§2). For Option A or B, substitute the following in that card:
+
+**Option A — data home on F:, runtime on C:**
+```
+LAUNCHER:  benny   (on PATH, installed to C:\miniconda3)
+BENNY_HOME = F:\optimus\home   (set as user env var)
+```
+
+**Option B — junction:**
+```
+LAUNCHER:  benny   (on PATH, unchanged)
+BENNY_HOME = C:\...\  (unchanged — junction handles the rest)
+Junction:  BENNY_HOME\workspaces → F:\optimus\workspaces
 ```
