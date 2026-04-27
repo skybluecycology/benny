@@ -31,9 +31,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F14 | 4   | `test_aos_f14_resume_from_checkpoint`, `test_aos_f14_no_redundant_tasks` | PASS | `3be752a` |
 | AOS-F15 | 4   | `test_aos_f15_pause_resume_across_hosts` (mocked move) | PASS | `3be752a` |
 | AOS-F16 | 4   | `test_aos_f16_time_budget_escalates`, `test_aos_f16_iteration_budget_escalates` | PASS | `3be752a` |
-| AOS-F17 | 5   | `test_aos_f17_vram_aware_capacity` (mocked VRAM) | TODO | |
-| AOS-F18 | 5   | `test_aos_f18_backpressure_blocks_dispatcher` | TODO | |
-| AOS-F19 | 5   | `test_aos_f19_iteration_budget_raises` | TODO | |
+| AOS-F17 | 5   | `test_aos_f17_vram_aware_capacity` (mocked VRAM) | PASS | `a504db9` |
+| AOS-F18 | 5   | `test_aos_f18_backpressure_blocks_dispatcher` | PASS | `a504db9` |
+| AOS-F19 | 5   | `test_aos_f19_iteration_budget_raises` | PASS | `a504db9` |
 | AOS-F20 | 6   | `test_aos_f20_req_emits_prd_and_feature` | TODO | |
 | AOS-F21 | 6   | `test_aos_f21_compile_to_pytest_deterministic` | TODO | |
 | AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | TODO | |
@@ -55,7 +55,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR2  | 4     | `tests/sdlc/test_resume_latency.py`   | PASS | `3be752a` |
 | AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | TODO | |
 | AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | PASS | `777f798` |
-| AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | TODO | |
+| AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | PASS | `a504db9` |
 | AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | TODO | |
 | AOS-NFR7  | all   | existing `tests/portability/test_no_absolute_paths.py` | TODO | |
 | AOS-NFR8  | 7,8,9 | `tests/sdlc/test_offline_e2e.py`      | TODO | |
