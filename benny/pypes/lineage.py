@@ -9,6 +9,17 @@ Bronze source is always one query away.
 Failures here never propagate — lineage is observability, not a gate.
 If Marquez is down, the pipeline keeps running and we log a single
 ``[pypes.lineage]`` warning.
+
+AOS-001 Phase 8 extension
+--------------------------
+  emit_column_lineage(step_id, stage, columns_used, columns_generated,
+                      run_id, manifest_id, *, cde_refs=None,
+                      workspace_path=None) -> dict | None
+      Returns a PROV-O column-level lineage block for silver/gold steps
+      (AOS-F24).  Bronze steps return ``None`` (raw data; no lineage).
+      When *workspace_path* is provided, the block is also written as a
+      JSON-LD sidecar at
+      ``<workspace>/data_out/lineage/pypes_{step_id}.jsonld``.
 """
 
 from __future__ import annotations
@@ -205,3 +216,94 @@ def _step_run_facets(
             "criticality": manifest.governance.criticality,
         }
     return facets
+
+
+# ---------------------------------------------------------------------------
+# AOS-001 Phase 8 — column-level lineage (AOS-F24)
+# ---------------------------------------------------------------------------
+
+_SILVER_GOLD_STAGES = {"silver", "gold"}
+
+# Inline PROV-O prefix map (stdlib-only, no network)
+_PROV_CONTEXT = {
+    "prov":  "http://www.w3.org/ns/prov#",
+    "xsd":   "http://www.w3.org/2001/XMLSchema#",
+    "benny": "https://benny.io/ontology/",
+    "prov:used":      {"@id": "prov:used"},
+    "prov:generated": {"@id": "prov:generated"},
+    "benny:cde_refs": {"@id": "benny:cde_refs", "@container": "@list"},
+    "benny:manifest_id": {"@id": "benny:manifest_id"},
+    "benny:stage":    {"@id": "benny:stage"},
+}
+
+
+def emit_column_lineage(
+    *,
+    step_id: str,
+    stage: str,
+    columns_used: list[str],
+    columns_generated: list[str],
+    run_id: str,
+    manifest_id: str,
+    cde_refs: Optional[list[str]] = None,
+    workspace_path: Optional[Any] = None,
+) -> Optional[dict[str, Any]]:
+    """Emit a PROV-O column-level lineage block for a pypes step (AOS-F24).
+
+    Only ``silver`` and ``gold`` stage steps produce lineage — ``bronze``
+    is raw ingestion and returns ``None``.
+
+    Parameters
+    ----------
+    step_id:
+        Pypes step identifier, e.g. ``"silver_trades"``.
+    stage:
+        Stage name: ``"bronze"``, ``"silver"``, or ``"gold"``.
+        Returns ``None`` for ``"bronze"``.
+    columns_used:
+        List of fully-qualified input column names, e.g.
+        ``["raw.trade_id", "raw.notional"]``.
+    columns_generated:
+        List of fully-qualified output column names, e.g.
+        ``["silver.trade_id", "silver.notional_usd"]``.
+    run_id:
+        AOS run identifier.
+    manifest_id:
+        Pypes manifest identifier (for traceability).
+    cde_refs:
+        Optional list of CDE column names (AOS-COMP2 bridge).
+    workspace_path:
+        Optional workspace root.  When provided, the block is written to
+        ``<workspace>/data_out/lineage/pypes_{step_id}.jsonld``.
+
+    Returns
+    -------
+    dict | None
+        The column-level lineage block, or ``None`` for bronze stages.
+    """
+    if stage not in _SILVER_GOLD_STAGES:
+        return None
+
+    block: dict[str, Any] = {
+        "@context": _PROV_CONTEXT,
+        "@type": "prov:Activity",
+        "@id": f"urn:benny:run:{run_id}:pypes:{step_id}",
+        "benny:stage": stage,
+        "benny:manifest_id": manifest_id,
+        "prov:used": list(columns_used),
+        "prov:generated": list(columns_generated),
+    }
+    if cde_refs:
+        block["benny:cde_refs"] = list(cde_refs)
+
+    # Optional sidecar write
+    if workspace_path is not None:
+        import json
+        from pathlib import Path as _Path
+
+        lineage_dir = _Path(workspace_path) / "data_out" / "lineage"
+        lineage_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = lineage_dir / f"pypes_{step_id}.jsonld"
+        sidecar.write_text(json.dumps(block, indent=2), encoding="utf-8")
+
+    return block
