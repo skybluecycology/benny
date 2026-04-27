@@ -21,7 +21,7 @@ from benny.live.connector import BaseConnector, register_connector
 logger = logging.getLogger(__name__)
 
 _API_BASE = "https://en.wikipedia.org/api/rest_v1"
-_HEADERS = {"User-Agent": "Benny/1.0 (https://github.com/benny/platform; contact@benny.ai)"}
+_HEADERS = {"User-Agent": "Benny/1.0 (https://github.com/skybluecycology/benny; contact@benny.ai)"}
 
 
 @register_connector

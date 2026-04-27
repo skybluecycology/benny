@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _SPARQL_URL = "https://query.wikidata.org/sparql"
 _HEADERS = {
-    "User-Agent": "Benny/1.0 (https://github.com/benny/platform; contact@benny.ai)",
+    "User-Agent": "Benny/1.0 (https://github.com/skybluecycology/benny; contact@benny.ai)",
     "Accept": "application/sparql-results+json",
 }
 

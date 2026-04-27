@@ -27,14 +27,14 @@ LOCAL_PROVIDERS = {
     "lemonade": {
         "port": 13305,
         "base_url": "http://127.0.0.1:13305/api/v1",
-        "docs": "https://github.com/benny/lemonade",
+        "docs": "https://github.com/skybluecycology/lemonade",
         "startup_cmd": "LemonadeServer.exe serve --port 13305",
         "check_url": "http://127.0.0.1:13305/api/v1/models"
     },
     "fastflowlm": {
         "port": 52625,
         "base_url": "http://localhost:52625/v1",
-        "docs": "https://github.com/benny/fastflow",
+        "docs": "https://github.com/skybluecycology/fastflow",
     },
     "lmstudio": {
         "port": 1234,

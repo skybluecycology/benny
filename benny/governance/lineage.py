@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 MARQUEZ_URL = os.getenv("MARQUEZ_URL", "http://localhost:5000")
 NAMESPACE = os.getenv("LINEAGE_NAMESPACE", "benny")
-PRODUCER = "https://github.com/benny/platform"
+PRODUCER = "https://github.com/skybluecycology/benny"
 
 
 # =============================================================================

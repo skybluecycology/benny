@@ -20,7 +20,7 @@ from benny.live.connector import BaseConnector, register_connector
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.duckduckgo.com"
-_HEADERS = {"User-Agent": "Benny/1.0 (https://github.com/benny/platform; contact@benny.ai)"}
+_HEADERS = {"User-Agent": "Benny/1.0 (https://github.com/skybluecycology/benny; contact@benny.ai)"}
 
 
 @register_connector

@@ -57,7 +57,7 @@ Ready to deploy the Agentic OS? Here is how to get Benny running for humans and 
 
 # Clone the repo
 
-git clone https://github.com/benny/benny.git
+git clone https://github.com/skybluecycology/benny.git
 cd benny
 
 # Setup the environment
