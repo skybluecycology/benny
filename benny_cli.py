@@ -173,6 +173,55 @@ def cmd_manifests_ls(args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_req(args: argparse.Namespace) -> int:
+    """benny req — Requirements Analyst: free-text → PRD JSON + Gherkin (AOS-F20).
+
+    Usage:
+        benny req "Build a VRAM-aware worker pool" --workspace default
+        benny req "..." --model local_lemonade --out prd.json
+    """
+    import os
+    import re as _re
+    from pathlib import Path as _Path
+    from benny.sdlc.requirements import PrdValidationError, generate_prd
+
+    requirement = args.requirement
+    model = args.model or "local_lemonade"
+
+    print(f"[req] requirement: {requirement[:120]}{'...' if len(requirement) > 120 else ''}")
+    print(f"[req] model={model}")
+
+    try:
+        prd, gherkin = generate_prd(requirement, model=model)
+    except PrdValidationError as exc:
+        print(f"[req] ERROR: PRD validation failed (AOS-F22): {exc}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(f"[req] ERROR: LLM returned invalid JSON: {exc}", file=sys.stderr)
+        return 1
+
+    # Derive a URL-safe slug from the PRD title
+    slug = _re.sub(r"[^a-z0-9]+", "_", prd.get("title", "prd").lower()).strip("_") or "prd"
+
+    if args.workspace:
+        home = os.environ.get("BENNY_HOME", ".")
+        out_dir = _Path(home) / "workspaces" / args.workspace / "data_out" / "prd"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        prd_path = out_dir / f"{slug}.json"
+        feature_path = out_dir / f"{slug}.feature"
+        prd_path.write_text(json.dumps(prd, indent=2), encoding="utf-8")
+        feature_path.write_text(gherkin, encoding="utf-8")
+        print(f"[req] PRD     → {prd_path}")
+        print(f"[req] Gherkin → {feature_path}")
+    else:
+        # No workspace — print to stdout
+        print(json.dumps(prd, indent=2))
+        print("---")
+        print(gherkin)
+
+    return 0
+
+
 async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intentionally long; each section is a clear phase
     """Knowledge enrichment pipeline with Rich live display, OpenLineage events,
     local run folder, and GDPR-compliant audit trail.
@@ -1526,6 +1575,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--stdio", action="store_true", default=True, help="Use stdio transport (default)")
     p_mcp.add_argument("--port", type=int, default=8000, help="Benny API port to proxy to")
 
+    # req — Requirements Analyst: free-text → PRD + Gherkin (AOS-F20)
+    p_req = sub.add_parser(
+        "req",
+        help="Requirements Analyst: convert a free-text requirement to PRD JSON + Gherkin (AOS-F20)",
+    )
+    p_req.add_argument("requirement", help="Free-text requirement (e.g. 'Build a VRAM-aware worker pool')")
+    p_req.add_argument("--workspace", default=None, help="Write PRD + feature file to this workspace's data_out/prd/")
+    p_req.add_argument("--model", default=None, help="LLM model ID (default: local_lemonade)")
+
     # enrich — knowledge enrichment pipeline
     p_enrich = sub.add_parser(
         "enrich",
@@ -1590,6 +1648,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_mcp(args)
     if args.cmd == "migrate":
         return cmd_migrate(args)
+    if args.cmd == "req":
+        return asyncio.run(cmd_req(args))
     if args.cmd == "enrich":
         return asyncio.run(cmd_enrich(args))
     if args.cmd == "pypes":
