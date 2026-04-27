@@ -20,6 +20,7 @@
 10. [Adding another machine](#10-adding-another-machine)
 11. [Troubleshooting](#11-troubleshooting)
 12. [Hybrid setup — models and Docker on C:, workspaces on F:](#12-hybrid-setup--models-and-docker-on-c-workspaces-on-f)
+13. [NVIDIA NIM — cloud GPU inference](#13-nvidia-nim--cloud-gpu-inference)
 
 ---
 
@@ -750,3 +751,199 @@ LAUNCHER:  benny   (on PATH, unchanged)
 BENNY_HOME = C:\...\  (unchanged — junction handles the rest)
 Junction:  BENNY_HOME\workspaces → F:\optimus\workspaces
 ```
+
+---
+
+## 13. NVIDIA NIM — cloud GPU inference
+
+NVIDIA's NIM platform (`https://integrate.api.nvidia.com/v1`) provides
+OpenAI-compatible access to hosted models — DeepSeek-R1, Llama 3.3, Mistral,
+Gemma 3, and more — running on NVIDIA's cloud GPUs. Benny routes these through
+the same `call_model()` dispatcher as every other provider.
+
+### 13.1 Get an API key
+
+1. Sign in at **https://build.nvidia.com**
+2. Select any model → click **Get API Key** → create a new key
+3. Your key starts with `nvapi-` followed by a long alphanumeric string
+
+Keep it private — it is a billing credential. Benny's secrets scanner
+(`benny/governance/portability/secrets_scanner.py`) will flag any `nvapi-…`
+token it finds written into a file on disk or committed to git.
+
+### 13.2 Store the key safely — three options
+
+**Option 1 — User env var (recommended)**
+
+Set once per machine. No admin rights required. Never written to disk in
+plaintext inside BENNY_HOME.
+
+```powershell
+[Environment]::SetEnvironmentVariable("NVIDIA_API_KEY", "nvapi-xxxx", "User")
+```
+
+Benny reads `NVIDIA_API_KEY` automatically at call time. If it is missing,
+`call_model()` logs a warning and the NIM call fails with an auth error — it
+never silently falls back to a different provider.
+
+> **Why env var and not a file?**
+> An env var set at the user level lives only in the Windows registry
+> (`HKEY_CURRENT_USER\Environment`) — not on the drive you hand to someone else,
+> not in git, and not inside `F:\optimus`. If this drive is lost or stolen, the
+> key is not on it.
+
+**Option 2 — Benny credential vault (per-workspace)**
+
+Use this when different workspaces need different NVIDIA keys, or when you want
+every key access to be Fernet-encrypted and audit-logged.
+
+```python
+# Store (run once)
+from benny.gateway.credential_vault import store_credential
+store_credential("my_workspace", "nvidia_api_key", "nvapi-xxxx")
+
+# Retrieve at call time
+from benny.gateway.credential_vault import get_credential
+key = get_credential("my_workspace", "nvidia_api_key")
+```
+
+The vault file lives at
+`$BENNY_HOME/workspaces/my_workspace/credentials/vault.json`.
+Values are Fernet-encrypted (AES-128-CBC). The vault is only as secure as
+`BENNY_VAULT_KEY` — set that env var too:
+
+```powershell
+# Generate a strong vault key once per machine
+$vk = python -c "import secrets; print(secrets.token_hex(32))"
+[Environment]::SetEnvironmentVariable("BENNY_VAULT_KEY", $vk, "User")
+```
+
+Without `BENNY_VAULT_KEY`, the vault falls back to base64 (obfuscation only,
+not encryption) — fine for local dev, not for production.
+
+**Option 3 — Session-only (CI / scripts)**
+
+```powershell
+$env:NVIDIA_API_KEY = "nvapi-xxxx"
+benny run manifests/my_manifest.json --json
+$env:NVIDIA_API_KEY = ""     # clear immediately after
+```
+
+Never use this in a `.ps1` file committed to git.
+
+### 13.3 What NOT to do
+
+| ❌ Don't | Why |
+|----------|-----|
+| Put the key in `benny.toml` | Plaintext on disk; SR-3 scanner flags it; file may be committed |
+| Put it directly in a manifest JSON | Manifests are signed and shared — the key travels with the file |
+| Set `NVIDIA_API_KEY` as a system-level env var | Available to every process and every user on the machine |
+| Commit a `.env` file containing the key | Ends up in git history even after deletion |
+| Echo the key in a log or print statement | `logs/llm_calls.jsonl` is not encrypted |
+
+### 13.4 Calling NVIDIA NIM models
+
+Once `NVIDIA_API_KEY` is set, use the `nvidia/<org>/<model>` prefix anywhere
+Benny accepts a model name:
+
+**From Python (via `call_model`):**
+```python
+import asyncio
+from benny.core.models import call_model
+
+response = asyncio.run(call_model(
+    model="nvidia/deepseek-ai/deepseek-r1",
+    messages=[{"role": "user", "content": "Explain HMAC-SHA256"}],
+    temperature=0.6,
+    max_tokens=4096,
+))
+print(response)
+```
+
+**From the CLI:**
+```batch
+benny plan "Refactor the payment service" --model nvidia/deepseek-ai/deepseek-r1 --workspace myws --save
+benny run manifests/latest.manifest.json --json
+```
+
+**In a manifest (model_per_persona):**
+```json
+{
+  "schema_version": "1.1",
+  "model_per_persona": {
+    "planner":    "nvidia/deepseek-ai/deepseek-r1",
+    "architect":  "nvidia/meta/llama-3.3-70b-instruct",
+    "coder":      "local_lemonade"
+  }
+}
+```
+This lets you mix NVIDIA cloud models for planning with local models for
+code generation — the offline kill-switch (`BENNY_OFFLINE=1`) will block
+the nvidia calls but leave `local_lemonade` untouched.
+
+### 13.5 Available models (built-in registry)
+
+These are pre-registered in `benny/core/models.py`. Any other NIM model
+from **https://build.nvidia.com** also works via the ad-hoc
+`nvidia/<org>/<slug>` prefix.
+
+| Benny model ID | NIM slug | Approx cost / 1 K tokens |
+|----------------|----------|--------------------------|
+| `nvidia/deepseek-ai/deepseek-r1` | `deepseek-ai/deepseek-r1` | $0.004 |
+| `nvidia/deepseek-ai/deepseek-v3` | `deepseek-ai/deepseek-v3` | $0.0004 |
+| `nvidia/meta/llama-3.3-70b-instruct` | `meta/llama-3.3-70b-instruct` | $0.00077 |
+| `nvidia/mistralai/mistral-large-2-instruct` | `mistralai/mistral-large-2-instruct` | $0.002 |
+| `nvidia/google/gemma-3-27b-it` | `google/gemma-3-27b-it` | $0.0002 |
+| `nvidia/<org>/<any-nim-slug>` | ad-hoc — any model on build.nvidia.com | varies |
+
+### 13.6 Reasoning / thinking models (DeepSeek-R1)
+
+DeepSeek-R1 on NIM supports extended reasoning via `extra_body`. Benny passes
+`extra_body` through to LiteLLM when you provide it via the manifest's
+`task.extra` field or directly in a script:
+
+```python
+response = asyncio.run(call_model(
+    model="nvidia/deepseek-ai/deepseek-r1",
+    messages=[{"role": "user", "content": "Design a fault-tolerant ledger"}],
+    temperature=1.0,
+    max_tokens=16384,
+    # extra_body is forwarded to litellm → OpenAI client
+    extra_body={
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "high",
+        }
+    },
+))
+```
+
+### 13.7 Offline safety
+
+NVIDIA NIM calls are always blocked when `BENNY_OFFLINE=1` is set, because
+`is_local_model("nvidia/...")` returns `False`. The offline kill-switch applies
+regardless of which NVIDIA model is requested.
+
+```powershell
+$env:BENNY_OFFLINE = "1"
+benny run manifests/my_manifest.json   # nvidia/* tasks raise OfflineRefusal
+$env:BENNY_OFFLINE = ""
+```
+
+### 13.8 Verify the setup
+
+```powershell
+# Check the key is readable by benny
+python -c "import os; k=os.environ.get('NVIDIA_API_KEY',''); print('Key set:', bool(k), '| Length:', len(k))"
+
+# Quick live call (costs a fraction of a cent)
+python -c "
+import asyncio, os
+from benny.core.models import call_model
+r = asyncio.run(call_model(
+    model='nvidia/meta/llama-3.3-70b-instruct',
+    messages=[{'role':'user','content':'Reply with exactly: NVIDIA_OK'}],
+    max_tokens=10,
+))
+print(r)
+"
