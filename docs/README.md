@@ -19,6 +19,7 @@ New to Benny? Read in this order:
 | Document | Description |
 |----------|-------------|
 | [BENNY_OPERATING_MANUAL.md](operations/BENNY_OPERATING_MANUAL.md) | **Primary run book** — init, up, down, plan, run, doctor, migrate, uninstall, release gates, troubleshooting |
+| [PORTABLE_INSTALL_MANUAL.md](operations/PORTABLE_INSTALL_MANUAL.md) | **Portable / external-drive install** — one-command bootstrap onto an external SSD, env var reference, drive relocation, multi-machine use |
 | [PYPES_TRANSFORMATION_GUIDE.md](operations/PYPES_TRANSFORMATION_GUIDE.md) | `benny pypes` — declarative, DAG-based transformation engine with CLP lineage, checkpoints, drill-down, and financial-risk reports |
 | [KNOWLEDGE_ENRICHMENT_WORKFLOW.md](operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md) | `benny enrich` pipeline — extract docs → synthesise triples → correlate to code → enable Studio ENRICH toggle |
 | [LOG_AND_LINEAGE_GUIDE.md](operations/LOG_AND_LINEAGE_GUIDE.md) | All log files, SSE events, Marquez lineage, Phoenix tracing, AER audit records, end-to-end process trace |
