@@ -37,8 +37,8 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F20 | 6   | `test_aos_f20_req_emits_prd_and_feature` | PASS | `a45e736` |
 | AOS-F21 | 6   | `test_aos_f21_compile_to_pytest_deterministic` | PASS | `a45e736` |
 | AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | PASS | `a45e736` |
-| AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | TODO | |
-| AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | TODO | |
+| AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | PASS | `1059565` |
+| AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | PASS | `1059565` |
 | AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | TODO | |
 | AOS-F26 | 9   | `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain` | TODO | |
 | AOS-F27 | 9   | `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain` | TODO | |
@@ -61,7 +61,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR8  | 7,8,9 | `tests/sdlc/test_offline_e2e.py`      | PASS | `e4226ef` |
 | AOS-NFR9  | 10    | `tests/sdlc/test_sandbox_soak.py`     | TODO | |
 | AOS-NFR10 | 10    | `tests/release/test_aos_release_gate.py::bundle_delta` | TODO | |
-| AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | TODO | |
+| AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | PASS | `1059565` |
 | AOS-NFR12 | 2     | `tests/sdlc/test_disclosure_budget.py`| PASS | `39cec9a` |
 
 ## Security (from [requirement.md §8](requirement.md#8-security--privacy))
@@ -80,8 +80,8 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
 | AOS-COMP1 | 9 | `test_aos_comp1_sox_chain_verify` | TODO | |
-| AOS-COMP2 | 8 | `test_aos_comp2_cde_lineage_present` | TODO | |
-| AOS-COMP3 | 8 | `test_aos_comp3_no_orphans`         | TODO | |
+| AOS-COMP2 | 8 | `test_aos_comp2_cde_lineage_present` | PASS | `1059565` |
+| AOS-COMP3 | 8 | `test_aos_comp3_no_orphans`         | PASS | `1059565` |
 | AOS-COMP4 | 10 | `test_aos_comp4_diff_smoke`         | TODO | |
 | AOS-COMP5 | 10 | `test_aos_comp5_replay_byte_equal_local` | TODO | |
 

@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-27
-**Active phase:** Phase 8 — Compliance lineage (READY TO START)
-**Next decision needed:** none — Phase 7 complete (SHA `e4226ef`)
+**Active phase:** Phase 9 — Policy-as-Code + Git ledger (READY TO START)
+**Next decision needed:** none — Phase 8 complete (SHA `1059565`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 8 — Compliance lineage |
-| Status | `[IN-PROGRESS]` — Phase 7 complete at `e4226ef`; Phase 8 ready to open |
-| Active workstream | Phase 8: `benny/governance/jsonld.py` + `benny/governance/lineage.py` + `benny/pypes/lineage.py` |
+| Phase | 9 — Policy-as-Code + Git ledger |
+| Status | `[IN-PROGRESS]` — Phase 8 complete at `1059565`; Phase 9 ready to open |
+| Active workstream | Phase 9: `benny/governance/policy.py` + `benny/governance/ledger.py` + `tests/safety/` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,19 +26,21 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0–7 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`, `e4226ef`). Next:
+Phases 0–8 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`, `e4226ef`, `1059565`). Next:
 
-1. Open Phase 8 — Compliance lineage (JSON-LD + column-level).
+1. Open Phase 9 — Policy-as-Code + Git ledger.
 2. Write red tests first:
-   - `tests/sdlc/test_lineage_overhead.py` (AOS-NFR11: p95 ≤ 5 ms emission overhead)
-   - `tests/sdlc/test_pypes_column_lineage.py` (AOS-F24: `test_aos_f24_pypes_column_lineage`)
-   - `tests/sdlc/test_aos_comp3_no_orphans.py` (AOS-COMP3: `test_aos_comp3_no_orphans`)
-   - Additional: `test_aos_f23_jsonld_per_artifact`, `test_aos_comp2_cde_lineage_present`
-3. Implement `benny/governance/jsonld.py::emit_provenance` (JSON-LD sidecar per artefact).
-4. Extend `benny/governance/lineage.py` with JSON-LD emission.
-5. Extend `benny/pypes/lineage.py` with column-level lineage blocks.
-6. Vendor PROV-O context under `vendor/prov-o/` (offline-safe, ~6 KB).
-7. Update §1, §4, §6 + acceptance matrix when Phase 8 gate is green.
+   - `tests/sdlc/test_policy_evaluate.py` (AOS-F25: `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses`)
+   - `tests/sdlc/test_ledger_chain.py` (AOS-F26: `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain`)
+   - `tests/sdlc/test_sox_ledger.py` (AOS-F27: `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain`)
+   - `tests/safety/test_aos_no_unexpected_egress.py` (AOS-SEC2)
+   - `tests/sdlc/test_security_phase9.py` (AOS-SEC1, AOS-SEC3, AOS-SEC6)
+   - `tests/sdlc/test_aos_comp1_sox_chain.py` (AOS-COMP1)
+3. Implement `benny/governance/policy.py::evaluate` (warn/enforce mode, tool allowlist).
+4. Implement `benny/governance/ledger.py` (append-only Git orphan branch, HMAC chain).
+5. Extend `benny/governance/permission_manifest.py` for per-persona tool allowlist.
+6. Wire `benny doctor --audit` to verify ledger chain.
+7. Update §1, §4, §6 + acceptance matrix when Phase 9 gate is green.
 
 Notes:
 - All AOS modules placed in `benny/sdlc/` (not `benny/graph/`) because
@@ -234,15 +236,15 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 8 — Compliance lineage
 
-- [ ] `benny/governance/jsonld.py::emit_provenance`
-- [ ] `benny/governance/lineage.py` extended for JSON-LD sidecar
-- [ ] `benny/pypes/lineage.py` emits column-level lineage on silver/gold
-- [ ] `vendor/prov-o/` context vendored (offline-safe)
-- [ ] `aos.lineage.jsonld` default flips `true`
-- [ ] Tests green: `test_aos_f23_*`, `test_aos_f24_*`, `test_aos_comp2_*`, `test_aos_comp3_*`
-- [ ] AOS-NFR11 ≤ 5 ms p95 overhead
-- [ ] Acceptance rows AOS-F23, AOS-F24, AOS-COMP2, AOS-COMP3, AOS-NFR11 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/governance/jsonld.py::emit_provenance` (JSON-LD sidecar at `data_out/lineage/{sha}.jsonld`)
+- [x] `benny/governance/jsonld.py::check_no_orphans` (graph completeness auditor)
+- [x] `benny/pypes/lineage.py::emit_column_lineage` — silver/gold steps only; bronze returns None
+- [x] `vendor/prov-o/prov-o.jsonld` vendored (offline-safe, ~42 lines); context rewritten to `file://` URI when `benny_home` is set (OQ-3)
+- [ ] `aos.lineage.jsonld` default flip (deferred to Phase 10 cutover)
+- [x] Tests green: 23/23 — `test_lineage_overhead.py` (10), `test_pypes_column_lineage.py` (7), `test_aos_comp3_no_orphans.py` (6)
+- [x] AOS-NFR11 p95 ≤ 5 ms (stdlib-only path write; well under budget)
+- [x] Acceptance rows AOS-F23, AOS-F24, AOS-COMP2, AOS-COMP3, AOS-NFR11 → `PASS`
+- Evidence SHA: `1059565`
 
 ### Phase 9 — Policy-as-Code + Git ledger
 
@@ -334,7 +336,7 @@ G-* gates.
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — | — | — | — |
 | AOS-NFR5 OOM-free pool | 0 OOM | n/a | n/a | n/a | n/a | n/a | **0 OOM** ✓ | — | — | — | — | — |
 | AOS-NFR3 req p95 | ≤ 2.5 s | n/a | n/a | n/a | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — |
-| AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
+| AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | **< 1 ms** ✓ | — | — |
 | AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | **0 tokens** ✓ | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
 | Open OQs | 0 by Phase 1 | **0** ✓ | — | — | — | — | — | — | — | — | — | — |
