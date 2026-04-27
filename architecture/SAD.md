@@ -378,6 +378,84 @@ See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](../docs/operations/PYPES_TRA
 
 ---
 
+## 9.6 AOS-001 — SDLC Capability Surface
+
+**Shipped:** 2026-04-27  ·  Phases 0–10  ·  Merge SHA chain: `2f6819b` → `357b3d1`  ·  62/62 acceptance rows PASS
+
+AOS-001 adds a fourth capability surface — *agentic SDLC orchestration* — on top of the existing Documents / Code / Tabular triptych. It turns Benny's manifest executor into a full software-delivery pipeline engine that is offline-safe, SOX-auditable, and multi-model comparable.
+
+### 9.6.1 Layers at a glance
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     AOS-001 SDLC Surface                            │
+│                                                                     │
+│  manifest 1.1  ──►  TOGAF phase map  ──►  quality gates  ──►  ADRs │
+│       │                                                             │
+│       ├──► BDD pipeline  (benny req / benny bdd compile)            │
+│       ├──► progressive disclosure  (Layer 1 / 2 / 3)               │
+│       ├──► PBR artefact store  (content-addressed, ≥80 % reduction) │
+│       ├──► durable resume  (atomic checkpoint, p95 ≤ 5 s)           │
+│       ├──► VRAM-aware worker pool  (backpressure, OOM-free)         │
+│       ├──► JSON-LD PROV-O lineage  (per-artefact sidecar)           │
+│       ├──► Policy-as-Code  (warn / enforce; path-traversal guard)   │
+│       ├──► HMAC-chained ledger  (SOX 404 intent proof)              │
+│       └──► multi-model sandbox runner  (SandboxResult metrics)      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.6.2 Module map
+
+| Concern | Module |
+|---------|--------|
+| Contracts (TogafPhase, QualityGate, BddScenario, SdlcConfig, PolicyConfig) | `benny/sdlc/contracts.py` |
+| TOGAF phase mapping, ADR emission, quality-gate runner | `benny/sdlc/togaf.py` |
+| BDD requirement → PRD → pytest compilation | `benny/sdlc/requirements.py`, `benny/sdlc/bdd.py` |
+| Progressive disclosure registry (Layer 1 / 2 / 3) | `benny/core/disclosure.py` |
+| PBR artefact store (content-addressed, URI substitution) | `benny/core/artifact_store.py` |
+| Mermaid + PlantUML diagram emitters | `benny/sdlc/diagrams.py` |
+| Durable resume (atomic checkpoint, HMAC) | `benny/sdlc/checkpoint.py` |
+| VRAM-aware worker pool + backpressure | `benny/sdlc/worker_pool.py` |
+| Persona model resolver (`qwen3_5_9b` default) | `benny/sdlc/model_resolver.py` |
+| JSON-LD PROV-O lineage sidecars + orphan check | `benny/governance/jsonld.py` |
+| Pypes column-level lineage (silver/gold) | `benny/pypes/lineage.py` |
+| Policy evaluator (warn/enforce, path-traversal, allowlist) | `benny/governance/policy.py` |
+| HMAC-chained append-only ledger (SOX 404) | `benny/governance/ledger.py` |
+| Multi-model sandbox runner + metrics + doctor section | `benny/sdlc/sandbox_runner.py`, `benny/sdlc/metrics.py` |
+| Vendored PROV-O JSON-LD context (offline-safe) | `vendor/prov-o/prov-o.jsonld` |
+| AOS release gates | `tests/release/test_aos_release_gate.py` |
+
+### 9.6.3 Key design decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| All AOS modules placed in `benny/sdlc/` and `benny/governance/`, **not** `benny/graph/` | `benny/graph/__init__.py` eagerly imports `langgraph` which is not present in all test environments. AOS modules are stdlib-only and must be importable unconditionally. |
+| Content-addressed artefact store (PBR) | Enables ≥80 % context-window reduction for large tool outputs; replay is deterministic (same payload → same SHA → same file). |
+| HMAC-SHA256 chained ledger (`ledger.jsonl`) | `get_head_hash()` reads from the **last line of the file**, not a separate HEAD pointer — making truncation/rewind immediately detectable (AOS-SEC6). |
+| `auto_approve_writes` hard-blocked in constructor | `PolicyEvaluator(auto_approve_writes=True)` raises `ValueError` — no runtime path can ever set this to True at release (GATE-AOS-POLICY-1). |
+| `PolicyConfig.mode` defaults to `"warn"` | Lets teams adopt the policy surface incrementally; teams flip to `"enforce"` per-manifest after validating no false positives. |
+| Vendored PROV-O context at `vendor/prov-o/` | Zero network calls for lineage emission under `BENNY_OFFLINE=1` (OQ-3 resolution). |
+| Stdlib-only constraint | No new top-level dependencies added by AOS-001 — all 11 phases use only the Python standard library for new AOS modules. |
+
+### 9.6.4 Release gates (GATE-AOS-*)
+
+| Gate | Threshold | Test |
+|------|-----------|------|
+| GATE-AOS-COV | AOS modules ≥ 85 % coverage | `tests/release/test_aos_release_gate.py::coverage` |
+| GATE-AOS-SR1 | SR-1 ratchet not raised | existing portability tests |
+| GATE-AOS-OFF | `BENNY_OFFLINE=1` SDLC e2e passes | `tests/sdlc/test_offline_e2e.py` |
+| GATE-AOS-SIG | Manifest 1.1 signature valid + replay verifies | `tests/release/test_aos_release_gate.py::sig` |
+| GATE-AOS-POLICY-1 | `auto_approve_writes` MUST be `false` at release | `tests/release/test_aos_release_gate.py::policy_off` |
+| GATE-AOS-LEDGER | Ledger HMAC chain verifies on `benny doctor --audit` | `test_aos_f27_doctor_audit_chain` |
+| GATE-AOS-PBR | Default-on PBR ≥ 80 % token reduction on fixture | `tests/sdlc/test_pbr_token_budget.py` |
+| GATE-AOS-DISC | Layer-1 disclosure ≤ 500 tokens | `tests/sdlc/test_disclosure_budget.py` |
+| GATE-AOS-RESUME | Resume p95 ≤ 5 s | `tests/sdlc/test_resume_latency.py` |
+| GATE-AOS-BUNDLE | UI bundle delta ≤ 250 KB gzipped | 0 KB (no frontend changes) |
+
+All 10 gates: **PASS** at `357b3d1`.  Full acceptance matrix: [docs/requirements/10/acceptance_matrix.md](../docs/requirements/10/acceptance_matrix.md).
+
+---
+
 ## 10. Quality Attributes
 
 | Attribute | Mechanism |

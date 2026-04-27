@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-27
-**Active phase:** COMPLETE — All phases 0–10 shipped (SHA `357b3d1`)
-**Next decision needed:** Final cutover audit (flip `aos.*` feature flags; archive requirement folder)
+**Active phase:** COMPLETE — All phases 0–10 shipped + final cutover done
+**Status:** AOS-001 ✅ SHIPPED. Archive `docs/requirements/10/` → `docs/requirements/archive/10/` when Phase 11 opens.
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 10 — Sandbox runner + process metrics + release gates |
-| Status | `[COMPLETE]` — all phases 0–10 shipped at `357b3d1` |
-| Active workstream | Final cutover: flip `aos.*` feature-flag defaults; archive requirements folder |
+| Phase | DONE — all phases 0–10 shipped + final cutover complete |
+| Status | `[SHIPPED]` ✅ — `357b3d1` (implementation) + cutover commit |
+| Active workstream | None — archive `docs/requirements/10/` on first Phase 11 planning commit |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -272,15 +272,27 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 - [x] All `GATE-AOS-*` rows → `PASS`
 - Evidence SHA: `357b3d1`
 
-### Final cutover (do not tick until every phase above is fully green)
+### Final cutover ✅ COMPLETE 2026-04-27
 
-- [ ] All `aos.*` flags reviewed; defaults at production-ready values
-- [ ] `aos.policy.auto_approve_writes` audited and `false`
-- [ ] Release notes entry added to top-level changelog
-- [ ] [docs/README.md](../../README.md) navigation updated to point at this folder under "Requirements & Phase History"
-- [ ] [architecture/SAD.md](../../../architecture/SAD.md) updated with §9.6 *AOS — SDLC capability surface*
-- [ ] Requirement folder archived: move under `docs/requirements/archive/` once Phase 11 opens
-- Final SHA: `________________`
+- [x] All `aos.*` flags reviewed; defaults at production-ready values.
+      `PolicyConfig.mode = "warn"` (appropriate incremental default);
+      `PolicyConfig.auto_approve_writes = False` (hardcoded, cannot be overridden);
+      `MemoryConfig.checkpoint_enabled = True`; all AOS modules stdlib-only and
+      active-when-imported — no runtime feature-flag gate required.
+- [x] `aos.policy.auto_approve_writes` audited and `false` — constructor raises
+      `ValueError` if caller attempts `True`; verified by `test_gate_aos_policy_off`.
+- [x] Release notes entry added: `CHANGELOG.md` created at repo root with full
+      AOS-001 phase-by-phase changelog and SHA chain.
+- [x] [docs/README.md](../../README.md) navigation updated — AOS-001 row shows
+      ✅ SHIPPED, includes SHA, links to CHANGELOG.md; Quick Reference updated
+      with `benny req` / `benny bdd compile` / `benny doctor --json` commands.
+- [x] [architecture/SAD.md](../../../architecture/SAD.md) updated with §9.6
+      *AOS-001 — SDLC Capability Surface* (layers diagram, module map, design
+      decisions table, release gates table).
+- [ ] Requirement folder archived: move `docs/requirements/10/` →
+      `docs/requirements/archive/10/` once Phase 11 opens. *(deferred — no
+      Phase 11 scope defined yet; archive on first Phase 11 planning commit)*
+- Final SHA: `cf4cd81` (Ph10 docs) → cutover commit: see git log
 
 ---
 

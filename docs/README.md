@@ -48,7 +48,7 @@ New to Benny? Read in this order:
 |----------|-------------|
 | [PBR-001_CONTINUATION_PLAN.md](requirements/PBR-001_CONTINUATION_PLAN.md) | Phase roadmap and history (Phases 0–8) |
 | [PORTABLE_BENNY_REQUIREMENTS.md](requirements/PORTABLE_BENNY_REQUIREMENTS.md) | Full Phase 0–8 technical specification |
-| [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC (Phase 10).** Six-sigma normative spec + acceptance matrix + project plan. Integrates the architectural brief into existing Benny (manifest 1.1, PBR, progressive disclosure, Mermaid, durable resume, BDD pipeline, TOGAF mapping, JSON-LD lineage, policy-as-code, sandbox runner). |
+| [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC** ✅ SHIPPED `357b3d1`. Manifest 1.1, PBR artefact store, progressive disclosure, Mermaid/PlantUML diagrams, durable resume, VRAM-aware worker pool, BDD pipeline (`benny req`), TOGAF phase mapping + ADR emission, JSON-LD PROV-O lineage, policy-as-code + HMAC ledger (SOX 404), multi-model sandbox runner. 62/62 acceptance rows PASS. See [CHANGELOG.md](../CHANGELOG.md) for the full release notes. |
 
 ---
 
@@ -78,6 +78,12 @@ benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
              --workspace c5_test --src src/dangpy \
              --resume <prior_run_id> --run                                  # resume a partial run
 benny enrich --help                                                         # full options
+
+# AOS-001 — SDLC pipeline (manifest 1.1)
+benny req "Add payment retry logic" --workspace my_ws --save   # PRD + BDD scenarios
+benny bdd compile --workspace my_ws                            # compile scenarios → pytest
+benny run manifests/sdlc_pipeline.json --json                  # run SDLC manifest
+benny doctor --json | jq '.aos'                                # AOS health section
 
 # Observe a run in real time
 curl -N -H "Accept: text/event-stream" \
