@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-27
-**Active phase:** Phase 7 — SDLC manifest + TOGAF + ADRs (READY TO START)
-**Next decision needed:** none — Phase 6 complete (SHA `a45e736`)
+**Active phase:** Phase 8 — Compliance lineage (READY TO START)
+**Next decision needed:** none — Phase 7 complete (SHA `e4226ef`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 7 — SDLC manifest + TOGAF + ADRs |
-| Status | `[IN-PROGRESS]` — Phase 6 complete at `a45e736`; Phase 7 ready to open |
-| Active workstream | Phase 7: `benny/sdlc/togaf.py` + SDLC manifest fixture + ADR emission |
+| Phase | 8 — Compliance lineage |
+| Status | `[IN-PROGRESS]` — Phase 7 complete at `e4226ef`; Phase 8 ready to open |
+| Active workstream | Phase 8: `benny/governance/jsonld.py` + `benny/governance/lineage.py` + `benny/pypes/lineage.py` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,17 +26,19 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0, 1, 2, 3, 4, 5, and 6 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`). Next:
+Phases 0–7 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`, `e4226ef`). Next:
 
-1. Open Phase 7 — SDLC manifest + TOGAF + ADRs.
+1. Open Phase 8 — Compliance lineage (JSON-LD + column-level).
 2. Write red tests first:
-   - `tests/sdlc/test_togaf_phase_map.py` (AOS-F2 extension, AOS-F3: `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure`)
-   - `tests/sdlc/test_adr_emission.py` (AOS-F4: `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic`)
-   - `tests/sdlc/test_quality_gate.py` (AOS-F3 full coverage)
-3. Implement `benny/sdlc/togaf.py::map_waves_to_phases` and ADR auto-emission.
-4. Create `manifests/templates/sdlc_pipeline.json` end-to-end fixture.
-5. Quality gate kinds (`linter`/`typechecker`/`bdd`/`schema`/`custom`) all wired.
-6. Update §1, §4, §6 + acceptance matrix when Phase 7 gate is green.
+   - `tests/sdlc/test_lineage_overhead.py` (AOS-NFR11: p95 ≤ 5 ms emission overhead)
+   - `tests/sdlc/test_pypes_column_lineage.py` (AOS-F24: `test_aos_f24_pypes_column_lineage`)
+   - `tests/sdlc/test_aos_comp3_no_orphans.py` (AOS-COMP3: `test_aos_comp3_no_orphans`)
+   - Additional: `test_aos_f23_jsonld_per_artifact`, `test_aos_comp2_cde_lineage_present`
+3. Implement `benny/governance/jsonld.py::emit_provenance` (JSON-LD sidecar per artefact).
+4. Extend `benny/governance/lineage.py` with JSON-LD emission.
+5. Extend `benny/pypes/lineage.py` with column-level lineage blocks.
+6. Vendor PROV-O context under `vendor/prov-o/` (offline-safe, ~6 KB).
+7. Update §1, §4, §6 + acceptance matrix when Phase 8 gate is green.
 
 Notes:
 - All AOS modules placed in `benny/sdlc/` (not `benny/graph/`) because
@@ -219,15 +221,16 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 7 — SDLC manifest + TOGAF + ADRs
 
-- [ ] `benny/sdlc/togaf.py::map_waves_to_phases`
-- [ ] ADR auto-emission per TOGAF phase boundary
-- [ ] `manifests/templates/sdlc_pipeline.json` end-to-end fixture
-- [ ] Quality-gate kinds (`linter`/`typechecker`/`bdd`/`schema`/`custom`) all wired
-- [ ] `aos.sdlc.enabled` default flips `true`
-- [ ] Tests green: `test_aos_f3_*`, `test_aos_f4_*`, `test_aos_obs3_*`, `test_aos_obs4_*`
-- [ ] AOS-NFR8 offline e2e green
-- [ ] Acceptance rows AOS-F3, AOS-F4, AOS-OBS3, AOS-OBS4 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/sdlc/togaf.py::map_waves_to_phases` + unmapped default to TogafPhase.D
+- [x] ADR auto-emission per TOGAF phase boundary (`emit_adr`, monotonic seq)
+- [x] `manifests/templates/sdlc_pipeline.json` end-to-end fixture (6 tasks/waves, TOGAF map, 3 quality gates, 3 BDD scenarios)
+- [x] Quality-gate kinds (`linter`/`typechecker`/`bdd`/`schema`/`custom`) wired + halt/retry/escalate policies
+- [ ] `aos.sdlc.enabled` default flip (deferred to Phase 10 cutover)
+- [x] SSE event builders (OBS3) + Phoenix OTLP attrs (OBS4) in `aos.*` namespace
+- [x] Tests green: 55/55 — `test_quality_gate.py` (20), `test_togaf_phase_map.py` (13), `test_adr_emission.py` (19), `test_offline_e2e.py` (3)
+- [x] AOS-NFR8 Phase 7 scope: all components stdlib-only, offline-safe
+- [x] Acceptance rows AOS-F3, AOS-F4, AOS-NFR8, AOS-OBS3, AOS-OBS4 → `PASS`
+- Evidence SHA: `e4226ef`
 
 ### Phase 8 — Compliance lineage
 
@@ -408,12 +411,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 6 committed — SHA `a45e736` |
-| Current in-progress step | Phase 7 — SDLC manifest + TOGAF + ADRs (not yet started) |
+| Last completed step | Phase 7 committed — SHA `e4226ef` |
+| Current in-progress step | Phase 8 — Compliance lineage (not yet started) |
 | Open files / scratch | — |
 | Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
-| Last green CI run | 167 PASS (sdlc + safety scope) @ `a45e736` |
-| Notes for next agent | Phase 7 starts with red tests: `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure`, `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic`. Implement `benny/sdlc/togaf.py::map_waves_to_phases` and ADR auto-emission. Create `manifests/templates/sdlc_pipeline.json`. All new modules in `benny/sdlc/` — the langgraph import chain still poisons `benny/graph/`. |
+| Last green CI run | 222 PASS (sdlc + safety scope) @ `e4226ef` |
+| Notes for next agent | Phase 8 starts with red tests: `test_aos_f23_jsonld_per_artifact`, `test_aos_f24_pypes_column_lineage`, `test_aos_comp2_cde_lineage_present`, `test_aos_comp3_no_orphans`, `test_aos_nfr11_lineage_overhead`. Implement `benny/governance/jsonld.py::emit_provenance`, extend `benny/governance/lineage.py` + `benny/pypes/lineage.py`, vendor `vendor/prov-o/` context file. Place in `benny/governance/` or `benny/sdlc/` — the langgraph import chain still poisons `benny/graph/`. |
 
 Update this section at the end of every working session.
 

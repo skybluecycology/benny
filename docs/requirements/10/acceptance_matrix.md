@@ -17,8 +17,8 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 |--------|-------|------------|--------|----------|
 | AOS-F1  | 0   | `test_aos_f1_schema_v1_1_back_compat`, `test_aos_f1_v1_1_round_trip` | PASS | `2f6819b` |
 | AOS-F2  | 0   | `test_aos_f2_togaf_phase_enum`, `test_aos_f2_phase_map_validation` | PASS | `2f6819b` |
-| AOS-F3  | 7   | `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure` | TODO | |
-| AOS-F4  | 7   | `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic` | TODO | |
+| AOS-F3  | 7   | `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure` | PASS | `e4226ef` |
+| AOS-F4  | 7   | `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic` | PASS | `e4226ef` |
 | AOS-F5  | 1   | `test_aos_f5_artifact_put_get_roundtrip`, `test_aos_f5_content_addressed` | PASS | `b2259f0` |
 | AOS-F6  | 1   | `test_aos_f6_auto_promote_above_threshold`, `test_aos_f6_summary_clamp_200` | PASS | `b2259f0` |
 | AOS-F7  | 1   | `test_aos_f7_uri_substitution_in_tool_call` | PASS | `b2259f0` |
@@ -58,7 +58,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | PASS | `a504db9` |
 | AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | TODO | |
 | AOS-NFR7  | all   | existing `tests/portability/test_no_absolute_paths.py` | TODO | |
-| AOS-NFR8  | 7,8,9 | `tests/sdlc/test_offline_e2e.py`      | TODO | |
+| AOS-NFR8  | 7,8,9 | `tests/sdlc/test_offline_e2e.py`      | PASS | `e4226ef` |
 | AOS-NFR9  | 10    | `tests/sdlc/test_sandbox_soak.py`     | TODO | |
 | AOS-NFR10 | 10    | `tests/release/test_aos_release_gate.py::bundle_delta` | TODO | |
 | AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | TODO | |
@@ -91,8 +91,8 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 |--------|-------|------------|--------|----------|
 | AOS-OBS1 | 10 | `test_aos_obs1_doctor_aos_section` | TODO | |
 | AOS-OBS2 | all | `test_aos_obs2_logs_carry_component` | TODO | |
-| AOS-OBS3 | 7,8,9 | `test_aos_obs3_sse_event_schemas` | TODO | |
-| AOS-OBS4 | 7,8,9 | `test_aos_obs4_phoenix_attrs` | TODO | |
+| AOS-OBS3 | 7,8,9 | `test_aos_obs3_sse_event_schemas` | PASS | `e4226ef` |
+| AOS-OBS4 | 7,8,9 | `test_aos_obs4_phoenix_attrs` | PASS | `e4226ef` |
 
 ---
 
