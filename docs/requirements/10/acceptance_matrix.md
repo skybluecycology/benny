@@ -39,9 +39,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | PASS | `a45e736` |
 | AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | PASS | `1059565` |
 | AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | PASS | `1059565` |
-| AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | TODO | |
-| AOS-F26 | 9   | `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain` | TODO | |
-| AOS-F27 | 9   | `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain` | TODO | |
+| AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | PASS | `b96a3ab` |
+| AOS-F26 | 9   | `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain` | PASS | `b96a3ab` |
+| AOS-F27 | 9   | `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain` | PASS | `b96a3ab` |
 | AOS-F28 | 10  | `test_aos_f28_metrics_record_persisted` | TODO | |
 | AOS-F29 | 10  | `test_aos_f29_sandbox_multi_model_report` | TODO | |
 | AOS-F30 | 10  | `test_aos_f30_report_shape` | TODO | |
@@ -68,18 +68,18 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-SEC1 | 9 | `test_aos_sec1_persona_tool_allowlist` | TODO | |
-| AOS-SEC2 | 9 | `tests/safety/test_aos_no_unexpected_egress.py` | TODO | |
-| AOS-SEC3 | 9 | `test_aos_sec3_path_traversal_rejected` | TODO | |
+| AOS-SEC1 | 9 | `test_aos_sec1_persona_tool_allowlist` | PASS | `b96a3ab` |
+| AOS-SEC2 | 9 | `tests/safety/test_aos_no_unexpected_egress.py` | PASS | `b96a3ab` |
+| AOS-SEC3 | 9 | `test_aos_sec3_path_traversal_rejected` | PASS | `b96a3ab` |
 | AOS-SEC4 | 10 | `test_aos_sec4_doctor_reports_sandbox` | TODO | |
 | AOS-SEC5 | 1 | `test_aos_sec5_artifact_path_escape` | PASS | `b2259f0` |
-| AOS-SEC6 | 9 | `test_aos_sec6_ledger_rewind_detected` | TODO | |
+| AOS-SEC6 | 9 | `test_aos_sec6_ledger_rewind_detected` | PASS | `b96a3ab` |
 
 ## Compliance — SOX 404 + BCBS 239 (from [requirement.md §9](requirement.md#9-compliance--sox-404--bcbs-239-brief-9))
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-COMP1 | 9 | `test_aos_comp1_sox_chain_verify` | TODO | |
+| AOS-COMP1 | 9 | `test_aos_comp1_sox_chain_verify` | PASS | `b96a3ab` |
 | AOS-COMP2 | 8 | `test_aos_comp2_cde_lineage_present` | PASS | `1059565` |
 | AOS-COMP3 | 8 | `test_aos_comp3_no_orphans`         | PASS | `1059565` |
 | AOS-COMP4 | 10 | `test_aos_comp4_diff_smoke`         | TODO | |

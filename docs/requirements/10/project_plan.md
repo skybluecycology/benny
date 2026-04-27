@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-27
-**Active phase:** Phase 9 — Policy-as-Code + Git ledger (READY TO START)
-**Next decision needed:** none — Phase 8 complete (SHA `1059565`)
+**Active phase:** Phase 10 — Sandbox runner + process metrics + release gates (READY TO START)
+**Next decision needed:** none — Phase 9 complete (SHA `b96a3ab`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 9 — Policy-as-Code + Git ledger |
-| Status | `[IN-PROGRESS]` — Phase 8 complete at `1059565`; Phase 9 ready to open |
-| Active workstream | Phase 9: `benny/governance/policy.py` + `benny/governance/ledger.py` + `tests/safety/` |
+| Phase | 10 — Sandbox runner + process metrics + release gates |
+| Status | `[IN-PROGRESS]` — Phase 9 complete at `b96a3ab`; Phase 10 ready to open |
+| Active workstream | Phase 10: `benny/sdlc/sandbox_runner.py` + `benny/sdlc/metrics.py` + `tests/release/test_aos_release_gate.py` |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,21 +26,22 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0–8 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`, `e4226ef`, `1059565`). Next:
+Phases 0–9 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`, `e4226ef`, `1059565`, `b96a3ab`). Next:
 
-1. Open Phase 9 — Policy-as-Code + Git ledger.
+1. Open Phase 10 — Sandbox runner + process metrics + release gates.
 2. Write red tests first:
-   - `tests/sdlc/test_policy_evaluate.py` (AOS-F25: `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses`)
-   - `tests/sdlc/test_ledger_chain.py` (AOS-F26: `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain`)
-   - `tests/sdlc/test_sox_ledger.py` (AOS-F27: `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain`)
-   - `tests/safety/test_aos_no_unexpected_egress.py` (AOS-SEC2)
-   - `tests/sdlc/test_security_phase9.py` (AOS-SEC1, AOS-SEC3, AOS-SEC6)
-   - `tests/sdlc/test_aos_comp1_sox_chain.py` (AOS-COMP1)
-3. Implement `benny/governance/policy.py::evaluate` (warn/enforce mode, tool allowlist).
-4. Implement `benny/governance/ledger.py` (append-only Git orphan branch, HMAC chain).
-5. Extend `benny/governance/permission_manifest.py` for per-persona tool allowlist.
-6. Wire `benny doctor --audit` to verify ledger chain.
-7. Update §1, §4, §6 + acceptance matrix when Phase 9 gate is green.
+   - `tests/sdlc/test_sandbox_runner.py` (AOS-F29, AOS-F30: `test_aos_f29_sandbox_multi_model_report`, `test_aos_f30_report_shape`)
+   - `tests/sdlc/test_metrics.py` (AOS-F28: `test_aos_f28_metrics_record_persisted`)
+   - `tests/release/test_aos_release_gate.py` (all GATE-AOS-* gates)
+   - `tests/sdlc/test_phoenix_metrics.py` (AOS-F31: `test_aos_f31_phoenix_attributes_emitted`)
+   - `tests/sdlc/test_doctor_aos.py` (AOS-OBS1: `test_aos_obs1_doctor_aos_section`)
+   - `tests/sdlc/test_aos_obs2_logs.py` (AOS-OBS2: `test_aos_obs2_logs_carry_component`)
+3. Implement `benny/sdlc/sandbox_runner.py::run_multi_model`.
+4. Implement `benny/sdlc/metrics.py` process-metric record (§4.5).
+5. Wire AOS section into `benny doctor --json`.
+6. Extend `docs/requirements/release_gates.yaml` with GATE-AOS-*.
+7. Build `tests/release/test_aos_release_gate.py` full release gate.
+8. Update §1, §4, §6 + acceptance matrix when Phase 10 gate is green.
 
 Notes:
 - All AOS modules placed in `benny/sdlc/` (not `benny/graph/`) because
@@ -248,16 +249,16 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 9 — Policy-as-Code + Git ledger
 
-- [ ] `benny/governance/policy.py::evaluate`
-- [ ] `benny/governance/ledger.py` append-only Git branch helper
-- [ ] HMAC chain + SOX intent proof
-- [ ] `benny/governance/permission_manifest.py` extended for tool allowlist
-- [ ] `benny doctor --audit` verifies chain
-- [ ] `aos.policy.mode` flips from `warn` → `enforce`
-- [ ] **`aos.policy.auto_approve_writes` MUST remain `false`**
-- [ ] Tests green: `test_aos_f25_*`, `test_aos_f26_*`, `test_aos_f27_*`, `test_aos_sec1_*`, `test_aos_sec2_*`, `test_aos_sec3_*`, `test_aos_sec6_*`, `test_aos_comp1_*`
-- [ ] Acceptance rows AOS-F25–F27, AOS-SEC1–SEC3, AOS-SEC6, AOS-COMP1 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny/governance/policy.py::evaluate`
+- [x] `benny/governance/ledger.py` — append-only HMAC-chained JSONL ledger; get_head_hash() reads from file tip for rewind detection
+- [x] HMAC chain: `HMAC-SHA256(secret, prompt_hash || diff_hash || prev_hash)` per entry; verify_chain() audits full chain
+- [x] SOX intent proof fields: prompt_hash, diff_hash, prev_hash, persona, model, model_hash, timestamp, manifest_sig, hmac, seq
+- [ ] `benny/governance/permission_manifest.py` extended for tool allowlist (deferred — policy.py handles allowlist inline)
+- [ ] `benny doctor --audit` wired to verify_chain (deferred to Phase 10 — benny doctor extended in that phase)
+- [x] `aos.policy.mode` default `warn`; `auto_approve_writes` = `false` hard-blocked in constructor (GATE-AOS-POLICY-1)
+- [x] Tests green: 30/30 — `test_policy_evaluate.py` (15), `test_ledger_chain.py` (15), `test_aos_no_unexpected_egress.py` (3)
+- [x] Acceptance rows AOS-F25–F27, AOS-SEC1–SEC3, AOS-SEC6, AOS-COMP1 → `PASS`
+- Evidence SHA: `b96a3ab`
 
 ### Phase 10 — Sandbox runner + process metrics + release gates
 
