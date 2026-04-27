@@ -34,9 +34,9 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F17 | 5   | `test_aos_f17_vram_aware_capacity` (mocked VRAM) | PASS | `a504db9` |
 | AOS-F18 | 5   | `test_aos_f18_backpressure_blocks_dispatcher` | PASS | `a504db9` |
 | AOS-F19 | 5   | `test_aos_f19_iteration_budget_raises` | PASS | `a504db9` |
-| AOS-F20 | 6   | `test_aos_f20_req_emits_prd_and_feature` | TODO | |
-| AOS-F21 | 6   | `test_aos_f21_compile_to_pytest_deterministic` | TODO | |
-| AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | TODO | |
+| AOS-F20 | 6   | `test_aos_f20_req_emits_prd_and_feature` | PASS | `a45e736` |
+| AOS-F21 | 6   | `test_aos_f21_compile_to_pytest_deterministic` | PASS | `a45e736` |
+| AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | PASS | `a45e736` |
 | AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | TODO | |
 | AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | TODO | |
 | AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | TODO | |
@@ -53,7 +53,7 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 |--------|-------|------------|--------|----------|
 | AOS-NFR1  | 1     | `tests/sdlc/test_pbr_token_budget.py` | PASS | `b2259f0` |
 | AOS-NFR2  | 4     | `tests/sdlc/test_resume_latency.py`   | PASS | `3be752a` |
-| AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | TODO | |
+| AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | PASS | `a45e736` |
 | AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | PASS | `777f798` |
 | AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | PASS | `a504db9` |
 | AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | TODO | |

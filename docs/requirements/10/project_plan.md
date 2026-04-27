@@ -6,8 +6,8 @@ phase exit gate (§3) is green AND the corresponding rows in
 [acceptance_matrix.md](acceptance_matrix.md) are `PASS` with evidence.
 
 **Last updated:** 2026-04-27
-**Active phase:** Phase 6 — BDD pipeline (READY TO START)
-**Next decision needed:** none — Phase 5 complete (SHA `a504db9`)
+**Active phase:** Phase 7 — SDLC manifest + TOGAF + ADRs (READY TO START)
+**Next decision needed:** none — Phase 6 complete (SHA `a45e736`)
 
 ---
 
@@ -15,9 +15,9 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 | Field | Value |
 |-------|-------|
-| Phase | 6 — BDD pipeline |
-| Status | `[IN-PROGRESS]` — Phase 5 complete at `a504db9`; Phase 6 ready to open |
-| Active workstream | Phase 6: `benny/sdlc/requirements.py` + `benny/sdlc/bdd.py` + `benny req` CLI |
+| Phase | 7 — SDLC manifest + TOGAF + ADRs |
+| Status | `[IN-PROGRESS]` — Phase 6 complete at `a45e736`; Phase 7 ready to open |
+| Active workstream | Phase 7: `benny/sdlc/togaf.py` + SDLC manifest fixture + ADR emission |
 | Blockers | None |
 | Open OQs | **0** (all 7 DECIDED 2026-04-26 — see [open_questions.md](open_questions.md)) |
 | Branch | `claude/peaceful-hugle-bcce2b` |
@@ -26,17 +26,17 @@ phase exit gate (§3) is green AND the corresponding rows in
 
 ### 1.1 Immediate next steps (for the next agent or operator)
 
-Phases 0, 1, 2, 3, 4, and 5 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`). Next:
+Phases 0, 1, 2, 3, 4, 5, and 6 are **complete** (`2f6819b`, `b2259f0`, `39cec9a`, `777f798`, `3be752a`, `a504db9`, `a45e736`). Next:
 
-1. Open Phase 6 — BDD pipeline.
+1. Open Phase 7 — SDLC manifest + TOGAF + ADRs.
 2. Write red tests first:
-   - `tests/sdlc/test_bdd_compile.py` (AOS-F21: `test_aos_f21_compile_to_pytest_deterministic`)
-   - `tests/sdlc/test_req_latency.py` (AOS-NFR3: `test_aos_nfr3_req_p95`)
-   - `tests/sdlc/test_req_bdd.py` (AOS-F20: `test_aos_f20_req_emits_prd_and_feature`, AOS-F22: `test_aos_f22_prd_schema_validation`)
-3. Implement `benny/sdlc/requirements.py::generate_prd` and `benny/sdlc/bdd.py::compile_to_pytest`.
-4. PRD JSON validated against `schemas/aos/prd_v1.schema.json`.
-5. Wire `benny req` CLI command in `benny_cli.py`.
-6. Update §1, §4, §6 + acceptance matrix when Phase 6 gate is green.
+   - `tests/sdlc/test_togaf_phase_map.py` (AOS-F2 extension, AOS-F3: `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure`)
+   - `tests/sdlc/test_adr_emission.py` (AOS-F4: `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic`)
+   - `tests/sdlc/test_quality_gate.py` (AOS-F3 full coverage)
+3. Implement `benny/sdlc/togaf.py::map_waves_to_phases` and ADR auto-emission.
+4. Create `manifests/templates/sdlc_pipeline.json` end-to-end fixture.
+5. Quality gate kinds (`linter`/`typechecker`/`bdd`/`schema`/`custom`) all wired.
+6. Update §1, §4, §6 + acceptance matrix when Phase 7 gate is green.
 
 Notes:
 - All AOS modules placed in `benny/sdlc/` (not `benny/graph/`) because
@@ -207,15 +207,15 @@ Flip a box from `[ ]` to `[x]` only after the phase exit gate is green AND every
 
 ### Phase 6 — BDD pipeline
 
-- [ ] `benny req` CLI command
-- [ ] `benny/sdlc/requirements.py::generate_prd`
-- [ ] `benny/sdlc/bdd.py::compile_to_pytest` deterministic
-- [ ] PRD JSON validated against `schemas/aos/prd_v1.schema.json`
-- [ ] `aos.bdd.enabled` default flips `true`
-- [ ] Tests green: `test_aos_f20_*`, `test_aos_f21_*`, `test_aos_f22_*`
-- [ ] AOS-NFR3 p95 ≤ 2.5 s (LLM mocked)
-- [ ] Acceptance rows AOS-F20–F22, AOS-NFR3 → `PASS`
-- Evidence SHA: `________________`
+- [x] `benny req` CLI command
+- [x] `benny/sdlc/requirements.py::generate_prd`
+- [x] `benny/sdlc/bdd.py::compile_to_pytest` deterministic
+- [x] PRD JSON validated against `schemas/aos/prd_v1.schema.json`
+- [ ] `aos.bdd.enabled` default flip (deferred to Phase 10 cutover)
+- [x] Tests green: 36/36 — `test_req_bdd.py` (19), `test_bdd_compile.py` (15), `test_req_latency.py` (3)
+- [x] AOS-NFR3 p95 ≤ 2.5 s (LLM mocked) — measured < 1 ms
+- [x] Acceptance rows AOS-F20–F22, AOS-NFR3 → `PASS`
+- Evidence SHA: `a45e736`
 
 ### Phase 7 — SDLC manifest + TOGAF + ADRs
 
@@ -330,6 +330,7 @@ G-* gates.
 | AOS-NFR2 resume p95 | ≤ 5 s | n/a | n/a | n/a | n/a | **~0.3 ms** ✓ | — | — | — | — | — | — |
 | AOS-NFR4 mermaid render | ≤ 50 ms | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — | — | — | — |
 | AOS-NFR5 OOM-free pool | 0 OOM | n/a | n/a | n/a | n/a | n/a | **0 OOM** ✓ | — | — | — | — | — |
+| AOS-NFR3 req p95 | ≤ 2.5 s | n/a | n/a | n/a | n/a | n/a | n/a | **< 1 ms** ✓ | — | — | — | — |
 | AOS-NFR11 lineage overhead p95 | ≤ 5 ms | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — | — | — |
 | AOS-NFR12 disclosure tokens | ≤ 500 | n/a | n/a | **0 tokens** ✓ | — | — | — | — | — | — | — | — |
 | Bundle delta | ≤ 250 KB gz | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |
@@ -407,12 +408,12 @@ If a session terminates unexpectedly, the next agent should pick up from here:
 
 | Field | Value |
 |-------|-------|
-| Last completed step | Phase 5 committed — SHA `a504db9` |
-| Current in-progress step | Phase 6 — BDD pipeline (not yet started) |
+| Last completed step | Phase 6 committed — SHA `a45e736` |
+| Current in-progress step | Phase 7 — SDLC manifest + TOGAF + ADRs (not yet started) |
 | Open files / scratch | — |
 | Pending HITL approvals | Confirm `qwen3_5_9b` Lemonade slug before swarm wire-up |
-| Last green CI run | 131 PASS (sdlc + safety scope) @ `a504db9` |
-| Notes for next agent | Phase 6 starts with red tests: `test_aos_f20_req_emits_prd_and_feature`, `test_aos_f21_compile_to_pytest_deterministic`, `test_aos_f22_prd_schema_validation`, and `test_aos_nfr3_req_p95` (LLM mocked). Implement `benny/sdlc/requirements.py::generate_prd` and `benny/sdlc/bdd.py::compile_to_pytest`. PRD JSON must validate against `schemas/aos/prd_v1.schema.json`. Wire `benny req` CLI. Place all new modules in `benny/sdlc/` — the langgraph import chain still poisons `benny/graph/`. |
+| Last green CI run | 167 PASS (sdlc + safety scope) @ `a45e736` |
+| Notes for next agent | Phase 7 starts with red tests: `test_aos_f3_quality_gate_kinds`, `test_aos_f3_halt_on_failure`, `test_aos_f4_adr_emission`, `test_aos_f4_adr_sequence_monotonic`. Implement `benny/sdlc/togaf.py::map_waves_to_phases` and ADR auto-emission. Create `manifests/templates/sdlc_pipeline.json`. All new modules in `benny/sdlc/` — the langgraph import chain still poisons `benny/graph/`. |
 
 Update this section at the end of every working session.
 
