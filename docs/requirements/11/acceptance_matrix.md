@@ -36,8 +36,8 @@ pull):
 | AAMP-F4  | 2 | `test_aamp_f4_event_filter_by_permissions` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-F5  | 3 | `test_aamp_f5_dsp_pure_transform` | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-F6  | 3 | `test_aamp_f6_spectrum_vu_loop` | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
-| AAMP-F7  | 4 | `test_aamp_f7_tui_palette_from_skin` | TODO | — |
-| AAMP-F8  | 4 | `test_aamp_f8_minimode_size_floor` | TODO | — |
+| AAMP-F7  | 4 | `test_aamp_f7_tui_palette_from_skin` | IN-PROGRESS | `tests/agentamp/test_tui.py` |
+| AAMP-F8  | 4 | `test_aamp_f8_minimode_size_floor` | IN-PROGRESS | `tests/agentamp/test_tui.py` |
 | AAMP-F9  | 5 | `test_aamp_f9_eq_write_signs_manifest` | TODO | — |
 | AAMP-F10 | 5 | `test_aamp_f10_per_task_picker`, `test_aamp_f10_knob_lock_persists` | TODO | — |
 | AAMP-F11 | 6 | `test_aamp_f11_playlist_reads_runs` | TODO | — |
@@ -75,7 +75,7 @@ pull):
 | AAMP-NFR3  | 3 | `tests/agentamp/test_dsp_throughput.py`         | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-NFR4  | 3 | `tests/agentamp/test_dsp_determinism.py`        | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-NFR5  | 8 | `tests/agentamp/test_install_perf.py`           | TODO | — |
-| AAMP-NFR6  | 4 | `tests/agentamp/test_tui_first_paint.py`        | TODO | — |
+| AAMP-NFR6  | 4 | `tests/agentamp/test_tui_first_paint.py`        | IN-PROGRESS | `tests/agentamp/test_tui.py` |
 | AAMP-NFR7  | 9 | `tests/release/test_aamp_release_gate.py::coverage` | TODO | — |
 | AAMP-NFR8  | all | existing `tests/portability/test_no_absolute_paths.py` | TODO | — |
 | AAMP-NFR9  | 9 | `tests/agentamp/test_telemetry_overhead.py`     | TODO | — |
