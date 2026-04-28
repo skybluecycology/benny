@@ -81,7 +81,7 @@ async def check_services() -> List[CheckResult]:
     
     # Check LLM Providers
     for p_id, p_info in LOCAL_PROVIDERS.items():
-        name = p_info["name"]
+        name = p_info.get("name", p_id)
         url = p_info.get("check_url")
         if not url:
             results.append(CheckResult(name=f"Service: {name}", status="OK", message="Static library (no probe)"))
