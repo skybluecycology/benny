@@ -32,8 +32,8 @@ pull):
 |--------|-------|------------|--------|----------|
 | AAMP-F1  | 1 | `test_aamp_f1_skin_load_signed`, `test_aamp_f1_unsigned_rejected` | TODO | — |
 | AAMP-F2  | 1 | `test_aamp_f2_tokens_to_css_vars`, `test_aamp_f2_no_react_remount` | TODO | — |
-| AAMP-F3  | 2 | `test_aamp_f3_sdk_mount_iframe_csp`, `test_aamp_f3_unmount_clean` | TODO | — |
-| AAMP-F4  | 2 | `test_aamp_f4_event_filter_by_permissions` | TODO | — |
+| AAMP-F3  | 2 | `test_aamp_f3_sdk_mount_iframe_csp`, `test_aamp_f3_unmount_clean` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
+| AAMP-F4  | 2 | `test_aamp_f4_event_filter_by_permissions` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-F5  | 3 | `test_aamp_f5_dsp_pure_transform` | TODO | — |
 | AAMP-F6  | 3 | `test_aamp_f6_spectrum_vu_loop` | TODO | — |
 | AAMP-F7  | 4 | `test_aamp_f7_tui_palette_from_skin` | TODO | — |
@@ -81,18 +81,18 @@ pull):
 | AAMP-NFR9  | 9 | `tests/agentamp/test_telemetry_overhead.py`     | TODO | — |
 | AAMP-NFR10 | 9 | `tests/agentamp/test_offline_e2e.py`            | TODO | — |
 | AAMP-NFR11 | 9 | `tests/release/test_aamp_release_gate.py::bundle_delta` | TODO | — |
-| AAMP-NFR12 | 2 | `tests/agentamp/test_plugin_watchdog.py`        | TODO | — |
+| AAMP-NFR12 | 2 | `tests/agentamp/test_plugin_watchdog.py`        | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 
 ## Security (from [requirement.md §8](requirement.md#8-security--privacy))
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AAMP-SEC1 | 2 | `test_aamp_sec1_iframe_sandbox_attrs`            | TODO | — |
-| AAMP-SEC2 | 2 | `test_aamp_sec2_csp_grammar`, `test_aamp_sec2_connect_src_none` | TODO | — |
+| AAMP-SEC1 | 2 | `test_aamp_sec1_iframe_sandbox_attrs`            | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
+| AAMP-SEC2 | 2 | `test_aamp_sec2_csp_grammar`, `test_aamp_sec2_connect_src_none` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-SEC3 | 1 | `test_aamp_sec3_zip_path_traversal_rejected`     | TODO | — |
 | AAMP-SEC4 | 1 | `test_aamp_sec4_signature_uses_shared_key_path`  | TODO | — |
 | AAMP-SEC5 | 5 | `test_aamp_sec5_eq_write_policy_evaluated`       | TODO | — |
-| AAMP-SEC6 | 2 | `test_aamp_sec6_event_filter_subset`             | TODO | — |
+| AAMP-SEC6 | 2 | `test_aamp_sec6_event_filter_subset`             | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-SEC7 | 8 | `test_aamp_sec7_doctor_reports_drift`            | TODO | — |
 
 ## Compliance — integration with AOS-001 (from [requirement.md §9](requirement.md#9-compliance--integration-with-aos-001-governance))
