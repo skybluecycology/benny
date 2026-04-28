@@ -263,6 +263,40 @@ All four sandbox commands route LLM calls through `call_model()` (CLAUDE.md rule
 
 ---
 
+### 4.6 AgentAmp — skinnable, pluggable agentic cockpit
+
+AgentAmp extends Benny's CLI and Studio surfaces with Winamp-style skin packs, visualiser plugins, and manifest-knob panels. Full run book in [AGENTAMP_GUIDE.md](AGENTAMP_GUIDE.md).
+
+**Phase 1 (shipped) — skin pack lifecycle**
+
+```bash
+# Create a draft skin
+benny agentamp scaffold-skin my-team-skin
+# → $BENNY_HOME/agentamp/drafts/my-team-skin/skin.manifest.json  (signature: null)
+
+# Pack, sign, install
+benny agentamp pack   $BENNY_HOME/agentamp/drafts/my-team-skin --out my-team-skin.aamp
+benny agentamp sign   my-team-skin.aamp        # HMAC-SHA256; uses BENNY_HMAC_KEY
+benny agentamp install my-team-skin.aamp --workspace default
+```
+
+Install exit codes: `0` = success · `1` = I/O error · `2` = security rejection (missing/invalid signature, path traversal).
+
+**Security invariants (enforced at every `install`)**
+- Unsigned packs are always rejected — no bypass flag in production (`GATE-AAMP-AUTOSIGN-1`).
+- Zip path-traversal sequences (`../`, absolute paths) raise `SkinPathEscape` before any file is read.
+- `BENNY_OFFLINE=1` is fully supported — all Phase 1 operations are stdlib-only.
+
+**HMAC key**
+
+Skin packs share the same key as manifests and checkpoints:
+
+```bash
+export BENNY_HMAC_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+```
+
+---
+
 ## 5. The LLM router (Phase 3 hardening)
 
 Knobs, in order of precedence:
