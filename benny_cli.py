@@ -1606,6 +1606,10 @@ def build_parser() -> argparse.ArgumentParser:
     from benny.pypes.cli import add_subparser as _pypes_add_subparser
     _pypes_add_subparser(sub)
 
+    # agentamp — skinnable, pluggable agentic cockpit (AAMP-001 Phase 1)
+    from benny.agentamp.cli import add_subparser as _agentamp_add_subparser
+    _agentamp_add_subparser(sub)
+
     # migrate (PBR-001 Phase 8)
     p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")
     p_mig.add_argument("--from-path", "--from", required=True, help="Source directory to migrate")
@@ -1655,6 +1659,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "pypes":
         from benny.pypes.cli import cmd_pypes
         return cmd_pypes(args)
+    if args.cmd == "agentamp":
+        from benny.agentamp.cli import cmd_agentamp
+        return cmd_agentamp(args)
 
     parser.print_help()
     return 1
