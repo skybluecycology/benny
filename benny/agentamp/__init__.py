@@ -11,6 +11,9 @@ Public surface (Phase 2)
                validate_permissions_subset(), PLUGIN_SANDBOX_ATTRS, PLUGIN_CSP
   sandbox    — SandboxHost, MountedPlugin, PluginPermissionsViolation
 
+Public surface (Phase 3)
+  dsp        — DSPTransform, Envelope, DerivedData, transform(), envelope_key()
+
 Feature flag: ``aamp.enabled`` (AAMP-F32). Checked at CLI dispatch; not re-checked here.
 """
 
@@ -51,6 +54,14 @@ from .sandbox import (
     PluginPermissionsViolation,
     SandboxHost,
 )
+from .dsp import (
+    DEFAULT_SPECTRUM_BINS,
+    DSPTransform,
+    DerivedData,
+    Envelope,
+    envelope_key,
+    transform,
+)
 
 __all__ = [
     # Phase 1 — contracts
@@ -88,4 +99,11 @@ __all__ = [
     "SandboxHost",
     "MountedPlugin",
     "PluginPermissionsViolation",
+    # Phase 3 — DSP-A pipeline
+    "DSPTransform",
+    "DerivedData",
+    "Envelope",
+    "DEFAULT_SPECTRUM_BINS",
+    "envelope_key",
+    "transform",
 ]

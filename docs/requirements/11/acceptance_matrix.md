@@ -34,8 +34,8 @@ pull):
 | AAMP-F2  | 1 | `test_aamp_f2_tokens_to_css_vars`, `test_aamp_f2_no_react_remount` | TODO | — |
 | AAMP-F3  | 2 | `test_aamp_f3_sdk_mount_iframe_csp`, `test_aamp_f3_unmount_clean` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-F4  | 2 | `test_aamp_f4_event_filter_by_permissions` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
-| AAMP-F5  | 3 | `test_aamp_f5_dsp_pure_transform` | TODO | — |
-| AAMP-F6  | 3 | `test_aamp_f6_spectrum_vu_loop` | TODO | — |
+| AAMP-F5  | 3 | `test_aamp_f5_dsp_pure_transform` | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
+| AAMP-F6  | 3 | `test_aamp_f6_spectrum_vu_loop` | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-F7  | 4 | `test_aamp_f7_tui_palette_from_skin` | TODO | — |
 | AAMP-F8  | 4 | `test_aamp_f8_minimode_size_floor` | TODO | — |
 | AAMP-F9  | 5 | `test_aamp_f9_eq_write_signs_manifest` | TODO | — |
@@ -72,8 +72,8 @@ pull):
 |--------|-------|------------|--------|----------|
 | AAMP-NFR1  | 1 | `tests/agentamp/test_skin_apply_perf.py`        | TODO | — |
 | AAMP-NFR2  | 1 | `tests/agentamp/test_skin_switch_no_flash.py`   | TODO | — |
-| AAMP-NFR3  | 3 | `tests/agentamp/test_dsp_throughput.py`         | TODO | — |
-| AAMP-NFR4  | 3 | `tests/agentamp/test_dsp_determinism.py`        | TODO | — |
+| AAMP-NFR3  | 3 | `tests/agentamp/test_dsp_throughput.py`         | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
+| AAMP-NFR4  | 3 | `tests/agentamp/test_dsp_determinism.py`        | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-NFR5  | 8 | `tests/agentamp/test_install_perf.py`           | TODO | — |
 | AAMP-NFR6  | 4 | `tests/agentamp/test_tui_first_paint.py`        | TODO | — |
 | AAMP-NFR7  | 9 | `tests/release/test_aamp_release_gate.py::coverage` | TODO | — |
@@ -103,7 +103,7 @@ pull):
 | AAMP-COMP2 | 5 | `test_aamp_comp2_previous_signatures_preserved` | TODO | — |
 | AAMP-COMP3 | 7 | `test_aamp_comp3_jsonld_per_plugin`             | TODO | — |
 | AAMP-COMP4 | 9 | `test_aamp_comp4_doctor_audit_completeness`     | TODO | — |
-| AAMP-COMP5 | 3 | `test_aamp_comp5_dsp_replay_byte_identical`     | TODO | — |
+| AAMP-COMP5 | 3 | `test_aamp_comp5_dsp_replay_byte_identical`     | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 
 ## Observability (from [requirement.md §10](requirement.md#10-observability))
 
