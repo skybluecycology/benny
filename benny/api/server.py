@@ -2,29 +2,9 @@
 Benny API Server - FastAPI application with CORS and routers
 """
 
+import builtins
 import sys as _sys
 import asyncio as _asyncio
-
-# ─── Windows FD-limit fix ─────────────────────────────────────────────────────
-# On Windows the default SelectorEventLoop is backed by select.select(), which
-# caps out at 64 or 512 file descriptors. Large RAG ingests (Docling + ChromaDB
-# embedding + Neo4j writes + Marquez lineage) push well past that and crash
-# the uvicorn subprocess with `ValueError: too many file descriptors in select()`.
-# ProactorEventLoop uses IOCP under the hood and has no such cap.
-if _sys.platform == "win32":
-    try:
-        # Increase the C runtime's max files limit (affects stdio, open(), etc.)
-        import msvcrt
-        msvcrt.setmaxstdio(2048)
-        
-        # Force ProactorEventLoopPolicy for this process
-        _asyncio.set_event_loop_policy(_asyncio.WindowsProactorEventLoopPolicy())
-        print("✓ Windows ProactorEventLoopPolicy Enforced (IOCP)")
-    except Exception as e:
-        print(f"⚠ Warning: Failed to enforce ProactorEventLoop: {e}")
-
-import json
-import builtins
 
 # Monkey-patch print to prevent UnicodeEncodeError on Windows CP1252 consoles
 _original_print = builtins.print
@@ -33,10 +13,27 @@ def _safe_print(*args, **kwargs):
     try:
         _original_print(*args, **kwargs)
     except UnicodeEncodeError:
+        # Replace non-encodable characters with '?' for console stability
         safe_args = [str(a).encode('ascii', 'replace').decode('ascii') for a in args]
         _original_print(*safe_args, **kwargs)
 
 builtins.print = _safe_print
+
+# ─── Windows FD-limit fix ─────────────────────────────────────────────────────
+if _sys.platform == "win32":
+    try:
+        # Increase the C runtime's max files limit if supported
+        import msvcrt
+        if hasattr(msvcrt, "setmaxstdio"):
+            msvcrt.setmaxstdio(2048)
+        
+        # Force ProactorEventLoopPolicy for this process
+        _asyncio.set_event_loop_policy(_asyncio.WindowsProactorEventLoopPolicy())
+        print("✓ Windows ProactorEventLoopPolicy Enforced (IOCP)")
+    except Exception as e:
+        print(f"Warning: Failed to enforce ProactorEventLoop: {e}")
+
+import json
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
