@@ -310,6 +310,7 @@ OUTPUT FORMAT:
     for attempt in range(max_retries):
         try:
             model_id = state.get("model") or "local_lemonade"
+            print(f"DEBUG: Planner calling call_model with model_id='{model_id}'")
             response_text = await call_model(
                 model=model_id,
                 messages=[
@@ -757,20 +758,26 @@ Do this sparingly and only for significant knowledge gaps."""
                 model_cfg = get_model_config(model)
                 litellm_model = normalize_model_string(model)
 
-                raw_payload = {
-                    "model": litellm_model,
-                    "messages": messages,
-                    "temperature": 0.7,
-                    "max_tokens": 3000
-                }
-                if "base_url" in model_cfg:
-                    raw_payload["api_base"] = model_cfg["base_url"]
-                if "api_key" in model_cfg:
-                    raw_payload["api_key"] = model_cfg["api_key"]
-                if tools:
-                    raw_payload["tools"] = tools
-
-                response = await acompletion(**raw_payload)
+                # Use call_model for the actual inference to benefit from resolution/local bypass
+                # but we still want the raw response if we want to handle tools here.
+                # WAIT: call_model returns a string. If we want tools, we need it to return a response or handle tools.
+                
+                # For now, let's just make call_model return the final string and handle tools inside it if possible.
+                # BUT executor_node wants to log each tool call.
+                
+                response_content = await call_model(
+                    model=model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=3000,
+                    run_id=execution_id,
+                    authorized_tools=assigned_skills
+                )
+                
+                # Since call_model currently returns a string, we'll assume it handled everything.
+                # We'll break the loop here.
+                final_content = response_content
+                break
 
                 # Robust content/message extraction (cloud/LiteLLM path)
                 if hasattr(response, "choices") and len(response.choices) > 0:

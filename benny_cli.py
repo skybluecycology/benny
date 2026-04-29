@@ -107,6 +107,8 @@ async def cmd_run(args: argparse.Namespace) -> int:
     from benny.persistence import run_store
 
     manifest = _load_manifest(args.manifest)
+    if args.workspace:
+        manifest.workspace = args.workspace
 
     # Persist so runs reference a real, resolvable manifest id.
     run_store.save_manifest(manifest)
@@ -1518,6 +1520,7 @@ def build_parser() -> argparse.ArgumentParser:
     # run
     p_run = sub.add_parser("run", help="Execute a SwarmManifest (by path or by id)")
     p_run.add_argument("manifest", help="Path to manifest.json OR manifest id")
+    p_run.add_argument("--workspace", default=None, help="Override the workspace baked into the manifest")
     p_run.add_argument("--json", action="store_true", help="Emit the final RunRecord as JSON")
 
     # runs

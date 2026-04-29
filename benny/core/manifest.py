@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 # AOS-001 Phase 0: additive v1.1 extension — all new fields optional for back-compat
@@ -136,6 +136,13 @@ class ManifestEdge(BaseModel):
     target: str
     label: Optional[str] = None
     animated: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_list(cls, data: Any) -> Any:
+        if isinstance(data, list) and len(data) >= 2:
+            return {"source": data[0], "target": data[1]}
+        return data
 
 
 class ManifestPlan(BaseModel):

@@ -57,7 +57,7 @@ MODEL_REGISTRY = {
     },
     # Local models for privacy and cost savings
     "local_lemonade": {
-        "model": "openai/deepseek-r1-8b-FLM",
+        "model": "qwen3.5-9b-FLM",
         "provider": "lemonade",
         "cost_per_1k": 0.0,
         "use_for": ["offline", "sensitive_data", "testing", "reasoning", "content_generation"]
@@ -124,8 +124,8 @@ def is_local_model(model_name: str) -> bool:
     # Check if it's a registry key pointing to a local provider
     if model_name in MODEL_REGISTRY:
         provider = MODEL_REGISTRY[model_name].get("provider", "").lower()
-        if provider in LOCAL_PROVIDERS or provider == "litert":
-            return True
+        res = provider in LOCAL_PROVIDERS or provider == "litert"
+        return res
             
     return False
 
@@ -238,11 +238,22 @@ async def call_model(
     run_id: Optional[str] = None,
     authorized_tools: Optional[List[str]] = None
 ) -> str:
-    print(f"DEBUG: call_model(model='{model}', run_id='{run_id}')")
     """
     Main entry point for LLM inference.
     Handles LiteRT (local), LiteLLM (cloud/local), and system prompt augmentation.
     """
+    print(f"DEBUG: call_model(model='{model}', run_id='{run_id}')")
+    
+    # 0. RESOLVE REGISTRY KEY (Ensures LiteLLM doesn't see 'local_lemonade')
+    actual_model = model
+    if model in MODEL_REGISTRY:
+        config = MODEL_REGISTRY[model]
+        actual_model = config.get("model", model)
+        provider = config.get("provider", "").lower()
+        if "/" not in actual_model and provider:
+             actual_model = f"{provider}/{actual_model}"
+        print(f"DEBUG: Resolved registry key '{model}' to '{actual_model}'")
+    
     start_ts = datetime.datetime.now()
     log_data = {
         "ts": start_ts.isoformat(),
@@ -294,9 +305,9 @@ async def call_model(
                 actual_timeout = 300.0
 
     # 4. LITERT ROUTING (Local On-Device)
-    if model.startswith("litert/"):
+    if actual_model.startswith("litert/"):
         try:
-            model_id = model.split("/")[-1]
+            model_id = actual_model.split("/")[-1]
             engine = LiteRTEngine()
             response = await engine.generate(model_id, messages, temperature, max_tokens)
             log_data["ok"] = True
@@ -311,7 +322,7 @@ async def call_model(
 
     # 5. LOCAL EXECUTOR SHORT-CIRCUIT (PBR-001 Phase 5)
     # If the model is local, we bypass LiteLLM to ensure reliability
-    if is_local_model(model):
+    if is_local_model(model) or is_local_model(actual_model):
         # Resolve to a specific provider/model string if it's a registry key
         config = get_model_config(model)
         provider = config.get("provider", "").lower()
@@ -361,7 +372,7 @@ async def call_model(
     try:
         config = get_model_config(model)
         provider = config.get("provider", "openai").lower()
-        litellm_model = config["model"]
+        litellm_model = actual_model # Use the resolved model name
         
         # Normalize local providers for LiteLLM if they somehow leaked here
         local_mapping = ["lemonade", "fastflowlm", "lmstudio", "ollama"]
@@ -382,6 +393,13 @@ async def call_model(
             kwargs["base_url"] = config["base_url"] # Double-bagging for OpenAI v1
             kwargs["custom_llm_provider"] = "openai" # Force OpenAI-compatible mode
         
+        # 6a. TOOL RESOLUTION
+        if authorized_tools:
+            from .skill_registry import registry
+            tool_schemas = registry.get_tool_schemas(authorized_tools, workspace_id)
+            if tool_schemas:
+                kwargs["tools"] = tool_schemas
+        
         # Ensure api_key is set for local providers (LiteLLM requirement for openai/ prefix)
         if "api_key" in config and config["api_key"]:
             kwargs["api_key"] = config["api_key"]
@@ -391,39 +409,81 @@ async def call_model(
         if actual_timeout:
             kwargs["timeout"] = actual_timeout
 
-        # DEBUG
-        print(f"DEBUG: Calling model={model} via LiteLLM as {litellm_model} @ {kwargs.get('api_base')}")
-
-        response = await _await_if_needed(_run_completion(**kwargs))
-
-        if isinstance(response, str):
-            log_data["ok"] = True
-            log_data["provider"] = provider
-            log_data["duration_ms"] = int((datetime.datetime.now() - start_ts).total_seconds() * 1000)
-            log_llm_call(log_data)
-            return response
+        # 6b. EXECUTION LOOP (Handles Tool Calls)
+        max_steps = 5
+        current_step = 0
+        final_content = ""
         
-        # Robust Content Extraction
-        content = ""
-        try:
-            if hasattr(response, "choices") and len(response.choices) > 0:
-                content = response.choices[0].message.content
-            elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
-                choice = response["choices"][0]
-                content = choice.get("message", {}).get("content", "") if isinstance(choice, dict) else getattr(choice, "message", choice).content
-            elif isinstance(response, str):
-                content = response
-            elif isinstance(response, dict) and "message" in response:
-                content = response["message"].get("content", str(response))
-            else:
-                content = str(response)
-        except Exception as ce:
-            logger.warning(f"Content extraction error: {ce}")
-            content = str(response)
+        while current_step < max_steps:
+            current_step += 1
+            print(f"DEBUG: Calling model={model} (step {current_step}) via LiteLLM as {litellm_model} @ {kwargs.get('api_base')}")
+            
+            response = await _await_if_needed(_run_completion(**kwargs))
 
+            if isinstance(response, str):
+                final_content = response
+                break
+            
+            # Extract message
+            if hasattr(response, "choices") and len(response.choices) > 0:
+                message = response.choices[0].message
+            elif isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
+                message = response["choices"][0].get("message")
+            else:
+                final_content = str(response)
+                break
+                
+            messages.append(message)
+            
+            # Handle Tool Calls
+            tool_calls = getattr(message, "tool_calls", None) or (message.get("tool_calls") if isinstance(message, dict) else None)
+            if tool_calls:
+                from .skill_registry import registry
+                for tc in tool_calls:
+                    func_name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name")
+                    call_id = tc.id if hasattr(tc, "id") else tc.get("id")
+                    args_str = tc.function.arguments if hasattr(tc, "function") else tc.get("function", {}).get("arguments", "{}")
+                    
+                    try:
+                        args = json.loads(args_str)
+                        print(f"DEBUG: Executing tool '{func_name}' with args: {args}")
+                        
+                        # Execute skill
+                        result = await registry.execute_skill(
+                            func_name, 
+                            workspace_id, 
+                            agent_id=run_id, 
+                            **args
+                        )
+                        
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": func_name,
+                            "content": str(result)
+                        })
+                    except Exception as te:
+                        print(f"DEBUG: Tool execution failed: {te}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": func_name,
+                            "content": f"Error: {str(te)}"
+                        })
+                # Update kwargs with new messages for next iteration
+                kwargs["messages"] = messages
+            else:
+                # No more tool calls, we are done
+                final_content = message.content if hasattr(message, "content") else message.get("content", "")
+                break
+        
+        # Final result from the loop
+        response_obj = response
+        content = final_content
+        
         # Usage Tracking
         try:
-             usage = response.get("usage", {}) if hasattr(response, "get") else getattr(response, "usage", {})
+             usage = response_obj.get("usage", {}) if hasattr(response_obj, "get") else getattr(response_obj, "usage", {})
              usage_data = usage if isinstance(usage, dict) else (usage.model_dump() if hasattr(usage, 'model_dump') else dict(usage))
              
              event_bus.emit(run_id, "resource_usage", {
