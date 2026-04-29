@@ -58,7 +58,7 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Iterable, Iterator, List
+from typing import Dict, Iterable, Iterator, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -96,23 +96,32 @@ DEFAULT_WINDOW_SIZE: int = 64   # events; controls VU rolling window
 class DerivedData:
     """Computed analytics for one SSE event (AAMP-F6).
 
-    All fields except ``policy_state`` are numeric; all floats lie in [0, 1].
+    All fields except ``policy_state`` and ``layout_event`` are numeric;
+    all floats lie in [0, 1].
+
+    ``layout_event`` is ``None`` for regular SSE-stream envelopes and is
+    set only by :func:`make_layout_envelope` for layout-transition events
+    (AAMP-F21).
     """
 
-    spectrum_bin: List[float]    # 32 (or spectrum_bins) floats in [0, 1]
-    vu_left: float               # dispatcher activity ratio [0, 1]
-    vu_right: float              # reasoner activity ratio [0, 1]
-    loop_index: int              # number of wave_started events seen so far
-    policy_state: str            # "approved" | "denied"
+    spectrum_bin: List[float]           # 32 (or spectrum_bins) floats in [0, 1]
+    vu_left: float                      # dispatcher activity ratio [0, 1]
+    vu_right: float                     # reasoner activity ratio [0, 1]
+    loop_index: int                     # number of wave_started events seen so far
+    policy_state: str                   # "approved" | "denied"
+    layout_event: Optional[str] = None  # set for layout transitions (AAMP-F21)
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "spectrum_bin": self.spectrum_bin,
             "vu_left": self.vu_left,
             "vu_right": self.vu_right,
             "loop_index": self.loop_index,
             "policy_state": self.policy_state,
         }
+        if self.layout_event is not None:
+            d["layout_event"] = self.layout_event
+        return d
 
 
 @dataclass
@@ -147,7 +156,8 @@ def envelope_key(env: Envelope) -> tuple:
     """Return a deterministic key for *env*, omitting ``captured_at``.
 
     Used by replay tests (AAMP-NFR4, AAMP-COMP5) to compare two runs
-    without wall-clock noise.
+    without wall-clock noise.  ``layout_event`` is included so layout-
+    transition envelopes remain distinguishable from regular ones.
     """
     d = env.derived
     return (
@@ -158,6 +168,7 @@ def envelope_key(env: Envelope) -> tuple:
         round(d.vu_right, 10),
         d.loop_index,
         d.policy_state,
+        d.layout_event,  # AAMP-F21; None for regular envelopes
     )
 
 
@@ -283,6 +294,75 @@ class DSPTransform:
             loop_index=self._loop_index,
             policy_state=self._policy_state,
         )
+
+
+# ---------------------------------------------------------------------------
+# Layout-event envelope factory (AAMP-F21)
+# ---------------------------------------------------------------------------
+
+
+def make_layout_envelope(
+    window_id: str,
+    event_type: str,
+    *,
+    dsp_state: Optional[DerivedData] = None,
+    spectrum_bins: int = DEFAULT_SPECTRUM_BINS,
+) -> Envelope:
+    """Build a DSP-A Envelope for a layout transition event (AAMP-F21).
+
+    Layout transitions (window moved, resized, snapped) are exposed to
+    visualisers as first-class DSP-A envelopes.  The ``derived.layout_event``
+    field carries the event type string so visualisers can react without
+    parsing the raw ``source_event`` dict.
+
+    Parameters
+    ----------
+    window_id:
+        The ``id`` of the layout window whose state changed.
+    event_type:
+        Layout event type string, e.g. ``"window_moved"``,
+        ``"window_resized"``, ``"window_snapped"``.
+    dsp_state:
+        Optional :class:`DerivedData` baseline to copy spectrum / VU /
+        loop_index / policy_state from.  Defaults to zeroed data.
+    spectrum_bins:
+        Spectrum bin count for the zeroed baseline.  Ignored when
+        *dsp_state* is provided.
+
+    Returns
+    -------
+    Envelope
+        An Envelope with ``source_event.type == "aamp_layout"`` and
+        ``derived.layout_event == event_type``.
+    """
+    if dsp_state is not None:
+        derived = DerivedData(
+            spectrum_bin=list(dsp_state.spectrum_bin),
+            vu_left=dsp_state.vu_left,
+            vu_right=dsp_state.vu_right,
+            loop_index=dsp_state.loop_index,
+            policy_state=dsp_state.policy_state,
+            layout_event=event_type,
+        )
+    else:
+        derived = DerivedData(
+            spectrum_bin=[0.0] * spectrum_bins,
+            vu_left=0.0,
+            vu_right=0.0,
+            loop_index=0,
+            policy_state="approved",
+            layout_event=event_type,
+        )
+
+    return Envelope(
+        source_event={
+            "type": "aamp_layout",
+            "window_id": window_id,
+            "event": event_type,
+        },
+        derived=derived,
+        captured_at=datetime.now(tz=timezone.utc).isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

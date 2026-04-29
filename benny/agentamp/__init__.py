@@ -12,7 +12,8 @@ Public surface (Phase 2)
   sandbox    — SandboxHost, MountedPlugin, PluginPermissionsViolation
 
 Public surface (Phase 3)
-  dsp        — DSPTransform, Envelope, DerivedData, transform(), envelope_key()
+  dsp        — DSPTransform, Envelope, DerivedData, transform(), envelope_key(),
+               make_layout_envelope()
 
 Public surface (Phase 4)
   tui        — BennyTUI, SkinPalette, extract_palette(), run_tui(), run_line_mode()
@@ -21,6 +22,14 @@ Public surface (Phase 5)
   equalizer  — EqKnob, EqManifest, EqLock, EQ_ALLOWED_PATHS,
                EqPathNotAllowed, EqWriteResult, validate_knob_path(),
                apply_eq_write()
+
+Public surface (Phase 6)
+  playlist   — PlaylistEntry, get_playlist(), enqueue_manifest()
+  user_state — CockpitWindowPosition, CockpitUserState,
+               load_user_state(), save_user_state(),
+               export_cockpit(), import_cockpit()
+  layout     — SNAP_ZONES, LayoutResult, resolve_snap(), clamp_window(),
+               apply_layout(), layout_event_envelope()
 
 Feature flag: ``aamp.enabled`` (AAMP-F32). Checked at CLI dispatch; not re-checked here.
 """
@@ -68,6 +77,7 @@ from .dsp import (
     DerivedData,
     Envelope,
     envelope_key,
+    make_layout_envelope,
     transform,
 )
 from .equalizer import (
@@ -79,6 +89,23 @@ from .equalizer import (
     EqWriteResult,
     apply_eq_write,
     validate_knob_path,
+)
+from .playlist import PlaylistEntry, get_playlist, enqueue_manifest
+from .user_state import (
+    CockpitUserState,
+    CockpitWindowPosition,
+    export_cockpit,
+    import_cockpit,
+    load_user_state,
+    save_user_state,
+)
+from .layout import (
+    SNAP_ZONES,
+    LayoutResult,
+    apply_layout,
+    clamp_window,
+    layout_event_envelope,
+    resolve_snap,
 )
 
 __all__ = [
@@ -133,4 +160,24 @@ __all__ = [
     "EqWriteResult",
     "apply_eq_write",
     "validate_knob_path",
+    # Phase 6 — playlist
+    "PlaylistEntry",
+    "get_playlist",
+    "enqueue_manifest",
+    # Phase 6 — user state
+    "CockpitUserState",
+    "CockpitWindowPosition",
+    "load_user_state",
+    "save_user_state",
+    "export_cockpit",
+    "import_cockpit",
+    # Phase 6 — layout DSL
+    "SNAP_ZONES",
+    "LayoutResult",
+    "resolve_snap",
+    "clamp_window",
+    "apply_layout",
+    "layout_event_envelope",
+    # Phase 3 (extended Phase 6)
+    "make_layout_envelope",
 ]
