@@ -1499,7 +1499,10 @@ def build_parser() -> argparse.ArgumentParser:
         prog="benny",
         description="Benny — declarative swarm workflow runner",
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # --tui flag: launch TUI mini-mode (AAMP-F7); bypasses required subcommand
+    p.add_argument("--tui", action="store_true", help="Launch AgentAmp TUI mini-mode (AAMP-F7)")
+    p.add_argument("--workspace", default="default", help="Active workspace (used with --tui)")
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     # plan
     p_plan = sub.add_parser("plan", help="Build a SwarmManifest from a requirement (no execution)")
@@ -1609,6 +1612,14 @@ def build_parser() -> argparse.ArgumentParser:
     from benny.pypes.cli import add_subparser as _pypes_add_subparser
     _pypes_add_subparser(sub)
 
+    # agentamp — skinnable, pluggable agentic cockpit (AAMP-001 Phase 1)
+    from benny.agentamp.cli import add_subparser as _agentamp_add_subparser
+    _agentamp_add_subparser(sub)
+
+    # tui — AgentAmp mini-mode (AAMP-001 Phase 4, AAMP-F7)
+    p_tui = sub.add_parser("tui", help="Launch AgentAmp TUI mini-mode (alias for benny --tui)")
+    p_tui.add_argument("--workspace", default="default", help="Active workspace")
+
     # migrate (PBR-001 Phase 8)
     p_mig = sub.add_parser("migrate", help="Import legacy installs or relocate workspaces")
     p_mig.add_argument("--from-path", "--from", required=True, help="Source directory to migrate")
@@ -1622,6 +1633,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # --tui / benny tui (AAMP-F7)
+    if getattr(args, "tui", False) or args.cmd == "tui":
+        from benny.agentamp.tui import run_tui, _default_palette
+        ws = getattr(args, "workspace", "default")
+        return run_tui(_default_palette(), workspace=ws)
+
+    if args.cmd is None:
+        parser.print_help()
+        return 1
 
     if args.cmd == "plan":
         return asyncio.run(cmd_plan(args))
@@ -1658,6 +1679,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "pypes":
         from benny.pypes.cli import cmd_pypes
         return cmd_pypes(args)
+    if args.cmd == "agentamp":
+        from benny.agentamp.cli import cmd_agentamp
+        return cmd_agentamp(args)
 
     parser.print_help()
     return 1

@@ -43,6 +43,19 @@ LOCAL_PROVIDERS = {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Cloud providers with custom base URLs (OpenAI-compatible APIs).
+# API keys are read from env vars at call time — never stored here.
+# ---------------------------------------------------------------------------
+CLOUD_PROVIDERS = {
+    "nvidia_nim": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "api_key_env": "NVIDIA_API_KEY",
+        "docs": "https://build.nvidia.com/explore/reasoning",
+        "offline_safe": False,  # requires internet — blocked by BENNY_OFFLINE=1
+    },
+}
+
 MODEL_REGISTRY = {
     # Cloud providers
     "openai/gpt-4o": {
@@ -92,6 +105,41 @@ MODEL_REGISTRY = {
         "cost_per_1k": 0.0,
         "use_for": ["voice", "speed", "high_speed", "low_latency"]
     },
+    # ---------------------------------------------------------------------------
+    # NVIDIA NIM — OpenAI-compatible cloud inference
+    # API key: NVIDIA_API_KEY env var (never stored in registry)
+    # Browse full catalogue: https://build.nvidia.com/explore/reasoning
+    # ---------------------------------------------------------------------------
+    "nvidia/deepseek-ai/deepseek-r1": {
+        "provider": "nvidia_nim",
+        "model": "deepseek-ai/deepseek-r1",
+        "cost_per_1k": 0.004,
+        "use_for": ["reasoning", "cloud", "nvidia", "thinking"]
+    },
+    "nvidia/deepseek-ai/deepseek-v3": {
+        "provider": "nvidia_nim",
+        "model": "deepseek-ai/deepseek-v3",
+        "cost_per_1k": 0.0004,
+        "use_for": ["general", "cloud", "nvidia"]
+    },
+    "nvidia/meta/llama-3.3-70b-instruct": {
+        "provider": "nvidia_nim",
+        "model": "meta/llama-3.3-70b-instruct",
+        "cost_per_1k": 0.00077,
+        "use_for": ["general", "cloud", "nvidia", "instruction"]
+    },
+    "nvidia/mistralai/mistral-large-2-instruct": {
+        "provider": "nvidia_nim",
+        "model": "mistralai/mistral-large-2-instruct",
+        "cost_per_1k": 0.002,
+        "use_for": ["general", "cloud", "nvidia"]
+    },
+    "nvidia/google/gemma-3-27b-it": {
+        "provider": "nvidia_nim",
+        "model": "google/gemma-3-27b-it",
+        "cost_per_1k": 0.0002,
+        "use_for": ["general", "cloud", "nvidia"]
+    },
     # AOS-001 OQ-1 (2026-04-26): default model for all AOS personas.
     # Exact Lemonade model name confirmed at Phase 0 wire-up — adjust the
     # "model" string below if the Lemonade catalogue uses a different slug.
@@ -120,13 +168,16 @@ def is_local_model(model_name: str) -> bool:
     """Return True if ``model_name`` is served by a local provider."""
     if model_name.startswith(_LOCAL_PREFIXES) or model_name.startswith("litert/"):
         return True
-    
+
+    # nvidia/ prefix is always a remote cloud provider
+    if model_name.startswith("nvidia/"):
+        return False
+
     # Check if it's a registry key pointing to a local provider
     if model_name in MODEL_REGISTRY:
         provider = MODEL_REGISTRY[model_name].get("provider", "").lower()
-        res = provider in LOCAL_PROVIDERS or provider == "litert"
-        return res
-            
+        return provider in LOCAL_PROVIDERS or provider == "litert"
+
     return False
 
 
@@ -145,7 +196,15 @@ class OfflineRefusal(Exception):
 def get_model_config(model_id: str) -> Dict[str, Any]:
     """Resolve a model ID to a provider and configuration."""
     if model_id in MODEL_REGISTRY:
-        return MODEL_REGISTRY[model_id]
+        config = dict(MODEL_REGISTRY[model_id])
+        # Enrich cloud-provider registry entries with base_url / api_key_env
+        provider = config.get("provider", "")
+        if provider in CLOUD_PROVIDERS and "base_url" not in config:
+            config.update({
+                "base_url": CLOUD_PROVIDERS[provider]["base_url"],
+                "api_key_env": CLOUD_PROVIDERS[provider]["api_key_env"],
+            })
+        return config
     
     # Handle direct provider/model strings
     if "/" in model_id:
@@ -158,6 +217,13 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         # Inject base_url for local providers if not in registry
         if provider in LOCAL_PROVIDERS:
             config["base_url"] = LOCAL_PROVIDERS[provider]["base_url"]
+        # nvidia/org/model-name — everything after "nvidia/" is the NIM model slug
+        elif provider == "nvidia":
+            nim = CLOUD_PROVIDERS["nvidia_nim"]
+            config["provider"] = "nvidia_nim"
+            config["model"] = model          # full slug e.g. "deepseek-ai/deepseek-r1"
+            config["base_url"] = nim["base_url"]
+            config["api_key_env"] = nim["api_key_env"]
         return config
     
     return {
@@ -400,11 +466,24 @@ async def call_model(
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
         
-        # Ensure api_key is set for local providers (LiteLLM requirement for openai/ prefix)
-        if "api_key" in config and config["api_key"]:
+        # Inject API key — cloud providers read from env; local providers use sentinel.
+        if provider == "nvidia_nim":
+            # Key comes from env — never hardcoded. Warn clearly if missing.
+            nvidia_key = os.environ.get(
+                config.get("api_key_env", "NVIDIA_API_KEY"), ""
+            )
+            if not nvidia_key:
+                logger.warning(
+                    "NVIDIA_API_KEY is not set. NVIDIA NIM calls will be rejected. "
+                    "Set it with: [Environment]::SetEnvironmentVariable('NVIDIA_API_KEY','nvapi-...','User')"
+                )
+            kwargs["api_key"] = nvidia_key or "not-set"
+            kwargs["custom_llm_provider"] = "openai"   # NIM is OpenAI-compatible
+        elif "api_key" in config and config["api_key"]:
             kwargs["api_key"] = config["api_key"]
         elif provider in local_mapping or "api_base" in kwargs:
             kwargs["api_key"] = "not-needed"
+
 
         if actual_timeout:
             kwargs["timeout"] = actual_timeout

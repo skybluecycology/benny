@@ -37,15 +37,15 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-F20 | 6   | `test_aos_f20_req_emits_prd_and_feature` | PASS | `a45e736` |
 | AOS-F21 | 6   | `test_aos_f21_compile_to_pytest_deterministic` | PASS | `a45e736` |
 | AOS-F22 | 6   | `test_aos_f22_prd_schema_validation` | PASS | `a45e736` |
-| AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | TODO | |
-| AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | TODO | |
-| AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | TODO | |
-| AOS-F26 | 9   | `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain` | TODO | |
-| AOS-F27 | 9   | `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain` | TODO | |
-| AOS-F28 | 10  | `test_aos_f28_metrics_record_persisted` | TODO | |
-| AOS-F29 | 10  | `test_aos_f29_sandbox_multi_model_report` | TODO | |
-| AOS-F30 | 10  | `test_aos_f30_report_shape` | TODO | |
-| AOS-F31 | 10  | `test_aos_f31_phoenix_attributes_emitted` | TODO | |
+| AOS-F23 | 8   | `test_aos_f23_jsonld_per_artifact` | PASS | `1059565` |
+| AOS-F24 | 8   | `test_aos_f24_pypes_column_lineage` | PASS | `1059565` |
+| AOS-F25 | 9   | `test_aos_f25_policy_evaluate_modes`, `test_aos_f25_escalate_pauses` | PASS | `b96a3ab` |
+| AOS-F26 | 9   | `test_aos_f26_ledger_append_only`, `test_aos_f26_hmac_chain` | PASS | `b96a3ab` |
+| AOS-F27 | 9   | `test_aos_f27_sox_intent_proof`, `test_aos_f27_doctor_audit_chain` | PASS | `b96a3ab` |
+| AOS-F28 | 10  | `test_aos_f28_metrics_record_persisted` | PASS | `357b3d1` |
+| AOS-F29 | 10  | `test_aos_f29_sandbox_multi_model_report` | PASS | `357b3d1` |
+| AOS-F30 | 10  | `test_aos_f30_report_shape` | PASS | `357b3d1` |
+| AOS-F31 | 10  | `test_aos_f31_phoenix_attributes_emitted` | PASS | `357b3d1` |
 
 ## Non-functional (from [requirement.md §6](requirement.md#6-non-functional-targets))
 
@@ -56,41 +56,41 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 | AOS-NFR3  | 6     | `tests/sdlc/test_req_latency.py`      | PASS | `a45e736` |
 | AOS-NFR4  | 3     | `tests/sdlc/test_diagrams_perf.py`    | PASS | `777f798` |
 | AOS-NFR5  | 5     | `tests/sdlc/test_worker_pool_oom.py`  | PASS | `a504db9` |
-| AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | TODO | |
-| AOS-NFR7  | all   | existing `tests/portability/test_no_absolute_paths.py` | TODO | |
+| AOS-NFR6  | 10    | `tests/release/test_aos_release_gate.py::coverage` | PASS | `357b3d1` |
+| AOS-NFR7  | all   | existing `tests/portability/test_no_absolute_paths.py` | PASS | `357b3d1` |
 | AOS-NFR8  | 7,8,9 | `tests/sdlc/test_offline_e2e.py`      | PASS | `e4226ef` |
-| AOS-NFR9  | 10    | `tests/sdlc/test_sandbox_soak.py`     | TODO | |
-| AOS-NFR10 | 10    | `tests/release/test_aos_release_gate.py::bundle_delta` | TODO | |
-| AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | TODO | |
+| AOS-NFR9  | 10    | `tests/sdlc/test_sandbox_soak.py`     | PASS | `357b3d1` |
+| AOS-NFR10 | 10    | `tests/release/test_aos_release_gate.py::bundle_delta` | PASS | `357b3d1` |
+| AOS-NFR11 | 8     | `tests/sdlc/test_lineage_overhead.py` | PASS | `1059565` |
 | AOS-NFR12 | 2     | `tests/sdlc/test_disclosure_budget.py`| PASS | `39cec9a` |
 
 ## Security (from [requirement.md §8](requirement.md#8-security--privacy))
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-SEC1 | 9 | `test_aos_sec1_persona_tool_allowlist` | TODO | |
-| AOS-SEC2 | 9 | `tests/safety/test_aos_no_unexpected_egress.py` | TODO | |
-| AOS-SEC3 | 9 | `test_aos_sec3_path_traversal_rejected` | TODO | |
-| AOS-SEC4 | 10 | `test_aos_sec4_doctor_reports_sandbox` | TODO | |
+| AOS-SEC1 | 9 | `test_aos_sec1_persona_tool_allowlist` | PASS | `b96a3ab` |
+| AOS-SEC2 | 9 | `tests/safety/test_aos_no_unexpected_egress.py` | PASS | `b96a3ab` |
+| AOS-SEC3 | 9 | `test_aos_sec3_path_traversal_rejected` | PASS | `b96a3ab` |
+| AOS-SEC4 | 10 | `test_aos_sec4_doctor_reports_sandbox` | PASS | `357b3d1` |
 | AOS-SEC5 | 1 | `test_aos_sec5_artifact_path_escape` | PASS | `b2259f0` |
-| AOS-SEC6 | 9 | `test_aos_sec6_ledger_rewind_detected` | TODO | |
+| AOS-SEC6 | 9 | `test_aos_sec6_ledger_rewind_detected` | PASS | `b96a3ab` |
 
 ## Compliance — SOX 404 + BCBS 239 (from [requirement.md §9](requirement.md#9-compliance--sox-404--bcbs-239-brief-9))
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-COMP1 | 9 | `test_aos_comp1_sox_chain_verify` | TODO | |
-| AOS-COMP2 | 8 | `test_aos_comp2_cde_lineage_present` | TODO | |
-| AOS-COMP3 | 8 | `test_aos_comp3_no_orphans`         | TODO | |
-| AOS-COMP4 | 10 | `test_aos_comp4_diff_smoke`         | TODO | |
-| AOS-COMP5 | 10 | `test_aos_comp5_replay_byte_equal_local` | TODO | |
+| AOS-COMP1 | 9 | `test_aos_comp1_sox_chain_verify` | PASS | `b96a3ab` |
+| AOS-COMP2 | 8 | `test_aos_comp2_cde_lineage_present` | PASS | `1059565` |
+| AOS-COMP3 | 8 | `test_aos_comp3_no_orphans`         | PASS | `1059565` |
+| AOS-COMP4 | 10 | `test_aos_comp4_diff_smoke`         | PASS | `357b3d1` |
+| AOS-COMP5 | 10 | `test_aos_comp5_replay_byte_equal_local` | PASS | `357b3d1` |
 
 ## Observability (from [requirement.md §10](requirement.md#10-observability))
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AOS-OBS1 | 10 | `test_aos_obs1_doctor_aos_section` | TODO | |
-| AOS-OBS2 | all | `test_aos_obs2_logs_carry_component` | TODO | |
+| AOS-OBS1 | 10 | `test_aos_obs1_doctor_aos_section` | PASS | `357b3d1` |
+| AOS-OBS2 | all | `test_aos_obs2_logs_carry_component` | PASS | `357b3d1` |
 | AOS-OBS3 | 7,8,9 | `test_aos_obs3_sse_event_schemas` | PASS | `e4226ef` |
 | AOS-OBS4 | 7,8,9 | `test_aos_obs4_phoenix_attrs` | PASS | `e4226ef` |
 
@@ -100,16 +100,16 @@ Phase column references [project_plan.md §3 Phase map](project_plan.md#3-phase-
 
 | Gate ID | Description | Test ID | Status | Evidence |
 |---------|-------------|---------|--------|----------|
-| GATE-AOS-COV     | New AOS modules ≥ 85 % coverage. | `tests/release/test_aos_release_gate.py::coverage` | TODO | |
-| GATE-AOS-SR1     | SR-1 ratchet not raised by AOS additions. | existing | TODO | |
-| GATE-AOS-OFF     | `BENNY_OFFLINE=1` runs full SDLC pipeline e2e. | `tests/sdlc/test_offline_e2e.py` | TODO | |
-| GATE-AOS-SIG     | Manifest 1.1 carries valid signature; replay verifies. | `tests/release/test_aos_release_gate.py::sig` | TODO | |
-| GATE-AOS-POLICY-1 | `aos.policy.auto_approve_writes` MUST be `false` at release. | `tests/release/test_aos_release_gate.py::policy_off` | TODO | |
-| GATE-AOS-LEDGER  | Ledger HMAC chain verifies on `benny doctor --audit`. | `test_aos_f27_doctor_audit_chain` | TODO | |
-| GATE-AOS-PBR     | Default-on PBR yields ≥ 80 % token reduction on the test fixture. | `tests/sdlc/test_pbr_token_budget.py` | TODO | |
-| GATE-AOS-DISC    | Layer-1 disclosure ≤ 500 tokens. | `tests/sdlc/test_disclosure_budget.py` | TODO | |
-| GATE-AOS-RESUME  | Resume p95 ≤ 5 s. | `tests/sdlc/test_resume_latency.py` | TODO | |
-| GATE-AOS-BUNDLE  | UI bundle delta ≤ 250 KB gzipped. | `tests/release/test_aos_release_gate.py::bundle_delta` | TODO | |
+| GATE-AOS-COV     | New AOS modules ≥ 85 % coverage. | `tests/release/test_aos_release_gate.py::coverage` | PASS | `357b3d1` |
+| GATE-AOS-SR1     | SR-1 ratchet not raised by AOS additions. | existing | PASS | `357b3d1` |
+| GATE-AOS-OFF     | `BENNY_OFFLINE=1` runs full SDLC pipeline e2e. | `tests/sdlc/test_offline_e2e.py` | PASS | `357b3d1` |
+| GATE-AOS-SIG     | Manifest 1.1 carries valid signature; replay verifies. | `tests/release/test_aos_release_gate.py::sig` | PASS | `357b3d1` |
+| GATE-AOS-POLICY-1 | `aos.policy.auto_approve_writes` MUST be `false` at release. | `tests/release/test_aos_release_gate.py::policy_off` | PASS | `357b3d1` |
+| GATE-AOS-LEDGER  | Ledger HMAC chain verifies on `benny doctor --audit`. | `test_aos_f27_doctor_audit_chain` | PASS | `357b3d1` |
+| GATE-AOS-PBR     | Default-on PBR yields ≥ 80 % token reduction on the test fixture. | `tests/sdlc/test_pbr_token_budget.py` | PASS | `357b3d1` |
+| GATE-AOS-DISC    | Layer-1 disclosure ≤ 500 tokens. | `tests/sdlc/test_disclosure_budget.py` | PASS | `357b3d1` |
+| GATE-AOS-RESUME  | Resume p95 ≤ 5 s. | `tests/sdlc/test_resume_latency.py` | PASS | `357b3d1` |
+| GATE-AOS-BUNDLE  | UI bundle delta ≤ 250 KB gzipped. | `tests/release/test_aos_release_gate.py::bundle_delta` | PASS | `357b3d1` |
 
 ## Open questions — resolved 2026-04-26
 

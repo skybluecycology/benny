@@ -5,13 +5,14 @@ This is a **local-first, multi-model AI orchestration platform**. Key facts befo
 ## Architecture in one sentence
 A FastAPI backend + React/Three.js frontend + Neo4j knowledge/code graph + LangGraph swarm executor + **Pypes declarative transformation engine**, all portable under `$BENNY_HOME`.
 
-## Three capability surfaces
+## Four capability surfaces
 
-Benny treats **documents**, **code**, and **tabular data** as first-class:
+Benny treats **documents**, **code**, **tabular data**, and the **operator cockpit** as first-class:
 
 - **Documents** → RAG / Knowledge Graph (`benny/api/rag_routes.py`, `benny/core/adaptive_rag.py`)
 - **Code** → Code Graph + Swarm execution (`benny/api/graph_routes.py`, `benny/graph/swarm.py`)
 - **Tabular data** → Pypes transformation engine (`benny/pypes/`, `benny/api/pypes_routes.py`) — manifest-driven DAG with bronze→silver→gold stages, CLP lineage, checkpoints, drill-down, and explainable financial-risk reports. Plus a **sandbox layer** (`pypes plan` / `agent-report` / `bench` / `chat`) for LLM manifest authoring, agent narratives, pandas-vs-polars benchmarks, and multi-turn drill-down — all advisory and side-effect-free relative to the deterministic core. See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md).
+- **Operator cockpit** → AgentAmp (`benny/agentamp/`, `frontend/src/agentamp/`) — Winamp-style skinnable cockpit. Phase 1: `.aamp` skin packs, HMAC signing, `benny agentamp scaffold-skin / pack / sign / install`. Later phases: AgentVis WebGL plugins, DSP-A spectrum, Equalizer panel, Textual TUI mini-mode, `skin_designer` LLM skill, marketplace. See [docs/operations/AGENTAMP_GUIDE.md](docs/operations/AGENTAMP_GUIDE.md).
 
 ## Where things live
 
@@ -19,6 +20,7 @@ Benny treats **documents**, **code**, and **tabular data** as first-class:
 |------|-------|
 | **Backend API** (FastAPI, 24 route modules) | `benny/api/` |
 | **Pypes transformation engine** (DAG manifests, CLP lineage, drill-down) | `benny/pypes/` + `benny/api/pypes_routes.py` |
+| **AgentAmp cockpit** (skin packs, signing, scaffold, plugins) | `benny/agentamp/` + `frontend/src/agentamp/` |
 | **CLI entry point** | `benny_cli.py` |
 | **Frontend** (React 19, Three.js, Vite) | `frontend/src/` |
 | **Swarm executor** (LangGraph) | `benny/graph/swarm.py` |
@@ -52,6 +54,11 @@ benny pypes agent-report <run_id>        --workspace W                    # one-
 benny pypes bench        pandas=<m1> polars=<m2> --workspace W [--repeats N]   # head-to-head wall/CPU/RSS/cost
 benny pypes model-bench  manifests/templates/model_comparison_planner.json --workspace W [--judge] [--save-report out.md]   # cross-model time/cost/tokens/accuracy/quality
 benny pypes chat         <run_id>        --workspace W                    # multi-turn risk-analyst REPL grounded on the run
+# --- agentamp — skinnable cockpit (Phase 1) ---
+benny agentamp scaffold-skin <id>  [--drafts-dir D]  # create deterministic draft (signature: null)
+benny agentamp pack   <draft_dir> --out <id>.aamp     # zip draft into .aamp
+benny agentamp sign   <id>.aamp                       # HMAC-SHA256 sign (uses BENNY_HMAC_KEY)
+benny agentamp install <id>.aamp [--workspace W]      # verify sig + register under $BENNY_HOME
 benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 ```
 
@@ -62,6 +69,7 @@ benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 - **[docs/operations/BENNY_OPERATING_MANUAL.md](docs/operations/BENNY_OPERATING_MANUAL.md)** — run book
 - **[docs/operations/LOG_AND_LINEAGE_GUIDE.md](docs/operations/LOG_AND_LINEAGE_GUIDE.md)** — logs, SSE, Marquez, Phoenix, AER
 - **[docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md)** — declarative DAG transformations, CLP lineage, drill-down, financial-risk reports
+- **[docs/operations/AGENTAMP_GUIDE.md](docs/operations/AGENTAMP_GUIDE.md)** — AgentAmp cockpit: skin pack format, HMAC signing, scaffold/pack/sign/install CLI, release gates
 - **[architecture/WORKSPACE_GUIDE.md](architecture/WORKSPACE_GUIDE.md)** — workspace structure + c4_test/c5_test guide
 - **[architecture/GRAPH_SCHEMA.md](architecture/GRAPH_SCHEMA.md)** — Neo4j schema
 

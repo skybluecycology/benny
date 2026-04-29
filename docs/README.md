@@ -19,7 +19,9 @@ New to Benny? Read in this order:
 | Document | Description |
 |----------|-------------|
 | [BENNY_OPERATING_MANUAL.md](operations/BENNY_OPERATING_MANUAL.md) | **Primary run book** — init, up, down, plan, run, doctor, migrate, uninstall, release gates, troubleshooting |
+| [PORTABLE_INSTALL_MANUAL.md](operations/PORTABLE_INSTALL_MANUAL.md) | **Portable / external-drive install** — one-command bootstrap onto an external SSD, env var reference, drive relocation, multi-machine use |
 | [PYPES_TRANSFORMATION_GUIDE.md](operations/PYPES_TRANSFORMATION_GUIDE.md) | `benny pypes` — declarative, DAG-based transformation engine with CLP lineage, checkpoints, drill-down, and financial-risk reports |
+| [AGENTAMP_GUIDE.md](operations/AGENTAMP_GUIDE.md) | `benny agentamp` — skinnable cockpit: scaffold, pack, sign, and install `.aamp` skin packs; HMAC signing; release gates |
 | [KNOWLEDGE_ENRICHMENT_WORKFLOW.md](operations/KNOWLEDGE_ENRICHMENT_WORKFLOW.md) | `benny enrich` pipeline — extract docs → synthesise triples → correlate to code → enable Studio ENRICH toggle |
 | [LOG_AND_LINEAGE_GUIDE.md](operations/LOG_AND_LINEAGE_GUIDE.md) | All log files, SSE events, Marquez lineage, Phoenix tracing, AER audit records, end-to-end process trace |
 | [manifest_operating_manual.md](operations/manifest_operating_manual.md) | Manifest execution and planning detail |
@@ -48,7 +50,8 @@ New to Benny? Read in this order:
 |----------|-------------|
 | [PBR-001_CONTINUATION_PLAN.md](requirements/PBR-001_CONTINUATION_PLAN.md) | Phase roadmap and history (Phases 0–8) |
 | [PORTABLE_BENNY_REQUIREMENTS.md](requirements/PORTABLE_BENNY_REQUIREMENTS.md) | Full Phase 0–8 technical specification |
-| [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC (Phase 10).** Six-sigma normative spec + acceptance matrix + project plan. Integrates the architectural brief into existing Benny (manifest 1.1, PBR, progressive disclosure, Mermaid, durable resume, BDD pipeline, TOGAF mapping, JSON-LD lineage, policy-as-code, sandbox runner). |
+| [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC** ✅ SHIPPED `357b3d1`. Manifest 1.1, PBR artefact store, progressive disclosure, Mermaid/PlantUML diagrams, durable resume, VRAM-aware worker pool, BDD pipeline (`benny req`), TOGAF phase mapping + ADR emission, JSON-LD PROV-O lineage, policy-as-code + HMAC ledger (SOX 404), multi-model sandbox runner. 62/62 acceptance rows PASS. See [CHANGELOG.md](../CHANGELOG.md) for the full release notes. |
+| [requirements/11/](requirements/11/README.md) | **AAMP-001 — AgentAmp: Skinnable, Pluggable Agentic Cockpit** 🚧 IN PROGRESS. Winamp-inspired skin packs (`.aamp`), AgentVis WebGL plugins, DSP-A spectrum, Equalizer panel, Textual TUI, `skin_designer` LLM skill, marketplace. Phase 1 (skin pack format + signing + scaffold CLI) SHIPPED `421351f`. 9 phases total; requirements in [requirement.md](requirements/11/requirement.md), acceptance rows in [acceptance_matrix.md](requirements/11/acceptance_matrix.md). |
 
 ---
 
@@ -78,6 +81,18 @@ benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
              --workspace c5_test --src src/dangpy \
              --resume <prior_run_id> --run                                  # resume a partial run
 benny enrich --help                                                         # full options
+
+# AgentAmp — skinnable cockpit (Phase 1)
+benny agentamp scaffold-skin my-skin                              # create draft skin
+benny agentamp pack   $BENNY_HOME/agentamp/drafts/my-skin --out my-skin.aamp
+benny agentamp sign   my-skin.aamp                               # HMAC-SHA256 (uses BENNY_HMAC_KEY)
+benny agentamp install my-skin.aamp --workspace default
+
+# AOS-001 — SDLC pipeline (manifest 1.1)
+benny req "Add payment retry logic" --workspace my_ws --save   # PRD + BDD scenarios
+benny bdd compile --workspace my_ws                            # compile scenarios → pytest
+benny run manifests/sdlc_pipeline.json --json                  # run SDLC manifest
+benny doctor --json | jq '.aos'                                # AOS health section
 
 # Observe a run in real time
 curl -N -H "Accept: text/event-stream" \
