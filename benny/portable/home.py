@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+import sys
 import uuid
 from pathlib import Path
 from typing import Iterable, Literal
@@ -73,34 +74,51 @@ _SERVER_OPS_ALLOWLIST_JSON = """{
 
 # Portable launcher scripts (PBR-001 §4.3). Each launcher derives $BENNY_HOME
 # from its own location so the SSD can be mounted at any drive letter or path.
+# {python_exe} is substituted at seed time with the absolute path to the
+# interpreter that ran `benny init`, ensuring launchers always use the venv.
 _POSIX_LAUNCHER = """#!/usr/bin/env sh
 # Portable Benny launcher (POSIX). Self-locates $BENNY_HOME.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
-exec python3 -m benny_cli "$@"
+exec {python_exe} -m benny_cli "$@"
 """
 
 _WINDOWS_LAUNCHER = """@echo off
-rem Portable Benny launcher (Windows). Self-locates %BENNY_HOME%.
+rem Portable Benny launcher (Windows). Self-locates %%BENNY_HOME%%.
+rem Python path pinned to the venv that ran `benny init` — do not edit by hand;
+rem re-run `benny init` if you recreate the venv.
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
-python -m benny_cli %*
+"{python_exe}" -m benny_cli %*
 """
 
 _POSIX_UI_LAUNCHER = """#!/usr/bin/env sh
-# Starts the UI dev server relative to $BENNY_HOME.
+# Starts the UI dev server.  Checks BENNY_FRONTEND_DIR first (dev installs),
+# then $BENNY_HOME/app/ui (packaged installs), then $BENNY_HOME.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export BENNY_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$BENNY_HOME/app/ui" 2>/dev/null || cd "$BENNY_HOME"
+if [ -n "$BENNY_FRONTEND_DIR" ] && [ -d "$BENNY_FRONTEND_DIR" ]; then
+    cd "$BENNY_FRONTEND_DIR"
+elif [ -d "$BENNY_HOME/app/ui" ]; then
+    cd "$BENNY_HOME/app/ui"
+else
+    cd "$BENNY_HOME"
+fi
 exec npm run dev -- "$@"
 """
 
 _WINDOWS_UI_LAUNCHER = """@echo off
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "BENNY_HOME=%%~fI"
-if exist "%BENNY_HOME%\\app\\ui" (cd /d "%BENNY_HOME%\\app\\ui") else (cd /d "%BENNY_HOME%")
+if defined BENNY_FRONTEND_DIR (
+    cd /d "%BENNY_FRONTEND_DIR%"
+) else if exist "%BENNY_HOME%\\app\\ui" (
+    cd /d "%BENNY_HOME%\\app\\ui"
+) else (
+    cd /d "%BENNY_HOME%"
+)
 npm run dev -- %*
 """
 
@@ -141,9 +159,24 @@ _LAUNCHERS: tuple[tuple[str, str, bool], ...] = (
     ("benny-llm.cmd", _WINDOWS_LLM_LAUNCHER, False),
     ("benny-neo4j", _POSIX_NEO4J_LAUNCHER, True),
     ("benny-neo4j.cmd", _WINDOWS_NEO4J_LAUNCHER, False),
-    ("benny-mcp", _POSIX_LAUNCHER.replace('benny_cli "$@"', 'mcp.server --stdio'), True),
-    ("benny-mcp.cmd", _WINDOWS_LAUNCHER.replace('benny_cli %*', 'mcp.server --stdio'), False),
+    ("benny-mcp", _POSIX_LAUNCHER, True),   # mcp variant resolved in _seed_launchers
+    ("benny-mcp.cmd", _WINDOWS_LAUNCHER, False),
 )
+
+# Project-root wrappers written next to benny_cli.py so `./benny` / `benny.bat`
+# works from the project directory without activating the venv.
+_PROJECT_POSIX_WRAPPER = """#!/usr/bin/env sh
+# Quick-launch wrapper — run from the project root.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec {python_exe} "$SCRIPT_DIR/benny_cli.py" "$@"
+"""
+
+_PROJECT_WINDOWS_WRAPPER = """@echo off
+rem Quick-launch wrapper — run from the project root without activating the venv.
+set "SCRIPT_DIR=%~dp0"
+"{python_exe}" "%SCRIPT_DIR%\\benny_cli.py" %*
+"""
 
 # Declarative compose manifest for the `app` profile (PBR-001 §4.3).
 # Kept minimal and generic — the image tags are placeholders the app-profile
@@ -260,11 +293,15 @@ def _seed_state(root: Path, profile: Profile) -> None:
     (state / "profile-lock").write_text(profile, encoding="utf-8")
 
 
-def _seed_launchers(root: Path) -> None:
-    """Write the portable launcher scripts into ``<root>/bin/``.
+def _seed_launchers(root: Path, python_exe: str) -> None:
+    """Write portable launcher scripts into ``<root>/bin/``.
 
-    On POSIX we also chmod +x; on Windows the x-bit is meaningless, but the
-    ``.cmd`` extension is what makes them runnable.
+    ``python_exe`` is the absolute path to the interpreter that ran
+    ``benny init``; it is embedded directly in each launcher so that the
+    correct venv Python is always used regardless of PATH.
+
+    On POSIX we also chmod +x; on Windows the .cmd extension is what
+    makes scripts runnable.
     """
     import os
     import stat
@@ -272,16 +309,54 @@ def _seed_launchers(root: Path) -> None:
     bin_dir = root / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
 
-    for name, content, executable in _LAUNCHERS:
+    # Normalise path separators for cross-platform embedding.
+    py = python_exe.replace("\\", "/")
+
+    for name, template, executable in _LAUNCHERS:
+        if name in ("benny-mcp", "benny-mcp.cmd"):
+            # MCP variant: swap the module invocation.
+            if name.endswith(".cmd"):
+                content = template.format(python_exe=py).replace(
+                    "-m benny_cli", "-m benny.mcp.server --stdio"
+                )
+            else:
+                content = template.format(python_exe=py).replace(
+                    'benny_cli "$@"', 'benny.mcp.server --stdio "$@"'
+                )
+        else:
+            content = template.format(python_exe=py)
+
         path = bin_dir / name
-        # Re-seed every init so template updates ship with new versions.
-        # Preserve the user's file if they edited it (detected by marker line
-        # absence) — for now a plain overwrite is fine; customisations go in
-        # config/, not bin/.
         path.write_text(content, encoding="utf-8")
         if executable and os.name == "posix":
             mode = path.stat().st_mode
             path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Record the Python path so `benny doctor` can verify it later.
+    (root / "state").mkdir(parents=True, exist_ok=True)
+    (root / "state" / "python-path").write_text(python_exe, encoding="utf-8")
+
+
+def _seed_project_entry_points(project_root: Path, python_exe: str) -> None:
+    """Write ``benny.bat`` / ``benny.sh`` next to ``benny_cli.py`` so users
+    can launch Benny from the project directory without activating the venv.
+
+    Uses ``benny.sh`` (not ``benny``) on POSIX to avoid a name collision with
+    the ``benny/`` package directory that lives in the same project root.
+    """
+    import os
+    import stat
+
+    py = python_exe.replace("\\", "/")
+
+    bat = project_root / "benny.bat"
+    bat.write_text(_PROJECT_WINDOWS_WRAPPER.format(python_exe=py), encoding="utf-8")
+
+    sh = project_root / "benny.sh"
+    sh.write_text(_PROJECT_POSIX_WRAPPER.format(python_exe=py), encoding="utf-8")
+    if os.name == "posix":
+        mode = sh.stat().st_mode
+        sh.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def _seed_app_compose(root: Path) -> None:
@@ -339,9 +414,11 @@ def init(root: Path, *, profile: Profile) -> BennyHome:
     for rel in _expected_dirs(profile):
         (root / rel).mkdir(parents=True, exist_ok=True)
 
+    python_exe = sys.executable
     _seed_state(root, profile)
     _seed_config(root, profile)
-    _seed_launchers(root)
+    _seed_launchers(root, python_exe)
+    _seed_project_entry_points(Path(__file__).parent.parent.parent, python_exe)
     if profile == "app":
         _seed_app_compose(root)
 

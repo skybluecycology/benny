@@ -24,9 +24,11 @@ async def create_workspace(workspace_id: str):
     """Create a new workspace structure and initialize DB context."""
     try:
         result = ensure_workspace_structure(workspace_id)
-        # Initialize graph schema for the new workspace context
-        init_schema()
-        result["db_initialized"] = True
+        try:
+            init_schema()
+            result["db_initialized"] = True
+        except Exception:
+            result["db_initialized"] = False
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

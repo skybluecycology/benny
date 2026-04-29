@@ -14,9 +14,19 @@ profile-specific launcher scripts stay in one place.
 from __future__ import annotations
 
 import dataclasses
+import sys
+from pathlib import Path
 from typing import Literal, Mapping
 
 from benny.portable.config import PortableConfig
+
+# On Windows, launcher scripts in bin/ are .cmd files; on POSIX they have no extension.
+_BIN_EXT = ".cmd" if sys.platform == "win32" else ""
+
+# Locate the frontend dev dir relative to this file (benny/portable/ -> project root -> frontend/).
+# Only used when app/ui doesn't exist in $BENNY_HOME (i.e. dev installs).
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_DEV_FRONTEND_DIR = _PROJECT_ROOT / "frontend"
 
 HealthKind = Literal["http", "cmd", "none"]
 
@@ -52,7 +62,7 @@ def default_services(config: PortableConfig) -> dict[str, ServiceSpec]:
     # time, so the specs never carry an absolute host path.
     neo4j = ServiceSpec(
         name="neo4j",
-        command=("${BENNY_HOME}/bin/benny-neo4j", "start"),
+        command=(f"${{BENNY_HOME}}/bin/benny-neo4j{_BIN_EXT}", "start"),
         health=HealthCheck(
             kind="http",
             target=f"http://127.0.0.1:{config.neo4j_http_port}/",
@@ -62,7 +72,7 @@ def default_services(config: PortableConfig) -> dict[str, ServiceSpec]:
     )
     lemonade = ServiceSpec(
         name="lemonade",
-        command=("${BENNY_HOME}/bin/benny-llm", "start"),
+        command=(f"${{BENNY_HOME}}/bin/benny-llm{_BIN_EXT}", "start"),
         health=HealthCheck(
             kind="http",
             target=f"http://127.0.0.1:{config.lemonade_port}/api/v1/models",
@@ -73,7 +83,7 @@ def default_services(config: PortableConfig) -> dict[str, ServiceSpec]:
     api = ServiceSpec(
         name="api",
         command=(
-            "python",
+            sys.executable,
             "-m",
             "uvicorn",
             "benny.api.server:app",
@@ -84,15 +94,18 @@ def default_services(config: PortableConfig) -> dict[str, ServiceSpec]:
         ),
         health=HealthCheck(
             kind="http",
-            target=f"http://127.0.0.1:{config.api_port}/health",
+            target=f"http://127.0.0.1:{config.api_port}/",
             timeout_seconds=30.0,
         ),
-        depends_on=("neo4j",),
         requires_port=config.api_port,
     )
+    _ui_env: dict[str, str] = {}
+    if _DEV_FRONTEND_DIR.is_dir():
+        _ui_env["BENNY_FRONTEND_DIR"] = str(_DEV_FRONTEND_DIR)
     ui = ServiceSpec(
         name="ui",
-        command=("${BENNY_HOME}/bin/benny-ui", "start"),
+        command=(f"${{BENNY_HOME}}/bin/benny-ui{_BIN_EXT}", "start"),
+        env=_ui_env,
         health=HealthCheck(
             kind="http",
             target=f"http://127.0.0.1:{config.ui_port}/",
