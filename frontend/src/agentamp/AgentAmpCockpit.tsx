@@ -4,6 +4,7 @@
  * Renders the skinnable Winamp-style cockpit view inside the main Benny app.
  * Phases visible here:
  *   Phase 5 → Equalizer panel (PUT /api/agentamp/eq)
+ *   Phase 6 → Playlist view (GET /api/agentamp/playlist)
  *   Phase 2 → AgentVis plugin sandbox placeholder
  *   Phase 3 → DSP-A visualizer placeholder
  *
@@ -21,8 +22,10 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
+  List,
 } from 'lucide-react';
 import EqualizerPanel from './EqualizerPanel';
+import PlaylistPanel from './PlaylistPanel';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -384,7 +387,7 @@ export default function AgentAmpCockpit() {
             justifyContent: 'flex-end',
           }}
         >
-          {['Ph1 Skins', 'Ph2 Plugins', 'Ph3 DSP', 'Ph4 TUI', 'Ph5 EQ'].map(
+          {['Ph1 Skins', 'Ph2 Plugins', 'Ph3 DSP', 'Ph4 TUI', 'Ph5 EQ', 'Ph6 Playlist'].map(
             (ph, i) => (
               <span
                 key={ph}
@@ -393,12 +396,12 @@ export default function AgentAmpCockpit() {
                   padding: '2px 8px',
                   borderRadius: '4px',
                   background:
-                    i === 4
+                    i >= 4
                       ? 'rgba(99,102,241,0.2)'
                       : 'var(--surface-raised)',
-                  border: `1px solid ${i === 4 ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-                  color: i === 4 ? 'var(--accent-primary)' : 'var(--text-tertiary)',
-                  fontWeight: i === 4 ? 600 : 400,
+                  border: `1px solid ${i >= 4 ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                  color: i >= 4 ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+                  fontWeight: i >= 4 ? 600 : 400,
                 }}
               >
                 {ph}
@@ -424,14 +427,24 @@ export default function AgentAmpCockpit() {
           <AgentVisStub />
         </div>
 
-        {/* Right column: equalizer panel */}
-        <Section
-          title="Equalizer — Manifest Write"
-          icon={<Sliders size={15} style={{ color: 'var(--accent-primary)' }} />}
-          defaultOpen
-        >
-          <EqualizerPanel />
-        </Section>
+        {/* Right column: playlist + equalizer panel */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Section
+            title="Playlist — Run History"
+            icon={<List size={15} style={{ color: 'var(--accent-primary)' }} />}
+            defaultOpen
+          >
+            <PlaylistPanel />
+          </Section>
+
+          <Section
+            title="Equalizer — Manifest Write"
+            icon={<Sliders size={15} style={{ color: 'var(--accent-primary)' }} />}
+            defaultOpen={false}
+          >
+            <EqualizerPanel />
+          </Section>
+        </div>
       </div>
     </div>
   );

@@ -50,6 +50,14 @@ _STUB_NAMES = [
     "openlineage.client.facet",
     "attr",
     "attrs",
+    # langgraph is an optional heavy dep used by benny.persistence.checkpointer;
+    # agentamp unit tests must not require it to be installed.
+    "langgraph",
+    "langgraph.checkpoint",
+    "langgraph.checkpoint.base",
+    "langgraph.checkpoint.sqlite",
+    "langgraph.graph",
+    "langgraph.prebuilt",
 ]
 
 for _name in _STUB_NAMES:

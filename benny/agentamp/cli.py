@@ -1,4 +1,4 @@
-"""`benny agentamp` CLI subcommand handlers (AAMP-001 Phase 1).
+"""`benny agentamp` CLI subcommand handlers (AAMP-001 Phases 1 + 6).
 
 Subcommands registered here:
   benny agentamp scaffold-skin <id>  [--drafts-dir D]
@@ -12,6 +12,16 @@ Subcommands registered here:
 
   benny agentamp install <path.aamp>  [--workspace W]  [--dev-mode]
       Load, verify, and register a pack (AAMP-F1, AAMP-F35).
+
+  benny agentamp enqueue <manifest.json>  [--workspace W]  [--api-base URL]
+      POST a manifest to the existing /api/run endpoint (AAMP-F12).
+
+  benny agentamp export-cockpit <out.aamp.cockpit>
+      Bundle cockpit user state (active skin, knob locks, window positions)
+      into a portable zip (AAMP-F19).
+
+  benny agentamp import-cockpit <in.aamp.cockpit>
+      Restore cockpit user state from a .aamp.cockpit bundle (AAMP-F19).
 
 Feature-flag guard: ``aamp.enabled`` must be True. Callers check the flag
 before dispatching to ``cmd_agentamp``; the flag is NOT re-checked here so
@@ -73,6 +83,47 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
         help="Skip signature check (for local development only; blocked at release)",
     )
 
+    # enqueue (AAMP-F12)
+    p_enqueue = aa.add_parser(
+        "enqueue",
+        help="POST a manifest to the /api/run endpoint (AAMP-F12)",
+    )
+    p_enqueue.add_argument(
+        "manifest_path",
+        help="Path to the manifest JSON file to enqueue",
+    )
+    p_enqueue.add_argument("--workspace", default="default")
+    p_enqueue.add_argument(
+        "--api-base",
+        default="http://localhost:8000",
+        help="Base URL of the Benny API (default: http://localhost:8000)",
+    )
+    p_enqueue.add_argument(
+        "--api-key",
+        default="benny-mesh-2026-auth",
+        help="API key for X-Benny-API-Key header",
+    )
+
+    # export-cockpit (AAMP-F19)
+    p_export = aa.add_parser(
+        "export-cockpit",
+        help="Bundle cockpit state into a portable .aamp.cockpit file (AAMP-F19)",
+    )
+    p_export.add_argument(
+        "out_path",
+        help="Output path for the .aamp.cockpit bundle",
+    )
+
+    # import-cockpit (AAMP-F19)
+    p_import = aa.add_parser(
+        "import-cockpit",
+        help="Restore cockpit state from a .aamp.cockpit bundle (AAMP-F19)",
+    )
+    p_import.add_argument(
+        "in_path",
+        help="Path to the .aamp.cockpit file to import",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Command handlers
@@ -89,6 +140,12 @@ def cmd_agentamp(args: argparse.Namespace) -> int:
         return _sign(args)
     if cmd == "install":
         return _install(args)
+    if cmd == "enqueue":
+        return _enqueue(args)
+    if cmd == "export-cockpit":
+        return _export_cockpit(args)
+    if cmd == "import-cockpit":
+        return _import_cockpit(args)
     print(f"[agentamp] unknown subcommand: {cmd!r}", file=sys.stderr)
     return 1
 
@@ -262,4 +319,92 @@ def _install(args: argparse.Namespace) -> int:
     )
 
     print(f"[agentamp] installed: {manifest.id}  →  {registry_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# enqueue (AAMP-F12)
+# ---------------------------------------------------------------------------
+
+
+def _enqueue(args: argparse.Namespace) -> int:
+    """POST a manifest file to the Benny /api/run endpoint (AAMP-F12)."""
+    from .playlist import enqueue_manifest
+
+    manifest_path = Path(args.manifest_path)
+    if not manifest_path.exists():
+        print(f"[agentamp enqueue] file not found: {manifest_path}", file=sys.stderr)
+        return 1
+
+    try:
+        manifest_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[agentamp enqueue] could not parse manifest: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        run_id = enqueue_manifest(
+            manifest_dict,
+            workspace=args.workspace,
+            api_base=args.api_base,
+            api_key=args.api_key,
+        )
+    except Exception as exc:
+        print(f"[agentamp enqueue] failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"[agentamp] enqueued: run_id={run_id}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# export-cockpit (AAMP-F19)
+# ---------------------------------------------------------------------------
+
+
+def _export_cockpit(args: argparse.Namespace) -> int:
+    """Bundle cockpit state into a .aamp.cockpit zip (AAMP-F19)."""
+    from .user_state import export_cockpit
+
+    out_path = Path(args.out_path)
+    benny_home = Path(os.environ.get("BENNY_HOME", Path.home() / ".benny"))
+
+    try:
+        export_cockpit(out_path, benny_home)
+    except Exception as exc:
+        print(f"[agentamp export-cockpit] failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"[agentamp] cockpit exported: {out_path}  ({out_path.stat().st_size} bytes)")
+    print("  Contains: cockpit.json, eq.json, bundle.json")
+    print(f"\nTo restore on another host:")
+    print(f"  benny agentamp import-cockpit {out_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# import-cockpit (AAMP-F19)
+# ---------------------------------------------------------------------------
+
+
+def _import_cockpit(args: argparse.Namespace) -> int:
+    """Restore cockpit state from a .aamp.cockpit bundle (AAMP-F19)."""
+    from .user_state import import_cockpit
+
+    in_path = Path(args.in_path)
+    benny_home = Path(os.environ.get("BENNY_HOME", Path.home() / ".benny"))
+
+    try:
+        state = import_cockpit(in_path, benny_home)
+    except FileNotFoundError as exc:
+        print(f"[agentamp import-cockpit] {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"[agentamp import-cockpit] failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"[agentamp] cockpit restored from: {in_path}")
+    print(f"  Active skin: {state.active_skin_id}")
+    print(f"  Knob locks:  {len(state.knob_locks)} path(s)")
+    print(f"  Windows:     {len(state.window_positions)} position(s)")
     return 0

@@ -101,6 +101,9 @@ class SkinWindow(BaseModel):
     w: int = 400
     h: int = 300
     z: int = 0
+    snap: Optional[str] = None  # snap zone: "tl"|"tr"|"bl"|"br"|"c" (AAMP-F20)
+    min_w: int = 0              # minimum width in pixels (AAMP-F20)
+    min_h: int = 0              # minimum height in pixels (AAMP-F20)
 
 
 class SkinMinimode(BaseModel):

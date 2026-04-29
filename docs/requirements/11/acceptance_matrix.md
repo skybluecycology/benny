@@ -40,17 +40,17 @@ pull):
 | AAMP-F8  | 4 | `test_aamp_f8_minimode_size_floor` | IN-PROGRESS | `tests/agentamp/test_tui.py` |
 | AAMP-F9  | 5 | `test_aamp_f9_eq_write_signs_manifest` | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
 | AAMP-F10 | 5 | `test_aamp_f10_per_task_picker`, `test_aamp_f10_knob_lock_persists` | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
-| AAMP-F11 | 6 | `test_aamp_f11_playlist_reads_runs` | TODO | — |
-| AAMP-F12 | 6 | `test_aamp_f12_enqueue_uses_runs_endpoint` | TODO | — |
+| AAMP-F11 | 6 | `test_aamp_f11_playlist_reads_runs` | IN-PROGRESS | `tests/agentamp/test_playlist.py` · `a0f822e` |
+| AAMP-F12 | 6 | `test_aamp_f12_enqueue_uses_runs_endpoint` | IN-PROGRESS | `tests/agentamp/test_playlist.py` · `a0f822e` |
 | AAMP-F13 | 7 | `test_aamp_f13_effect_chain_skip_on_deny` | TODO | — |
 | AAMP-F14 | 7 | `test_aamp_f14_shader_uses_shared_gl_context` | TODO | — |
 | AAMP-F15 | 8 | `test_aamp_f15_local_registry_install_use` | TODO | — |
 | AAMP-F16 | 8 | `test_aamp_f16_remote_pull_metadata_only` | TODO | — |
 | AAMP-F17 | 8 | `test_aamp_f17_doctor_reports_aamp` | TODO | — |
-| AAMP-F18 | 6 | `test_aamp_f18_user_state_under_benny_home` | TODO | — |
-| AAMP-F19 | 6 | `test_aamp_f19_export_import_cockpit_roundtrip` | TODO | — |
-| AAMP-F20 | 6 | `test_aamp_f20_layout_snap_zones_clamp` | TODO | — |
-| AAMP-F21 | 6 | `test_aamp_f21_layout_event_envelope` | TODO | — |
+| AAMP-F18 | 6 | `test_aamp_f18_user_state_under_benny_home` | IN-PROGRESS | `tests/agentamp/test_user_state.py` · `a0f822e` |
+| AAMP-F19 | 6 | `test_aamp_f19_export_import_cockpit_roundtrip` | IN-PROGRESS | `tests/agentamp/test_user_state.py` · `a0f822e` |
+| AAMP-F20 | 6 | `test_aamp_f20_layout_snap_zones_clamp` | IN-PROGRESS | `tests/agentamp/test_layout.py` · `a0f822e` |
+| AAMP-F21 | 6 | `test_aamp_f21_layout_event_envelope` | IN-PROGRESS | `tests/agentamp/test_layout.py` · `a0f822e` |
 | AAMP-F22 | 9 | `test_aamp_f22_signature_required_outside_devmode` | TODO | — |
 | AAMP-F23 | 9 | `test_aamp_f23_routes_require_api_key` | TODO | — |
 | AAMP-F24 | 9 | `test_aamp_f24_offline_default_path_works`, `test_aamp_f24_remote_pull_offline_refusal` | TODO | — |
