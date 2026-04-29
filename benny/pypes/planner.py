@@ -345,7 +345,8 @@ def plan_pypes_manifest(
             )
         raise RuntimeError(
             f"Planner: LLM did not return valid JSON.{hint}\n"
-            f"--- raw response ---\n{raw[:2000]}"
+            f"--- raw response (showing 4000 of {len(raw)} chars) ---\n"
+            f"{raw[:4000]}"
         )
 
     # Force the manifest_id and workspace the caller asked for so the user can
@@ -409,6 +410,24 @@ def _call_llm(
 _FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
+# Trailing comma before `}` or `]` — invalid in standard JSON, common in
+# LLM output. Captures the closing bracket so the substitution preserves it.
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+# Fake "comment" keys some finetunes (notably Qwen3.5-FLM) invent because
+# JSON has no native comments. Pattern: ``"_commented_out_<anything>": <value>``
+# followed by an optional comma. We strip these key/value pairs entirely.
+_COMMENT_KEY_RE = re.compile(
+    r'"_commented_out_[^"]*"\s*:\s*'
+    r'(?:"[^"]*"|true|false|null|-?\d+(?:\.\d+)?)'
+    r'\s*,?',
+    re.IGNORECASE,
+)
+
+# `// line comment` and `/* block */` — also occasionally hallucinated.
+_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
 # Models that need /no_think to suppress chain-of-thought preamble.
 _THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-r2")
 
@@ -433,6 +452,38 @@ def _with_prefill(messages: List[Dict[str, str]], enabled: bool) -> List[Dict[st
     return list(messages) + [{"role": "assistant", "content": "{"}]
 
 
+def _repair_json(text: str) -> str:
+    """Best-effort cleanup of LLM-emitted JSON quirks before strict parsing.
+
+    Handles three patterns we've observed in the wild from local models:
+
+    1. Trailing commas before ``}`` or ``]`` (some chat templates strip the
+       final field-separator handling and the model leaves a stray comma).
+    2. ``"_commented_out_..."`` keys — qwen3.5-FLM tries to "comment out"
+       fields by inventing fake keys with ``true`` values.
+    3. ``//`` and ``/* ... */`` comments — JSON5-style hallucinations.
+    """
+    text = _BLOCK_COMMENT_RE.sub("", text)
+    text = _LINE_COMMENT_RE.sub("", text)
+    text = _COMMENT_KEY_RE.sub("", text)
+    # Run trailing-comma cleanup *after* comment removal so a deleted
+    # `_commented_out_*` pair that left a dangling comma is still cleaned.
+    text = _TRAILING_COMMA_RE.sub(r"\1", text)
+    return text
+
+
+def _try_parse(text: str) -> Optional[Dict[str, Any]]:
+    """Try strict parse, fall back to repaired parse."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_repair_json(text))
+    except json.JSONDecodeError:
+        return None
+
+
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     """Be forgiving: strip optional ```json fences, find the outermost JSON object."""
     if not text:
@@ -441,19 +492,17 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     # Strip <think>...</think> blocks emitted by reasoning-mode models.
     text = _THINK_RE.sub("", text).strip()
 
-    # 1. Direct parse.
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    # 1. Direct parse (with repair fallback).
+    payload = _try_parse(text)
+    if payload is not None:
+        return payload
 
     # 2. Triple-backtick fenced block.
     m = _FENCE_RE.search(text)
     if m:
-        try:
-            return json.loads(m.group(1))
-        except json.JSONDecodeError:
-            pass
+        payload = _try_parse(m.group(1))
+        if payload is not None:
+            return payload
 
     # 3. Outermost { ... } slice — last resort for chatty models.
     #    Use the *last* closing brace so reasoning text before the JSON doesn't
@@ -462,9 +511,5 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
-        snippet = text[start : end + 1]
-        try:
-            return json.loads(snippet)
-        except json.JSONDecodeError:
-            return None
+        return _try_parse(text[start : end + 1])
     return None
