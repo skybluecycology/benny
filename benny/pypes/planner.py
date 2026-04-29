@@ -201,7 +201,7 @@ def plan_pypes_manifest(
     manifest_id: Optional[str] = None,
     extra_notes: Optional[str] = None,
     temperature: float = 0.2,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> Tuple[PypesManifest, Dict[str, Any]]:
     """Generate (and validate) a `PypesManifest` from a plain-English requirement.
 
@@ -277,20 +277,75 @@ def plan_pypes_manifest(
         ),
     }
 
-    # Qwen3 and similar thinking-mode models default to chain-of-thought
-    # which burns all available tokens on reasoning before reaching the JSON.
-    # Prepending /no_think suppresses that preamble for compatible models.
-    if _is_thinking_model(resolved_model):
+    # Thinking-mode models (Qwen3, QwQ, DeepSeek-R1) default to chain-of-thought
+    # that consumes the entire token budget before any JSON is emitted. We
+    # mitigate in three layers:
+    #   (a) /no_think directive (honored by stock Qwen3 chat templates)
+    #   (b) much larger token budget (some finetunes ignore /no_think)
+    #   (c) assistant prefill — start the assistant turn with `{` so the
+    #       model is forced to continue inside a JSON object instead of
+    #       opening with an English preamble.
+    is_thinking = _is_thinking_model(resolved_model)
+    if is_thinking:
         user_msg = {
             "role": "user",
             "content": "/no_think\n" + user_msg["content"],
         }
+        # Quadruple the budget — small finetunes that ignore /no_think still
+        # need ~8–12k tokens of slack to ramble *and* then emit the manifest.
+        max_tokens = max(max_tokens, 16384)
 
-    raw = _call_llm(resolved_model, [system_msg, user_msg], temperature, max_tokens)
+    raw = _call_llm(
+        resolved_model,
+        _with_prefill([system_msg, user_msg], is_thinking),
+        temperature,
+        max_tokens,
+    )
+    if is_thinking:
+        # Re-attach the prefill so `_extract_json` sees a complete `{...}`.
+        raw = "{" + raw if not raw.lstrip().startswith("{") else raw
     payload = _extract_json(raw)
+
     if payload is None:
+        # Retry once with a brutally terse prompt that doesn't give the
+        # model any room to philosophize. Drop the long schema spec — the
+        # first attempt's reasoning burned through it without producing JSON
+        # anyway, so a second pass with the same prompt would just repeat.
+        retry_user = {
+            "role": "user",
+            "content": (
+                "/no_think\n"
+                "Output ONLY a single valid JSON object for a PypesManifest "
+                f"with id={manifest_id!r} and workspace={workspace!r}. "
+                "No prose, no markdown, no <think> tags, no explanation. "
+                "Start your response with `{` and end with `}`. "
+                "Required fields: schema_version, kind, id, name, workspace, "
+                "governance, clp, steps. The first step must be stage=bronze "
+                "with inputs=[] and a source.{uri,format}. "
+                "Original requirement: " + requirement.strip()
+            ),
+        }
+        raw = _call_llm(
+            resolved_model,
+            _with_prefill([system_msg, retry_user], True),
+            temperature,
+            max_tokens,
+        )
+        raw = "{" + raw if not raw.lstrip().startswith("{") else raw
+        payload = _extract_json(raw)
+
+    if payload is None:
+        hint = ""
+        if is_thinking:
+            hint = (
+                "\n\nHint: this model appears to ignore the JSON-only "
+                "instruction and emit chain-of-thought instead. Try a "
+                "stronger / non-thinking model (e.g. an Ollama llama3.1 "
+                "variant or a cloud model) for the planner."
+            )
         raise RuntimeError(
-            f"Planner: LLM did not return valid JSON.\n--- raw response ---\n{raw[:2000]}"
+            f"Planner: LLM did not return valid JSON.{hint}\n"
+            f"--- raw response ---\n{raw[:2000]}"
         )
 
     # Force the manifest_id and workspace the caller asked for so the user can
@@ -361,6 +416,21 @@ _THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-r2")
 def _is_thinking_model(model: str) -> bool:
     lm = model.lower()
     return any(p in lm for p in _THINKING_MODEL_PATTERNS)
+
+
+def _with_prefill(messages: List[Dict[str, str]], enabled: bool) -> List[Dict[str, str]]:
+    """Append an assistant prefill of ``{`` so the model continues inside a
+    JSON object instead of opening with English prose.
+
+    OpenAI-compatible servers (Lemonade, Ollama, vLLM) treat a trailing
+    assistant message as a partial completion to continue from. The leading
+    ``{`` becomes the first token the model sees on its turn — strongly
+    biasing it toward completing the JSON literal rather than starting a
+    sentence with "Okay, let's tackle...".
+    """
+    if not enabled:
+        return messages
+    return list(messages) + [{"role": "assistant", "content": "{"}]
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
