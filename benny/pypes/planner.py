@@ -277,6 +277,15 @@ def plan_pypes_manifest(
         ),
     }
 
+    # Qwen3 and similar thinking-mode models default to chain-of-thought
+    # which burns all available tokens on reasoning before reaching the JSON.
+    # Prepending /no_think suppresses that preamble for compatible models.
+    if _is_thinking_model(resolved_model):
+        user_msg = {
+            "role": "user",
+            "content": "/no_think\n" + user_msg["content"],
+        }
+
     raw = _call_llm(resolved_model, [system_msg, user_msg], temperature, max_tokens)
     payload = _extract_json(raw)
     if payload is None:
@@ -343,13 +352,24 @@ def _call_llm(
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+# Models that need /no_think to suppress chain-of-thought preamble.
+_THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-r2")
+
+
+def _is_thinking_model(model: str) -> bool:
+    lm = model.lower()
+    return any(p in lm for p in _THINKING_MODEL_PATTERNS)
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     """Be forgiving: strip optional ```json fences, find the outermost JSON object."""
     if not text:
         return None
-    text = text.strip()
+
+    # Strip <think>...</think> blocks emitted by reasoning-mode models.
+    text = _THINK_RE.sub("", text).strip()
 
     # 1. Direct parse.
     try:
@@ -366,6 +386,9 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
             pass
 
     # 3. Outermost { ... } slice — last resort for chatty models.
+    #    Use the *last* closing brace so reasoning text before the JSON doesn't
+    #    get included in the slice, and partial-truncated trailing prose is
+    #    cut at the final complete brace.
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
