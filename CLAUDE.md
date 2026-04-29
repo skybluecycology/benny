@@ -12,7 +12,7 @@ Benny treats **documents**, **code**, **tabular data**, and the **operator cockp
 - **Documents** → RAG / Knowledge Graph (`benny/api/rag_routes.py`, `benny/core/adaptive_rag.py`)
 - **Code** → Code Graph + Swarm execution (`benny/api/graph_routes.py`, `benny/graph/swarm.py`)
 - **Tabular data** → Pypes transformation engine (`benny/pypes/`, `benny/api/pypes_routes.py`) — manifest-driven DAG with bronze→silver→gold stages, CLP lineage, checkpoints, drill-down, and explainable financial-risk reports. Plus a **sandbox layer** (`pypes plan` / `agent-report` / `bench` / `chat`) for LLM manifest authoring, agent narratives, pandas-vs-polars benchmarks, and multi-turn drill-down — all advisory and side-effect-free relative to the deterministic core. See [docs/operations/PYPES_TRANSFORMATION_GUIDE.md](docs/operations/PYPES_TRANSFORMATION_GUIDE.md).
-- **Operator cockpit** → AgentAmp (`benny/agentamp/`, `frontend/src/agentamp/`) — Winamp-style skinnable cockpit. Phase 1: `.aamp` skin packs, HMAC signing, `benny agentamp scaffold-skin / pack / sign / install`. Later phases: AgentVis WebGL plugins, DSP-A spectrum, Equalizer panel, Textual TUI mini-mode, `skin_designer` LLM skill, marketplace. See [docs/operations/AGENTAMP_GUIDE.md](docs/operations/AGENTAMP_GUIDE.md).
+- **Operator cockpit** → AgentAmp (`benny/agentamp/`, `frontend/src/agentamp/`) — Winamp-style skinnable cockpit. **Phases 1–6 shipped**: `.aamp` skin packs + HMAC signing (`scaffold-skin / pack / sign / install`); AgentVis WebGL plugin sandbox (Phase 2); DSP-A deterministic spectrum/VU/loop pipeline (Phase 3); Textual TUI mini-mode (Phase 4); Equalizer manifest write + policy/ledger (Phase 5); Playlist run-history + enqueue + Layout DSL snap/clamp + user-state portability export/import (Phase 6). Phases 7–9 (effects pipeline, marketplace, release hardening) are next. See [docs/operations/AGENTAMP_GUIDE.md](docs/operations/AGENTAMP_GUIDE.md).
 
 ## Where things live
 
@@ -54,11 +54,14 @@ benny pypes agent-report <run_id>        --workspace W                    # one-
 benny pypes bench        pandas=<m1> polars=<m2> --workspace W [--repeats N]   # head-to-head wall/CPU/RSS/cost
 benny pypes model-bench  manifests/templates/model_comparison_planner.json --workspace W [--judge] [--save-report out.md]   # cross-model time/cost/tokens/accuracy/quality
 benny pypes chat         <run_id>        --workspace W                    # multi-turn risk-analyst REPL grounded on the run
-# --- agentamp — skinnable cockpit (Phase 1) ---
+# --- agentamp — skinnable cockpit (Phases 1–6 shipped) ---
 benny agentamp scaffold-skin <id>  [--drafts-dir D]  # create deterministic draft (signature: null)
 benny agentamp pack   <draft_dir> --out <id>.aamp     # zip draft into .aamp
 benny agentamp sign   <id>.aamp                       # HMAC-SHA256 sign (uses BENNY_HMAC_KEY)
 benny agentamp install <id>.aamp [--workspace W]      # verify sig + register under $BENNY_HOME
+benny agentamp enqueue <manifest.json> [--workspace W] [--api-base URL] [--api-key KEY]  # enqueue run
+benny agentamp export-cockpit <out.aamp.cockpit>      # export user state + EQ to portable bundle
+benny agentamp import-cockpit <in.aamp.cockpit>       # restore user state + EQ from bundle
 benny up/down/status/doctor --home $BENNY_HOME        # service lifecycle
 ```
 

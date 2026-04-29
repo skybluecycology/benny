@@ -51,7 +51,7 @@ New to Benny? Read in this order:
 | [PBR-001_CONTINUATION_PLAN.md](requirements/PBR-001_CONTINUATION_PLAN.md) | Phase roadmap and history (Phases 0–8) |
 | [PORTABLE_BENNY_REQUIREMENTS.md](requirements/PORTABLE_BENNY_REQUIREMENTS.md) | Full Phase 0–8 technical specification |
 | [requirements/10/](requirements/10/README.md) | **AOS-001 — Agentic OS for the SDLC** ✅ SHIPPED `357b3d1`. Manifest 1.1, PBR artefact store, progressive disclosure, Mermaid/PlantUML diagrams, durable resume, VRAM-aware worker pool, BDD pipeline (`benny req`), TOGAF phase mapping + ADR emission, JSON-LD PROV-O lineage, policy-as-code + HMAC ledger (SOX 404), multi-model sandbox runner. 62/62 acceptance rows PASS. See [CHANGELOG.md](../CHANGELOG.md) for the full release notes. |
-| [requirements/11/](requirements/11/README.md) | **AAMP-001 — AgentAmp: Skinnable, Pluggable Agentic Cockpit** 🚧 IN PROGRESS. Winamp-inspired skin packs (`.aamp`), AgentVis WebGL plugins, DSP-A spectrum, Equalizer panel, Textual TUI, `skin_designer` LLM skill, marketplace. Phase 1 (skin pack format + signing + scaffold CLI) SHIPPED `421351f`. 9 phases total; requirements in [requirement.md](requirements/11/requirement.md), acceptance rows in [acceptance_matrix.md](requirements/11/acceptance_matrix.md). |
+| [requirements/11/](requirements/11/README.md) | **AAMP-001 — AgentAmp: Skinnable, Pluggable Agentic Cockpit** 🚧 IN PROGRESS. Winamp-inspired skin packs (`.aamp`), AgentVis WebGL plugins, DSP-A spectrum, Equalizer panel, Textual TUI, `skin_designer` LLM skill, marketplace. **Phases 1–6 SHIPPED `a0f822e`** (skin packs + signing + scaffold CLI; AgentVis sandbox; DSP-A pipeline; TUI mini-mode; Equalizer manifest write; Playlist + enqueue + Layout DSL + user-state portability). 9 phases total; requirements in [requirement.md](requirements/11/requirement.md), acceptance rows in [acceptance_matrix.md](requirements/11/acceptance_matrix.md). |
 
 ---
 
@@ -82,11 +82,14 @@ benny enrich --manifest manifests/templates/knowledge_enrichment_pipeline.json \
              --resume <prior_run_id> --run                                  # resume a partial run
 benny enrich --help                                                         # full options
 
-# AgentAmp — skinnable cockpit (Phase 1)
-benny agentamp scaffold-skin my-skin                              # create draft skin
+# AgentAmp — skinnable cockpit (Phases 1–6 shipped)
+benny agentamp scaffold-skin my-skin                              # create draft skin (Phase 1)
 benny agentamp pack   $BENNY_HOME/agentamp/drafts/my-skin --out my-skin.aamp
 benny agentamp sign   my-skin.aamp                               # HMAC-SHA256 (uses BENNY_HMAC_KEY)
 benny agentamp install my-skin.aamp --workspace default
+benny agentamp enqueue manifest.json --workspace W               # enqueue manifest via API (Phase 6)
+benny agentamp export-cockpit cockpit.aamp.cockpit               # export user state + EQ (Phase 6)
+benny agentamp import-cockpit cockpit.aamp.cockpit               # restore user state + EQ (Phase 6)
 
 # AOS-001 — SDLC pipeline (manifest 1.1)
 benny req "Add payment retry logic" --workspace my_ws --save   # PRD + BDD scenarios
