@@ -26,9 +26,10 @@ import AppV2 from './AppV2Beta';
 
 
 
-import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield, Folder } from 'lucide-react';
+import { Layers, Cpu, BookOpen, PanelLeftClose, PanelLeft, PanelRightClose, PanelRight, Shield, Folder, Music2 } from 'lucide-react';
+import AgentAmpCockpit from './agentamp/AgentAmpCockpit';
 
-type View = 'studio' | 'notebook' | 'llm' | 'admin' | 'workspaces';
+type View = 'studio' | 'notebook' | 'llm' | 'admin' | 'workspaces' | 'agentamp';
 
 
 import WorkspaceSelector from './components/Shared/WorkspaceSelector';
@@ -166,12 +167,20 @@ function App() {
             <Shield size={20} />
           </button>
 
-          <button 
+          <button
             className={`nav-rail-item ${view === 'workspaces' ? 'active' : ''}`}
             onClick={() => setView('workspaces')}
             title="Workspace Manager"
           >
             <Folder size={20} />
+          </button>
+
+          <button
+            className={`nav-rail-item ${view === 'agentamp' ? 'active' : ''}`}
+            onClick={() => setView('agentamp')}
+            title="AgentAmp Cockpit"
+          >
+            <Music2 size={20} />
           </button>
 
           <div style={{ flex: 1 }} />
@@ -279,6 +288,7 @@ function App() {
           {view === 'llm' && <LLMManager />}
           {view === 'admin' && <GlobalAdminDashboard />}
           {view === 'workspaces' && <WorkspaceManager />}
+          {view === 'agentamp' && <AgentAmpCockpit />}
 
           {(view === 'studio' || view === 'notebook') && (
             <button 
