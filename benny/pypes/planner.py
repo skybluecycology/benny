@@ -27,7 +27,7 @@ import logging
 import os
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import ValidationError
 
@@ -193,48 +193,109 @@ fence — just the JSON.
 # ---------------------------------------------------------------------------
 
 
+# Strategy literal — public for type-checkers, validated in the dispatcher.
+PlannerStrategy = Literal["auto", "oneshot", "incremental", "swarm"]
+_VALID_STRATEGIES = ("auto", "oneshot", "incremental", "swarm")
+
+
 def plan_pypes_manifest(
     requirement: str,
     *,
     workspace: str = "default",
     model: Optional[str] = None,
+    strategy: str = "auto",
+    swarm_models: Optional[List[str]] = None,
+    judge_model: Optional[str] = None,
     manifest_id: Optional[str] = None,
     extra_notes: Optional[str] = None,
     temperature: float = 0.2,
     max_tokens: int = 8192,
 ) -> Tuple[PypesManifest, Dict[str, Any]]:
-    """Generate (and validate) a `PypesManifest` from a plain-English requirement.
+    """Generate (and validate) a ``PypesManifest`` from a plain-English requirement.
+
+    The dispatcher picks one of three planning strategies:
+
+    * ``"oneshot"`` — single LLM call. Fast, but requires a strong model
+      (cloud-class or 14B+ local) to reliably produce valid JSON.
+    * ``"incremental"`` — multi-pass authoring: outline → CLP → per-step
+      expansion → reports → validate-and-repair loop. Each LLM call has a
+      small focused context, so even a 4–9B local model has a reasonable
+      shot at producing a valid manifest. ~5–8× more LLM calls than oneshot.
+    * ``"swarm"`` — runs ``incremental`` across multiple models concurrently
+      (or sequentially if no event loop), then a Judge model synthesizes
+      the strongest single manifest from the drafts. Highest quality at
+      the cost of N× the token spend.
+    * ``"auto"`` (default) — picks ``incremental`` when the resolved model
+      is local or thinking-mode, else ``oneshot``.
 
     Parameters
     ----------
     requirement
         The free-text spec to turn into a manifest.
     workspace
-        Workspace name to bake into the manifest. Defaults to "default".
+        Workspace name to bake into the manifest.
     model
-        Specific model id to call. If ``None``, falls back to
-        ``$BENNY_DEFAULT_MODEL`` then to ``benny.core.models.get_active_model``.
+        Specific model id. Falls back to ``$BENNY_DEFAULT_MODEL`` then a
+        live probe of Lemonade/Ollama.
+    strategy
+        ``"auto" | "oneshot" | "incremental" | "swarm"``.
+    swarm_models
+        Explicit list of model ids for the swarm. Defaults to ``[primary]``
+        plus up to 2 sibling models from the same provider.
+    judge_model
+        Model id for the swarm Judge. Defaults to the primary model.
     manifest_id
-        Optional fixed id. Defaults to ``pypes-<12hex>``.
+        Force a specific manifest id (defaults to ``pypes-<12hex>``).
     extra_notes
-        Free-text appended to the user prompt — useful for steering
-        ("must include a maturity-bucket gold step", etc.).
+        Free-text steering appended to the user prompt.
 
     Returns
     -------
     (manifest, meta)
-        The validated PypesManifest and a metadata dict with the resolved
-        model, the raw response text, and the token usage envelope.
+        Validated ``PypesManifest`` and a metadata dict including
+        ``strategy``, ``model``, ``manifest_id``, and per-strategy details.
 
     Raises
     ------
     RuntimeError
-        On any LLM or validation failure — the caller decides whether to
-        retry, surface the error, or fall back.
+        On any LLM or validation failure that survives all retry layers.
     """
-    manifest_id = manifest_id or f"pypes-{uuid.uuid4().hex[:12]}"
+    if strategy not in _VALID_STRATEGIES:
+        raise ValueError(
+            f"plan_pypes_manifest: unknown strategy {strategy!r}; "
+            f"expected one of {_VALID_STRATEGIES}"
+        )
 
-    # Resolve model lazily so the user can override per-call.
+    manifest_id = manifest_id or f"pypes-{uuid.uuid4().hex[:12]}"
+    resolved_model = _resolve_model(model, workspace)
+
+    if strategy == "auto":
+        strategy = "incremental" if _prefer_incremental(resolved_model) else "oneshot"
+        log.info("planner: auto-selected strategy=%s for model=%s", strategy, resolved_model)
+
+    if strategy == "oneshot":
+        return _plan_oneshot(
+            requirement=requirement, workspace=workspace, model=resolved_model,
+            manifest_id=manifest_id, extra_notes=extra_notes,
+            temperature=temperature, max_tokens=max_tokens,
+        )
+    if strategy == "incremental":
+        return _plan_incremental(
+            requirement=requirement, workspace=workspace, model=resolved_model,
+            manifest_id=manifest_id, extra_notes=extra_notes,
+            temperature=temperature, max_tokens=max_tokens,
+        )
+    # strategy == "swarm"
+    return _plan_swarm(
+        requirement=requirement, workspace=workspace, primary_model=resolved_model,
+        swarm_models=swarm_models, judge_model=judge_model,
+        manifest_id=manifest_id, extra_notes=extra_notes,
+        temperature=temperature, max_tokens=max_tokens,
+    )
+
+
+def _resolve_model(model: Optional[str], workspace: str) -> str:
+    """Resolve a concrete model id from explicit arg, env var, or live probe."""
     resolved_model = model or os.environ.get("BENNY_DEFAULT_MODEL")
     if not resolved_model:
         try:
@@ -257,6 +318,40 @@ def plan_pypes_manifest(
     if not resolved_model:
         # Conservative final default — local-first per Benny's portability guarantee.
         resolved_model = "ollama/llama3.1"
+    return resolved_model
+
+
+def _prefer_incremental(resolved_model: str) -> bool:
+    """Auto-select incremental for local or thinking-mode models.
+
+    Cloud / large models (anthropic, openai, gemini, etc.) handle one-shot
+    JSON generation reliably and don't need the multi-pass overhead.
+    """
+    if not resolved_model:
+        return False
+    lm = resolved_model.lower()
+    if lm.startswith(("lemonade/", "ollama/", "litert/", "local/")):
+        return True
+    if _is_thinking_model(resolved_model):
+        return True
+    return False
+
+
+def _plan_oneshot(
+    *,
+    requirement: str,
+    workspace: str,
+    model: str,
+    manifest_id: str,
+    extra_notes: Optional[str],
+    temperature: float,
+    max_tokens: int,
+) -> Tuple[PypesManifest, Dict[str, Any]]:
+    """Single-call planner — works on cloud-class models. Falls back through
+    /no_think + retry + JSON repair, but ultimately bets the whole manifest
+    on a single model turn.
+    """
+    resolved_model = model
 
     # ``str.format`` treats every `{...}` as a placeholder. The embedded JSON
     # example contains literal tokens like ``${data_dir}`` whose `{...}` would
@@ -369,9 +464,510 @@ def plan_pypes_manifest(
         "model": resolved_model,
         "manifest_id": manifest_id,
         "workspace": workspace,
+        "strategy": "oneshot",
         "raw_response_chars": len(raw),
     }
     return manifest, meta
+
+
+# ---------------------------------------------------------------------------
+# INCREMENTAL STRATEGY — multi-pass authoring for small/local models.
+# ---------------------------------------------------------------------------
+
+_OUTLINE_SYSTEM = """You produce JSON outlines of data pipelines. Output ONE JSON object only — no prose, no markdown, no <think> tags.
+
+Schema you must produce:
+{
+  "name": "<3-10 word pipeline name>",
+  "description": "<one sentence>",
+  "conceptual": [
+    {"name": "EntityName", "description": "<short>"}
+  ],
+  "step_skeleton": [
+    {"id": "bronze_<noun>", "stage": "bronze", "summary": "<<=20 words>"},
+    {"id": "silver_<noun>", "stage": "silver", "summary": "..."},
+    {"id": "gold_<noun>",   "stage": "gold",   "summary": "..."}
+  ]
+}
+
+Rules:
+- At least one bronze (load), one silver (transform/clean), one gold (aggregate/output) step.
+- Step ids: lowercase, prefixed by stage, snake_case.
+- 3-7 total steps. Conceptual entities are capitalised business nouns.
+- Output JSON only. Begin with `{` and end with `}`.
+"""
+
+_CLP_SYSTEM = """You expand business entities into typed logical fields. Output ONE JSON object only.
+
+Schema:
+{
+  "logical": [
+    {
+      "entity": "EntityName",
+      "fields": [
+        {"name": "field_name", "type": "string|int|float|bool|datetime", "required": true}
+      ]
+    }
+  ]
+}
+
+Rules:
+- 3-8 fields per entity. Use snake_case names.
+- Match entity names exactly to the conceptual list provided.
+- Output JSON only.
+"""
+
+_STEP_SYSTEM = """You expand a single pipeline step into a complete PipelineStep JSON. Output ONE JSON object only.
+
+Schema for one step:
+{
+  "id": "<snake_case>",
+  "stage": "bronze"|"silver"|"gold",
+  "engine": "pandas",
+  "inputs": [string],
+  "outputs": [string],
+  "operations": [{"operation": "<from registered list>", "params": {...}}],
+  "source": {"uri": "${data_dir}/<file>", "format": "csv|parquet|json"},
+  "post_validations": {"completeness": [...], "uniqueness": [...]}
+}
+
+Rules:
+- Bronze step MUST have `inputs: []` and a `source.{uri,format}`.
+- Silver/gold steps MUST cite at least one upstream output in `inputs`, and MUST omit `source`.
+- Use ONLY operations from the registered list provided.
+- Output names are unique across the whole pipeline.
+- Use ${data_dir} (not absolute paths). Output JSON only.
+"""
+
+_REPORTS_SYSTEM = """You produce reports + governance for a pipeline. Output ONE JSON object only.
+
+Schema:
+{
+  "governance": {
+    "compliance_tags": [string],
+    "owner": "<team name>",
+    "criticality": "low"|"medium"|"high"|"critical",
+    "pii_policy": "block"|"mask"|"allow"
+  },
+  "reports": [
+    {
+      "id": "<snake_case>",
+      "title": "<human title>",
+      "kind": "financial_risk"|"threshold_breaches"|"move_analysis"|"generic_summary",
+      "source_step": "<gold step id>",
+      "drill_down_by": [string],
+      "metrics": {"metric_name": "sum(col)|count(col)|avg(col)"},
+      "format": "markdown"
+    }
+  ]
+}
+
+Rules:
+- pii_policy MUST be one of "block","mask","allow" (NOT null).
+- Each report's source_step MUST match an existing gold step id.
+- Output JSON only.
+"""
+
+_REPAIR_SYSTEM = """You produce focused JSON patches to fix Pydantic validation errors in a manifest draft.
+
+Output ONE JSON object containing ONLY the top-level keys that need to be replaced
+(e.g. {"governance": {...}} or {"steps": [...]}). Do NOT return the full manifest.
+Do NOT include keys that are already valid. Output JSON only — no prose.
+"""
+
+_JUDGE_SYSTEM = """You synthesize the strongest single PypesManifest from N drafts produced by different models.
+
+Output ONE complete PypesManifest JSON. No commentary, no markdown.
+
+Synthesis rules:
+- Pick the most internally-consistent draft as the base.
+- Merge in fields from other drafts where they add real value (more validations, better field names, missing reports).
+- Resolve conflicts in favor of schema correctness over creativity.
+- Preserve manifest_id and workspace exactly as instructed.
+- Output JSON only — start with `{` and end with `}`.
+"""
+
+
+def _plan_incremental(
+    *,
+    requirement: str,
+    workspace: str,
+    model: str,
+    manifest_id: str,
+    extra_notes: Optional[str],
+    temperature: float,
+    max_tokens: int,
+) -> Tuple[PypesManifest, Dict[str, Any]]:
+    """Multi-pass planner — outline → CLP → per-step → reports → validate+repair.
+
+    Each LLM call has a small focused context, which is the difference between
+    "model can hold the whole schema in mind" and "model produces 80% reasoning
+    text and never reaches the JSON". Useful for 4–9B local models.
+    """
+    log.info("planner.incremental: starting model=%s", model)
+    notes_suffix = f"\n\nExtra steering notes:\n{extra_notes}" if extra_notes else ""
+
+    # ─── Stage 1: outline ───────────────────────────────────────────────────
+    outline = _stage_call(
+        system=_OUTLINE_SYSTEM,
+        user=f"Requirement:\n{requirement}{notes_suffix}\n\nProduce the outline JSON now.",
+        model=model, temperature=temperature, max_tokens=min(max_tokens, 4096),
+        stage_name="outline",
+    )
+    skeleton = outline.get("step_skeleton") or outline.get("steps") or []
+    if not skeleton:
+        raise RuntimeError(
+            "Planner.incremental[outline]: model produced no step skeleton. "
+            f"Raw outline: {json.dumps(outline)[:500]}"
+        )
+    conceptual = outline.get("conceptual", [])
+
+    # ─── Stage 2: CLP logical ───────────────────────────────────────────────
+    clp_payload = _stage_call(
+        system=_CLP_SYSTEM,
+        user=(
+            f"Conceptual entities:\n{json.dumps(conceptual, indent=2)}\n\n"
+            f"Original requirement:\n{requirement}\n\n"
+            "Produce the logical model JSON now."
+        ),
+        model=model, temperature=temperature, max_tokens=min(max_tokens, 4096),
+        stage_name="clp_logical",
+    )
+    logical = clp_payload.get("logical", [])
+
+    # ─── Stage 3: per-step expansion ────────────────────────────────────────
+    ops_list = "\n".join(f"- {n}" for n in default_registry.names())
+    steps: List[Dict[str, Any]] = []
+    for skel in skeleton:
+        upstream_outputs: List[str] = []
+        for s in steps:
+            upstream_outputs.extend(s.get("outputs", []))
+        step_payload = _stage_call(
+            system=_STEP_SYSTEM,
+            user=(
+                f"Step skeleton to expand:\n{json.dumps(skel, indent=2)}\n\n"
+                f"Available upstream outputs (from prior steps): {json.dumps(upstream_outputs)}\n\n"
+                f"Registered operations (use ONLY these names):\n{ops_list}\n\n"
+                f"Original requirement:\n{requirement}\n\n"
+                "Produce the single PipelineStep JSON now."
+            ),
+            model=model, temperature=temperature, max_tokens=min(max_tokens, 4096),
+            stage_name=f"step:{skel.get('id', '?')}",
+        )
+        # Force the step id to match the skeleton — small models tend to
+        # rename them, breaking the inputs/outputs DAG references.
+        step_payload["id"] = skel.get("id", step_payload.get("id"))
+        step_payload.setdefault("stage", skel.get("stage", "silver"))
+        step_payload.setdefault("engine", "pandas")
+        steps.append(step_payload)
+
+    # ─── Stage 4: reports + governance ──────────────────────────────────────
+    gold_summaries = [
+        {"id": s.get("id"), "outputs": s.get("outputs", [])}
+        for s in steps if s.get("stage") == "gold"
+    ]
+    reports_payload = _stage_call(
+        system=_REPORTS_SYSTEM,
+        user=(
+            f"Gold steps:\n{json.dumps(gold_summaries, indent=2)}\n\n"
+            f"Original requirement:\n{requirement}\n\n"
+            "Produce the governance + reports JSON now."
+        ),
+        model=model, temperature=temperature, max_tokens=min(max_tokens, 4096),
+        stage_name="reports",
+    )
+
+    # ─── Assembly ───────────────────────────────────────────────────────────
+    payload: Dict[str, Any] = {
+        "schema_version": "1.0",
+        "kind": "pypes_pipeline",
+        "id": manifest_id,
+        "name": outline.get("name", "Untitled Pipeline"),
+        "description": outline.get("description", ""),
+        "workspace": workspace,
+        "governance": reports_payload.get("governance") or {},
+        "clp": {"conceptual": conceptual, "logical": logical},
+        "variables": {"data_dir": "${benny_home}/data_in"},
+        "steps": steps,
+        "reports": reports_payload.get("reports") or [],
+    }
+
+    # ─── Stage 5: validate + repair loop ────────────────────────────────────
+    manifest, repair_iters = _validate_and_repair(
+        payload, requirement=requirement, model=model,
+        temperature=temperature, max_tokens=max_tokens,
+    )
+
+    meta = {
+        "model": model,
+        "manifest_id": manifest_id,
+        "workspace": workspace,
+        "strategy": "incremental",
+        "stages": {
+            "outline_steps": len(skeleton),
+            "clp_entities": len(logical),
+            "steps_expanded": len(steps),
+            "reports": len(payload["reports"]),
+            "repair_iterations": repair_iters,
+        },
+    }
+    return manifest, meta
+
+
+def _stage_call(
+    *,
+    system: str,
+    user: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    stage_name: str,
+) -> Dict[str, Any]:
+    """Run one focused stage of the incremental planner — small prompt,
+    /no_think + assistant-prefill, parse JSON, retry once on failure.
+    """
+    is_thinking = _is_thinking_model(model)
+    user_content = ("/no_think\n" + user) if is_thinking else user
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_content},
+    ]
+
+    raw = _call_llm(model, _with_prefill(messages, is_thinking), temperature, max_tokens)
+    if is_thinking and not raw.lstrip().startswith("{"):
+        raw = "{" + raw
+    payload = _extract_json(raw)
+    if payload is not None:
+        log.debug("planner.incremental[%s]: parsed on first attempt (%d chars)", stage_name, len(raw))
+        return payload
+
+    # Second attempt — terser prompt, force thinking-style suppression.
+    terse_user = (
+        "/no_think\n"
+        "Output ONE valid JSON object exactly matching the schema in the system "
+        "prompt. No prose, no markdown, no <think> tags. Begin with `{` and end "
+        f"with `}}`.\n\n{user}"
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": terse_user},
+    ]
+    raw = _call_llm(model, _with_prefill(messages, True), temperature, max_tokens)
+    if not raw.lstrip().startswith("{"):
+        raw = "{" + raw
+    payload = _extract_json(raw)
+    if payload is not None:
+        log.debug("planner.incremental[%s]: parsed on retry (%d chars)", stage_name, len(raw))
+        return payload
+
+    raise RuntimeError(
+        f"Planner.incremental[{stage_name}]: model {model!r} produced unparseable "
+        f"output after retry.\n--- raw (showing 2000 of {len(raw)}) ---\n{raw[:2000]}"
+    )
+
+
+def _validate_and_repair(
+    payload: Dict[str, Any],
+    *,
+    requirement: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    max_iters: int = 3,
+) -> Tuple[PypesManifest, int]:
+    """Try Pydantic validation; on failure, ask the model for a focused patch
+    and re-merge. Returns (manifest, iterations_used).
+    """
+    last_err: Optional[ValidationError] = None
+    for attempt in range(max_iters + 1):
+        try:
+            return PypesManifest.model_validate(payload), attempt
+        except ValidationError as exc:
+            last_err = exc
+            log.info(
+                "planner.repair[%d/%d]: %d validation error(s)",
+                attempt, max_iters, len(exc.errors()),
+            )
+            if attempt >= max_iters:
+                break
+            try:
+                patch = _stage_call(
+                    system=_REPAIR_SYSTEM,
+                    user=(
+                        f"Validation errors:\n{str(exc)[:1500]}\n\n"
+                        f"Current manifest payload (truncated):\n"
+                        f"{json.dumps(payload, indent=2)[:3000]}\n\n"
+                        f"Original requirement:\n{requirement}\n\n"
+                        "Produce a JSON patch object containing ONLY the top-level "
+                        "keys to replace. Do NOT return the full manifest."
+                    ),
+                    model=model, temperature=temperature,
+                    max_tokens=min(max_tokens, 4096),
+                    stage_name=f"repair#{attempt}",
+                )
+            except RuntimeError as repair_exc:
+                log.warning("planner.repair[%d]: patch call failed: %s", attempt, repair_exc)
+                break
+            if not patch:
+                break
+            # Shallow merge — patch keys overwrite payload keys wholesale.
+            for k, v in patch.items():
+                payload[k] = v
+
+    raise RuntimeError(
+        "Planner.incremental: validation failed after repair loop.\n"
+        f"Last error:\n{last_err}\n--- payload (truncated) ---\n"
+        f"{json.dumps(payload, indent=2)[:4000]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SWARM STRATEGY — multiple models draft concurrently, Judge synthesizes.
+# ---------------------------------------------------------------------------
+
+
+def _plan_swarm(
+    *,
+    requirement: str,
+    workspace: str,
+    primary_model: str,
+    swarm_models: Optional[List[str]],
+    judge_model: Optional[str],
+    manifest_id: str,
+    extra_notes: Optional[str],
+    temperature: float,
+    max_tokens: int,
+) -> Tuple[PypesManifest, Dict[str, Any]]:
+    """Run incremental on N models, then synthesize the winning manifest.
+
+    Members run sequentially (each is itself a multi-call sequence; running
+    them in parallel would multiply local GPU contention without much wall-
+    clock win for a single-GPU host). The Judge call sees all surviving
+    drafts and emits one synthesized manifest.
+    """
+    members = swarm_models or _default_swarm_members(primary_model)
+    log.info("planner.swarm: members=%s", members)
+
+    drafts: List[Tuple[str, PypesManifest]] = []
+    failures: List[Dict[str, str]] = []
+    for m in members:
+        try:
+            mf, _ = _plan_incremental(
+                requirement=requirement, workspace=workspace, model=m,
+                manifest_id=manifest_id, extra_notes=extra_notes,
+                temperature=temperature, max_tokens=max_tokens,
+            )
+            drafts.append((m, mf))
+            log.info("planner.swarm: member %s produced a valid draft", m)
+        except Exception as exc:
+            failures.append({"model": m, "error": str(exc)[:300]})
+            log.warning("planner.swarm: member %s failed: %s", m, exc)
+
+    if not drafts:
+        raise RuntimeError(
+            "Planner.swarm: no swarm members produced a valid draft.\n"
+            f"Failures: {json.dumps(failures, indent=2)[:2000]}"
+        )
+
+    if len(drafts) == 1:
+        only_model, only_mf = drafts[0]
+        return only_mf, {
+            "model": only_model, "manifest_id": manifest_id,
+            "workspace": workspace, "strategy": "swarm",
+            "swarm_members": [only_model], "swarm_drafts": 1,
+            "swarm_failures": failures, "judge": None,
+        }
+
+    judge = judge_model or primary_model
+    final = _stage_judge(
+        drafts=drafts, requirement=requirement, manifest_id=manifest_id,
+        workspace=workspace, judge=judge,
+        temperature=temperature, max_tokens=max_tokens,
+    )
+    return final, {
+        "model": judge, "manifest_id": manifest_id, "workspace": workspace,
+        "strategy": "swarm",
+        "swarm_members": [m for m, _ in drafts],
+        "swarm_drafts": len(drafts),
+        "swarm_failures": failures,
+        "judge": judge,
+    }
+
+
+def _default_swarm_members(primary: str) -> List[str]:
+    """Pick the primary plus up to 2 sibling models from the same provider."""
+    members = [primary]
+    if "/" not in primary:
+        return members
+    provider, _, _ = primary.partition("/")
+    try:
+        from .agent_chat import _list_lemonade_models, _list_ollama_models
+
+        candidates: List[str] = []
+        if provider == "lemonade":
+            for mid, _labels, _size in _list_lemonade_models():
+                if any(skip in mid.lower() for skip in ("embed", "whisper", "kokoro", "nomic")):
+                    continue
+                full = f"lemonade/{mid}"
+                if full != primary:
+                    candidates.append(full)
+        elif provider == "ollama":
+            for mid, _labels, _size in _list_ollama_models():
+                full = f"ollama/{mid}"
+                if full != primary:
+                    candidates.append(full)
+        for c in candidates[:2]:
+            members.append(c)
+    except Exception as exc:
+        log.debug("planner.swarm: member enumeration failed: %s", exc)
+    return members
+
+
+def _stage_judge(
+    *,
+    drafts: List[Tuple[str, PypesManifest]],
+    requirement: str,
+    manifest_id: str,
+    workspace: str,
+    judge: str,
+    temperature: float,
+    max_tokens: int,
+) -> PypesManifest:
+    """Synthesize one PypesManifest from N drafts via the Judge model."""
+    drafts_payload = [
+        {"model": m, "manifest": mf.model_dump(mode="json")}
+        for m, mf in drafts
+    ]
+    user = (
+        f"Original requirement:\n{requirement}\n\n"
+        f"Drafts from {len(drafts)} models (truncated to fit):\n"
+        f"{json.dumps(drafts_payload, indent=2)[:8000]}\n\n"
+        f"Synthesize the strongest single PypesManifest. "
+        f"Use id={manifest_id!r} and workspace={workspace!r} exactly. "
+        "Output ONE complete manifest JSON."
+    )
+    try:
+        payload = _stage_call(
+            system=_JUDGE_SYSTEM, user=user, model=judge,
+            temperature=temperature, max_tokens=max(max_tokens, 16384),
+            stage_name="judge",
+        )
+    except RuntimeError as exc:
+        log.warning("planner.swarm.judge: synthesis call failed (%s); falling back to first draft", exc)
+        return drafts[0][1]
+
+    payload["id"] = manifest_id
+    payload["workspace"] = workspace
+    payload.setdefault("schema_version", "1.0")
+    payload.setdefault("kind", "pypes_pipeline")
+    try:
+        return PypesManifest.model_validate(payload)
+    except ValidationError as exc:
+        log.warning(
+            "planner.swarm.judge: synthesis output failed validation (%s); "
+            "falling back to first valid draft", exc,
+        )
+        return drafts[0][1]
 
 
 # ---------------------------------------------------------------------------

@@ -230,6 +230,23 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
     p_plan.add_argument("--out", default=None, help="Explicit output path (overrides --save)")
     p_plan.add_argument("--run", action="store_true", help="Execute the draft immediately after generation")
     p_plan.add_argument("--json", action="store_true", help="Emit the draft as JSON to stdout (disables Rich UI)")
+    p_plan.add_argument(
+        "--strategy",
+        choices=("auto", "oneshot", "incremental", "swarm"),
+        default="auto",
+        help="Planning strategy: oneshot (1 LLM call), incremental (multi-pass for small/local models), "
+             "swarm (N models + Judge), auto (incremental for local/thinking models, oneshot otherwise).",
+    )
+    p_plan.add_argument(
+        "--swarm-models",
+        default=None,
+        help="Comma-separated list of model ids for --strategy swarm (defaults to primary + 2 siblings).",
+    )
+    p_plan.add_argument(
+        "--judge-model",
+        default=None,
+        help="Model id for the swarm Judge synthesis call (defaults to the primary model).",
+    )
 
     # ── agent-report: risk-analyst persona narrative over a finished run ─────
     p_ar = pp.add_parser(
@@ -958,6 +975,23 @@ def _print_receipt_panel(receipt: RunReceipt) -> None:
 def _cmd_plan(args: argparse.Namespace) -> int:
     from .planner import plan_pypes_manifest
 
+    swarm_models: Optional[List[str]] = None
+    if getattr(args, "swarm_models", None):
+        swarm_models = [m.strip() for m in args.swarm_models.split(",") if m.strip()]
+    judge_model = getattr(args, "judge_model", None)
+    strategy = getattr(args, "strategy", "auto")
+
+    plan_kwargs = dict(
+        requirement=args.requirement,
+        workspace=args.workspace,
+        model=args.model,
+        strategy=strategy,
+        swarm_models=swarm_models,
+        judge_model=judge_model,
+        manifest_id=args.manifest_id,
+        extra_notes=args.notes,
+    )
+
     # ── Header ───────────────────────────────────────────────────────────────
     if not args.json:
         console.print()
@@ -965,6 +999,10 @@ def _cmd_plan(args: argparse.Namespace) -> int:
             f"[bold white]Requirement[/]\n[white]{args.requirement}[/]\n\n"
             f"[bold white]Workspace[/]   [accent]{args.workspace}[/]\n"
             f"[bold white]Model[/]       [accent]{args.model or 'auto'}[/]\n"
+            f"[bold white]Strategy[/]    [accent]{strategy}[/]"
+            + (f"  [muted]swarm={','.join(swarm_models)}[/]" if swarm_models else "")
+            + (f"  [muted]judge={judge_model}[/]" if judge_model else "")
+            + "\n"
             f"[bold white]Mode[/]        [muted]sandbox  ·  draft only (no execution unless --run)[/]",
             title="[bold cyan]  Benny Pypes — Planner [/]",
             border_style="cyan",
@@ -975,22 +1013,16 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     # ── LLM call ─────────────────────────────────────────────────────────────
     try:
         if args.json:
-            manifest, meta = plan_pypes_manifest(
-                requirement=args.requirement,
-                workspace=args.workspace,
-                model=args.model,
-                manifest_id=args.manifest_id,
-                extra_notes=args.notes,
-            )
+            manifest, meta = plan_pypes_manifest(**plan_kwargs)
         else:
-            with console.status("[cyan]Calling LLM to draft manifest...[/]", spinner="dots"):
-                manifest, meta = plan_pypes_manifest(
-                    requirement=args.requirement,
-                    workspace=args.workspace,
-                    model=args.model,
-                    manifest_id=args.manifest_id,
-                    extra_notes=args.notes,
-                )
+            spinner_label = {
+                "oneshot":     "Calling LLM to draft manifest...",
+                "incremental": "Authoring manifest incrementally (outline -> CLP -> steps -> reports -> validate)...",
+                "swarm":       "Running swarm of models + Judge synthesis...",
+                "auto":        "Calling LLM to draft manifest...",
+            }.get(strategy, "Calling LLM to draft manifest...")
+            with console.status(f"[cyan]{spinner_label}[/]", spinner="dots"):
+                manifest, meta = plan_pypes_manifest(**plan_kwargs)
     except Exception as exc:
         console.print(Panel(
             f"[red]{exc}[/]",
@@ -1010,12 +1042,31 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     silver = sum(1 for s in manifest.steps if s.stage.value == "silver")
     gold   = sum(1 for s in manifest.steps if s.stage.value == "gold")
 
+    strategy_used = meta.get("strategy", "?")
+    strategy_detail = ""
+    if strategy_used == "incremental":
+        st = meta.get("stages") or {}
+        strategy_detail = (
+            f"  [muted]outline_steps={st.get('outline_steps','?')}  "
+            f"clp_entities={st.get('clp_entities','?')}  "
+            f"steps_expanded={st.get('steps_expanded','?')}  "
+            f"reports={st.get('reports','?')}  "
+            f"repair_iters={st.get('repair_iterations',0)}[/]"
+        )
+    elif strategy_used == "swarm":
+        strategy_detail = (
+            f"  [muted]drafts={meta.get('swarm_drafts','?')}  "
+            f"failures={len(meta.get('swarm_failures', []))}  "
+            f"judge={meta.get('judge') or 'n/a'}[/]"
+        )
+
     console.print(Panel.fit(
         f"[bold white]Draft id[/]    [accent]{manifest.id}[/]\n"
         f"[bold white]Name[/]        [white]{manifest.name}[/]\n"
         f"[bold white]Steps[/]       [white]{len(manifest.steps)}[/]  "
         f"[muted]bronze={bronze}  silver={silver}  gold={gold}[/]\n"
         f"[bold white]Reports[/]     [white]{len(manifest.reports)}[/]\n"
+        f"[bold white]Strategy[/]    [accent]{strategy_used}[/]{strategy_detail}\n"
         f"[bold white]Resolved model[/] [muted]{meta.get('model')}[/]",
         title="[bold green]  Draft Manifest [/]",
         border_style="green",

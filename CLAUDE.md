@@ -49,7 +49,7 @@ benny pypes run     manifests/templates/financial_risk_pipeline.json --workspace
 benny pypes drilldown <run_id> gold_exposure --workspace pypes_demo    # rows + CLP annotations
 benny pypes rerun    <run_id> --from silver_trades --workspace pypes_demo
 # --- pypes sandbox layer (advisory; never mutates run audit data) ---
-benny pypes plan         "<requirement>" --workspace W [--save] [--run]   # LLM-author a draft manifest
+benny pypes plan         "<requirement>" --workspace W [--save] [--run] [--strategy auto|oneshot|incremental|swarm]  # LLM-author a draft manifest (auto picks incremental for local/thinking models)
 benny pypes agent-report <run_id>        --workspace W                    # one-shot risk-analyst Markdown narrative
 benny pypes bench        pandas=<m1> polars=<m2> --workspace W [--repeats N]   # head-to-head wall/CPU/RSS/cost
 benny pypes model-bench  manifests/templates/model_comparison_planner.json --workspace W [--judge] [--save-report out.md]   # cross-model time/cost/tokens/accuracy/quality
