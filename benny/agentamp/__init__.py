@@ -14,6 +14,14 @@ Public surface (Phase 2)
 Public surface (Phase 3)
   dsp        — DSPTransform, Envelope, DerivedData, transform(), envelope_key()
 
+Public surface (Phase 4)
+  tui        — BennyTUI, SkinPalette, extract_palette(), run_tui(), run_line_mode()
+
+Public surface (Phase 5)
+  equalizer  — EqKnob, EqManifest, EqLock, EQ_ALLOWED_PATHS,
+               EqPathNotAllowed, EqWriteResult, validate_knob_path(),
+               apply_eq_write()
+
 Feature flag: ``aamp.enabled`` (AAMP-F32). Checked at CLI dispatch; not re-checked here.
 """
 
@@ -62,6 +70,16 @@ from .dsp import (
     envelope_key,
     transform,
 )
+from .equalizer import (
+    EQ_ALLOWED_PATHS,
+    EqKnob,
+    EqLock,
+    EqManifest,
+    EqPathNotAllowed,
+    EqWriteResult,
+    apply_eq_write,
+    validate_knob_path,
+)
 
 __all__ = [
     # Phase 1 — contracts
@@ -106,4 +124,13 @@ __all__ = [
     "DEFAULT_SPECTRUM_BINS",
     "envelope_key",
     "transform",
+    # Phase 5 — equalizer
+    "EQ_ALLOWED_PATHS",
+    "EqKnob",
+    "EqLock",
+    "EqManifest",
+    "EqPathNotAllowed",
+    "EqWriteResult",
+    "apply_eq_write",
+    "validate_knob_path",
 ]

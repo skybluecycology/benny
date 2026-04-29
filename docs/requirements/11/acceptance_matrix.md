@@ -38,8 +38,8 @@ pull):
 | AAMP-F6  | 3 | `test_aamp_f6_spectrum_vu_loop` | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
 | AAMP-F7  | 4 | `test_aamp_f7_tui_palette_from_skin` | IN-PROGRESS | `tests/agentamp/test_tui.py` |
 | AAMP-F8  | 4 | `test_aamp_f8_minimode_size_floor` | IN-PROGRESS | `tests/agentamp/test_tui.py` |
-| AAMP-F9  | 5 | `test_aamp_f9_eq_write_signs_manifest` | TODO | — |
-| AAMP-F10 | 5 | `test_aamp_f10_per_task_picker`, `test_aamp_f10_knob_lock_persists` | TODO | — |
+| AAMP-F9  | 5 | `test_aamp_f9_eq_write_signs_manifest` | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
+| AAMP-F10 | 5 | `test_aamp_f10_per_task_picker`, `test_aamp_f10_knob_lock_persists` | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
 | AAMP-F11 | 6 | `test_aamp_f11_playlist_reads_runs` | TODO | — |
 | AAMP-F12 | 6 | `test_aamp_f12_enqueue_uses_runs_endpoint` | TODO | — |
 | AAMP-F13 | 7 | `test_aamp_f13_effect_chain_skip_on_deny` | TODO | — |
@@ -91,7 +91,7 @@ pull):
 | AAMP-SEC2 | 2 | `test_aamp_sec2_csp_grammar`, `test_aamp_sec2_connect_src_none` | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-SEC3 | 1 | `test_aamp_sec3_zip_path_traversal_rejected`     | TODO | — |
 | AAMP-SEC4 | 1 | `test_aamp_sec4_signature_uses_shared_key_path`  | TODO | — |
-| AAMP-SEC5 | 5 | `test_aamp_sec5_eq_write_policy_evaluated`       | TODO | — |
+| AAMP-SEC5 | 5 | `test_aamp_sec5_eq_write_policy_evaluated`       | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
 | AAMP-SEC6 | 2 | `test_aamp_sec6_event_filter_subset`             | IN-PROGRESS | `tests/agentamp/test_agentvis_sdk.py` |
 | AAMP-SEC7 | 8 | `test_aamp_sec7_doctor_reports_drift`            | TODO | — |
 
@@ -99,8 +99,8 @@ pull):
 
 | Req ID | Phase | Test ID(s) | Status | Evidence |
 |--------|-------|------------|--------|----------|
-| AAMP-COMP1 | 5 | `test_aamp_comp1_eq_write_ledger_entry`         | TODO | — |
-| AAMP-COMP2 | 5 | `test_aamp_comp2_previous_signatures_preserved` | TODO | — |
+| AAMP-COMP1 | 5 | `test_aamp_comp1_eq_write_ledger_entry`         | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
+| AAMP-COMP2 | 5 | `test_aamp_comp2_previous_signatures_preserved` | IN-PROGRESS | `tests/agentamp/test_equalizer.py` |
 | AAMP-COMP3 | 7 | `test_aamp_comp3_jsonld_per_plugin`             | TODO | — |
 | AAMP-COMP4 | 9 | `test_aamp_comp4_doctor_audit_completeness`     | TODO | — |
 | AAMP-COMP5 | 3 | `test_aamp_comp5_dsp_replay_byte_identical`     | IN-PROGRESS | `tests/agentamp/test_dsp.py` |
