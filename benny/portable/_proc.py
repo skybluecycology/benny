@@ -62,15 +62,13 @@ def terminate(pid: int, *, grace_seconds: float = 10.0) -> bool:
         return True
 
     if _IS_WINDOWS:
-        import ctypes
-
-        k32 = ctypes.windll.kernel32
-        handle = k32.OpenProcess(_PROCESS_TERMINATE, False, pid)
-        if handle:
-            try:
-                k32.TerminateProcess(handle, 1)
-            finally:
-                k32.CloseHandle(handle)
+        import subprocess
+        # /T kills the entire process tree so child processes (e.g. node/vite
+        # spawned by benny-ui.cmd) don't become orphans after the wrapper dies.
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+        )
     else:
         try:
             os.kill(pid, signal.SIGTERM)
