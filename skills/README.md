@@ -44,7 +44,7 @@ Provide example Actions and Observations.
 
 | Skill              | Description                  | Status     |
 | ------------------ | ---------------------------- | ---------- |
-| `knowledge_search` | Semantic search in workspace | 🔜 Planned |
-| `file_operations`  | Read/write workspace files   | 🔜 Planned |
-| `data_processing`  | Extract data from PDF/CSV    | 🔜 Planned |
+| `knowledge_search` | Semantic search in workspace | ✅ Active  |
+| `file_operations`  | Read/write workspace files   | ✅ Active  |
+| `data_processing`  | Extract data from PDF/CSV    | ✅ Active  |
 | `code_execution`   | Sandboxed Python REPL        | 🔜 Planned |

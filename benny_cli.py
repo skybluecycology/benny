@@ -378,7 +378,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
     if getattr(args, "resume_run_id", None):
         _benny_home_resume = Path(os.environ.get("BENNY_HOME", "."))
-        _prior_folder = _benny_home_resume / "workspace" / args.workspace / "runs" / f"enrich-{args.resume_run_id}"
+        _prior_folder = _benny_home_resume / "workspaces" / args.workspace / "runs" / f"enrich-{args.resume_run_id}"
         if not _prior_folder.exists():
             console.print(f"[bold yellow]⚠  --resume {args.resume_run_id}: run folder not found[/] ({_prior_folder}). Running fresh.")
         else:
@@ -580,7 +580,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
 
     # ─── 4. Create local run folder ──────────────────────────────────────────
     benny_home = Path(os.environ.get("BENNY_HOME", "."))
-    run_folder = benny_home / "workspace" / args.workspace / "runs" / f"enrich-{run_id}"
+    run_folder = benny_home / "workspaces" / args.workspace / "runs" / f"enrich-{run_id}"
     run_folder.mkdir(parents=True, exist_ok=True)
 
     (run_folder / "manifest.json").write_text(rendered, encoding="utf-8")
@@ -1165,7 +1165,7 @@ async def cmd_enrich(args: argparse.Namespace) -> int:  # noqa: C901 — intenti
             # data_out dir (stable path referenced by manifest templates).
             (run_folder / "enrichment_report.md").write_text(report, encoding="utf-8")
             try:
-                _data_out = benny_home / "workspace" / args.workspace / "data_out"
+                _data_out = benny_home / "workspaces" / args.workspace / "data_out"
                 _data_out.mkdir(parents=True, exist_ok=True)
                 (_data_out / "enrichment_report.md").write_text(report, encoding="utf-8")
             except Exception:
@@ -1700,7 +1700,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     except home_mod.PortableHomeError as exc:
         print(f"benny init failed: {exc}", file=sys.stderr)
         return 1
-    print(f"initialised $BENNY_HOME at {bh.root} (profile={bh.profile})")
+
+    project_root = Path(__file__).parent
+    is_win = sys.platform == "win32"
+    launcher = str(project_root / ("benny.bat" if is_win else "benny.sh"))
+    bin_launcher = str(bh.root / "bin" / ("benny.cmd" if is_win else "benny"))
+
+    print(f"""
+Benny initialised at {bh.root}  (profile={bh.profile})
+Python: {sys.executable}
+
+Quick-start (run from the project directory):
+  {launcher} up --home {bh.root} --only api --only ui
+
+Or add {bh.root / 'bin'} to your PATH, then:
+  benny{''.join(['.cmd' if is_win else ''])} up --home {bh.root} --only api --only ui
+
+Run benny doctor --home {bh.root} to verify the install.
+""".strip())
     return 0
 
 

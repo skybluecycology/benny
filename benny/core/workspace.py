@@ -11,8 +11,11 @@ import json
 from .schema import WorkspaceManifest
 
 
-# Base workspace directory
-WORKSPACE_ROOT = Path("workspace")
+# Resolve workspace root: prefer $BENNY_HOME/workspaces when the env var is set
+# (i.e. when the API was launched via `benny up`); fall back to a relative
+# "workspace" dir for plain dev-server runs from the project root.
+_benny_home = os.environ.get("BENNY_HOME")
+WORKSPACE_ROOT = Path(_benny_home) / "workspaces" if _benny_home else Path("workspace")
 
 
 def get_workspace_path(workspace_id: str = "default", subdir: str = "") -> Path:
