@@ -108,7 +108,7 @@ def default_services(config: PortableConfig) -> dict[str, ServiceSpec]:
         env=_ui_env,
         health=HealthCheck(
             kind="http",
-            target=f"http://127.0.0.1:{config.ui_port}/",
+            target=f"http://localhost:{config.ui_port}/",
             timeout_seconds=30.0,
         ),
         depends_on=("api",),
