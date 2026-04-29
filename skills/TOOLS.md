@@ -170,13 +170,13 @@ def query_csv(
 
 | Tool                         | Module           | Status |
 | ---------------------------- | ---------------- | ------ |
-| `search_knowledge_workspace` | knowledge_search | 🔜     |
-| `list_available_documents`   | knowledge_search | 🔜     |
-| `read_full_document`         | knowledge_search | 🔜     |
-| `write_file`                 | file_operations  | 🔜     |
-| `read_file`                  | file_operations  | 🔜     |
-| `extract_pdf_text`           | data_processing  | 🔜     |
-| `query_csv`                  | data_processing  | 🔜     |
+| `search_knowledge_workspace` | knowledge_search | ✅     |
+| `list_available_documents`   | knowledge_search | ✅     |
+| `read_full_document`         | knowledge_search | ✅     |
+| `write_file`                 | file_operations  | ✅     |
+| `read_file`                  | file_operations  | ✅     |
+| `extract_pdf_text`           | data_processing  | ✅     |
+| `query_csv`                  | data_processing  | ✅     |
 
 ---
 
