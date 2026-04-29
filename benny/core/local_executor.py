@@ -93,7 +93,7 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # Use a longer default timeout for local models (LC-5.4)
-        self.timeout = float(os.environ.get("BENNY_LLM_TIMEOUT", "300"))
+        self.timeout = float(os.environ.get("BENNY_LLM_TIMEOUT", "900"))
 
     async def generate(self, prompt: str, system: Optional[str] = None, run_id: Optional[str] = None, **kwargs) -> str:
         start_ts = time.time()
@@ -103,16 +103,26 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
         messages.append({"role": "user", "content": prompt})
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
+            payload = {
+                "model": self.model_id,
+                "messages": messages,
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1000),
+                "stream": False
+            }
+            
+            if "frequency_penalty" in kwargs:
+                payload["frequency_penalty"] = kwargs["frequency_penalty"]
+            if "presence_penalty" in kwargs:
+                payload["presence_penalty"] = kwargs["presence_penalty"]
+            if "repetition_penalty" in kwargs:
+                payload["repetition_penalty"] = kwargs["repetition_penalty"]
+                
+            json_payload = payload
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "model": self.model_id,
-                    "messages": messages,
-                    "temperature": kwargs.get("temperature", 0.7),
-                    "max_tokens": kwargs.get("max_tokens", 1000),
-                    "stream": False
-                }
+                json=json_payload
             )
             resp.raise_for_status()
             data = resp.json()
@@ -156,17 +166,27 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
         start_ts = time.time()
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
+            payload = {
+                "model": self.model_id,
+                "messages": messages,
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1000),
+                "stream": True
+            }
+            
+            if "frequency_penalty" in kwargs:
+                payload["frequency_penalty"] = kwargs["frequency_penalty"]
+            if "presence_penalty" in kwargs:
+                payload["presence_penalty"] = kwargs["presence_penalty"]
+            if "repetition_penalty" in kwargs:
+                payload["repetition_penalty"] = kwargs["repetition_penalty"]
+                
+            json_payload = payload
             async with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "model": self.model_id,
-                    "messages": messages,
-                    "temperature": kwargs.get("temperature", 0.7),
-                    "max_tokens": kwargs.get("max_tokens", 1000),
-                    "stream": True
-                }
+                json=json_payload
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
