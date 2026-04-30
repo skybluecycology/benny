@@ -107,7 +107,7 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
                 "model": self.model_id,
                 "messages": messages,
                 "temperature": kwargs.get("temperature", 0.7),
-                "max_tokens": kwargs.get("max_tokens", 1000),
+                "max_tokens": kwargs.get("max_tokens", 4000),
                 "stream": False
             }
             
@@ -170,7 +170,7 @@ class BaseOpenAICompatibleExecutor(BaseLocalExecutor):
                 "model": self.model_id,
                 "messages": messages,
                 "temperature": kwargs.get("temperature", 0.7),
-                "max_tokens": kwargs.get("max_tokens", 1000),
+                "max_tokens": kwargs.get("max_tokens", 4000),
                 "stream": True
             }
             

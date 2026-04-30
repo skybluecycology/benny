@@ -33,6 +33,7 @@ from pydantic import ValidationError
 
 from .models import PypesManifest
 from .registry import default_registry
+from ..graph.swarm import parse_json_safe
 
 log = logging.getLogger(__name__)
 
@@ -490,6 +491,21 @@ Schema you must produce:
   ]
 }
 
+Example:
+{
+  "name": "Trade Exposure Pipeline",
+  "description": "Loads raw trade data and computes counterparty exposure.",
+  "conceptual": [
+    {"name": "Trade", "description": "Individual financial transaction"},
+    {"name": "Exposure", "description": "Aggregated risk per counterparty"}
+  ],
+  "step_skeleton": [
+    {"id": "bronze_trades", "stage": "bronze", "summary": "Load raw CSV from staging"},
+    {"id": "silver_clean", "stage": "silver", "summary": "Filter and deduplicate trades"},
+    {"id": "gold_risk", "stage": "gold", "summary": "Aggregate notional by counterparty"}
+  ]
+}
+
 Rules:
 - At least one bronze (load), one silver (transform/clean), one gold (aggregate/output) step.
 - Step ids: lowercase, prefixed by stage, snake_case.
@@ -505,7 +521,21 @@ Schema:
     {
       "entity": "EntityName",
       "fields": [
-        {"name": "field_name", "type": "string|int|float|bool|datetime", "required": true}
+        {"name": "field_name", "type": "string"|"int"|"float"|"bool"|"datetime", "required": true}
+      ]
+    }
+  ]
+}
+
+Example (ALWAYS use double quotes for types):
+{
+  "logical": [
+    {
+      "entity": "Trade",
+      "fields": [
+        {"name": "trade_id", "type": "string", "required": true},
+        {"name": "amount", "type": "float", "required": true},
+        {"name": "is_active", "type": "bool", "required": true}
       ]
     }
   ]
@@ -514,6 +544,7 @@ Schema:
 Rules:
 - 3-8 fields per entity. Use snake_case names.
 - Match entity names exactly to the conceptual list provided.
+- EVERY value must be a double-quoted string (except booleans like true/false for the 'required' field).
 - Output JSON only.
 """
 
@@ -529,6 +560,29 @@ Schema for one step:
   "operations": [{"operation": "<from registered list>", "params": {...}}],
   "source": {"uri": "${data_dir}/<file>", "format": "csv|parquet|json"},
   "post_validations": {"completeness": [...], "uniqueness": [...]}
+}
+
+Example (Bronze):
+{
+  "id": "bronze_load",
+  "stage": "bronze",
+  "engine": "pandas",
+  "inputs": [],
+  "outputs": ["raw_data"],
+  "source": {"uri": "${data_dir}/input.csv", "format": "csv"},
+  "operations": [{"operation": "load", "params": {"source_id": "STAGING"}}]
+}
+
+Example (Silver):
+{
+  "id": "silver_clean",
+  "stage": "silver",
+  "engine": "pandas",
+  "inputs": ["raw_data"],
+  "outputs": ["clean_data"],
+  "operations": [
+    {"operation": "filter", "params": {"column": "status", "op": "==", "value": "A"}}
+  ]
 }
 
 Rules:
@@ -1069,24 +1123,27 @@ def _repair_json(text: str) -> str:
 
 
 def _try_parse(text: str) -> Optional[Dict[str, Any]]:
-    """Try strict parse, fall back to repaired parse."""
+    """Try strict parse, fall back to robust parse_json_safe."""
     try:
+        # Standard fast path
         return json.loads(text)
     except json.JSONDecodeError:
         pass
+    
     try:
-        return json.loads(_repair_json(text))
-    except json.JSONDecodeError:
+        # Robust fallback path
+        payload, _ = parse_json_safe(text)
+        return payload
+    except Exception:
         return None
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Be forgiving: strip optional ```json fences, find the outermost JSON object."""
+    """Be forgiving: strip optional ```json fences, find the outermost JSON object.
+    Uses the robust parse_json_safe utility from swarm logic.
+    """
     if not text:
         return None
-
-    # Strip <think>...</think> blocks emitted by reasoning-mode models.
-    text = _THINK_RE.sub("", text).strip()
 
     # 1. Direct parse (with repair fallback).
     payload = _try_parse(text)

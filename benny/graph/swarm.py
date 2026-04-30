@@ -680,7 +680,8 @@ Execute the task following these skill guidelines. Be thorough and comprehensive
         else:
             system_prompt = """You are a focused task executor. Complete the given task thoroughly.
 Write comprehensive, well-structured content. Be specific and detailed.
-If the task requires research or data you don't have, clearly state assumptions.
+If the task requires research or data you don't have, clearly state that the information is missing.
+CRITICAL: Do NOT hallucinate or use external general knowledge for specific workspace reports. If tools return no data, report 'No data found'.
 
 DYNAMIC EXPANSION:
 If you identify a complex sub-pillar that requires dedicated research or separate execution, 

@@ -51,23 +51,23 @@ Rules:
 - CROSS-LINKING: If the text describes a design decision, architecture, or pattern, try to link it to potential code symbols or files (e.g., "AuthenticationService", "schema.py").
 - If the text mentions a source document name, include triples that reference it.
 
-Return ONLY a JSON array of objects, like:
-[
-  {{
-    "subject": "Dopamine",
-    "subject_type": "Biology",
-    "predicate": "drives",
-    "object": "reward-seeking behavior",
-    "object_type": "Concept",
-    "citation": "Dopamine is responsible for...",
-    "confidence": 0.95
-  }}
-]
+Return ONLY an XML block representing the triples, like this:
+<triples>
+  <triple>
+    <subject>Dopamine</subject>
+    <subject_type>Biology</subject_type>
+    <predicate>drives</predicate>
+    <object>reward-seeking behavior</object>
+    <object_type>Concept</object_type>
+    <citation>Dopamine is responsible for...</citation>
+    <confidence>0.95</confidence>
+  </triple>
+</triples>
 
 TEXT:
 {text}
 
-JSON TRIPLES:"""
+XML TRIPLES:"""
 
 
 DIRECTED_EXTRACTION_PROMPT = """You are an L2 expert reading a specific section of a document.
@@ -85,29 +85,29 @@ Rules for Extraction:
 TEXT SECTION: {section_title}
 {text}
 
-Output ONLY a JSON array of objects. Example format:
-[
-  {{
-    "subject": "Dopamine",
-    "subject_type": "Biology",
-    "predicate": "drives",
-    "object": "Reward-Seeking Behavior",
-    "object_type": "Concept",
-    "citation": "Dopamine is responsible for the reward-seeking loop in mammalian brains.",
-    "confidence": 0.9
-  }},
-  {{
-    "subject": "Prefrontal Cortex",
-    "subject_type": "Biology",
-    "predicate": "modulates",
-    "object": "impulse control",
-    "object_type": "Process",
-    "citation": "The prefrontal cortex acts as a top-down modulator for impulsive actions.",
-    "confidence": 0.85
-  }}
-]
+Output ONLY an XML block of triples. Example format:
+<triples>
+  <triple>
+    <subject>Dopamine</subject>
+    <subject_type>Biology</subject_type>
+    <predicate>drives</predicate>
+    <object>Reward-Seeking Behavior</object>
+    <object_type>Concept</object_type>
+    <citation>Dopamine is responsible for the reward-seeking loop in mammalian brains.</citation>
+    <confidence>0.9</confidence>
+  </triple>
+  <triple>
+    <subject>Prefrontal Cortex</subject>
+    <subject_type>Biology</subject_type>
+    <predicate>modulates</predicate>
+    <object>impulse control</object>
+    <object_type>Process</object_type>
+    <citation>The prefrontal cortex acts as a top-down modulator for impulsive actions.</citation>
+    <confidence>0.85</confidence>
+  </triple>
+</triples>
 
-JSON:"""
+XML:"""
 
 
 CONFLICT_DETECTION_PROMPT = """You are a logical consistency checker.
@@ -123,13 +123,19 @@ EXISTING TRIPLES:
 NEW TRIPLES:
 {new_triples}
 
-Return a JSON array of conflict objects. If no conflicts, return [].
-Each conflict object should have:
-  "concept_a": the first concept involved,
-  "concept_b": the second concept involved,
-  "description": a brief explanation of the contradiction
+Return an XML block of conflicts. If no conflicts, return <conflicts></conflicts>.
+Each conflict object should have <concept_a>, <concept_b>, and <description>.
 
-JSON CONFLICTS:"""
+Example:
+<conflicts>
+  <conflict>
+    <concept_a>A</concept_a>
+    <concept_b>B</concept_b>
+    <description>Contradiction explanation...</description>
+  </conflict>
+</conflicts>
+
+XML CONFLICTS:"""
 
 
 SYNTHESIS_PROMPT = """You are a cross-domain synthesis engine that finds structural isomorphisms -
@@ -146,14 +152,20 @@ An analogy exists when:
 KNOWLEDGE GRAPH:
 {graph_summary}
 
-Return a JSON array of analogy objects. If no analogies found, return [].
-Each analogy object should have:
-  "concept_a": first concept,
-  "concept_b": second concept,
-  "description": explanation of the analogy,
-  "pattern": the shared abstract pattern name (e.g. "Resilience through Redundancy")
+Return an XML block of analogies. If no analogies found, return <analogies></analogies>.
+Each analogy should use the tags <concept_a>, <concept_b>, <description>, and <pattern>.
 
-JSON ANALOGIES:"""
+Example:
+<analogies>
+  <analogy>
+    <concept_a>A</concept_a>
+    <concept_b>B</concept_b>
+    <description>Analogy explanation...</description>
+    <pattern>Pattern Name</pattern>
+  </analogy>
+</analogies>
+
+XML ANALOGIES:"""
 
 
 CROSS_DOMAIN_PROMPT = """You are a cross-domain analogy engine.
@@ -168,15 +180,15 @@ Provide:
 2. How the structural pattern maps
 3. Key similarities and differences
 
-Be specific and insightful. Format as JSON:
-{{
-  "analogous_concept": "...",
-  "mapping": "...",
-  "similarities": ["..."],
-  "differences": ["..."]
-}}
+Be specific and insightful. Format as XML:
+<analogy>
+  <analogous_concept>...</analogous_concept>
+  <mapping>...</mapping>
+  <similarities>...</similarities>
+  <differences>...</differences>
+</analogy>
 
-JSON:"""
+XML:"""
 
 
 COMMUNITY_NAMING_PROMPT = """You are a topological expert.
@@ -190,13 +202,13 @@ GUIDELINES:
 2. It should capture the "essence" of the cluster (e.g., "Neural Execution Layer", "User Data Governance", "Asynchronous Messaging Patterns").
 3. Avoid generic names like "Group 1" or "System Cluster".
 
-Return ONLY a JSON object:
-{{
-  "community_name": "...",
-  "justification": "..."
-}}
+Return ONLY an XML block:
+<community>
+  <community_name>...</community_name>
+  <justification>...</justification>
+</community>
 
-JSON:"""
+XML:"""
 
 
 
@@ -209,7 +221,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def adaptive_truncate(text: str, max_tokens: int = 1500) -> str:
+def adaptive_truncate(text: str, max_tokens: int = 4000) -> str:
     """
     Truncate text to fit within a token budget, preferring to break at
     sentence boundaries rather than mid-sentence.
@@ -250,30 +262,22 @@ async def call_llm(
     cfg = config or SynthesisConfig()
 
     # Priority 1: Use explicitly provided model
-    # Priority 2: Auto-resolve via active workspace manifest
-    # Priority 3: Fallback defaults
-    if not model and workspace:
+    # Priority 2: Auto-resolve via active workspace manifest OR swarm manifest
+    if not model and (workspace or run_id):
         try:
             from ..core.models import get_active_model
-            model = await get_active_model(workspace, role=role)
+            model = await get_active_model(workspace or "default", role=role, run_id=run_id)
         except Exception:
             pass
 
     # Resolve model string (e.g., "ollama/llama3")
     if model and "/" in model:
         full_model = model
+    elif model:
+        full_model = f"{provider}/{model}"
     else:
-        # Fallback to default model names for known providers
-        default_models = {
-            "ollama": "ollama/llama3",
-            "lemonade": "lemonade/deepseek-r1-8b-FLM",
-            "fastflowlm": "fastflowlm/gemma3:4b",
-            "litert": "litert/gemma-4-E4B-it.litertlm"
-        }
-        if model:
-            full_model = f"{provider}/{model}"
-        else:
-            full_model = default_models.get(provider, "lemonade/default")
+        # Final safety fallback: use provider/default and let executor resolve
+        full_model = f"{provider}/default"
 
     last_error = None
     for attempt in range(cfg.max_retries):
@@ -311,10 +315,10 @@ def _parse_json_from_llm(text: str) -> Tuple[Any, str]:
     """
     Robustly extract JSON from LLM output that may contain markdown fences,
     <think> reasoning blocks, or truncated arrays.
-    Now returns (parsed_data, thinking_string).
+    Returns (parsed_data, thinking_string).
     """
     thinking = ""
-    # Extract and strip all think blocks (handles multiple or nested blocks better)
+    # Extract and strip all think blocks
     cleaned = text
     think_blocks = re.findall(r'<think>(.*?)</think>', cleaned, re.DOTALL)
     if think_blocks:
@@ -327,55 +331,146 @@ def _parse_json_from_llm(text: str) -> Tuple[Any, str]:
             thinking = think_match.group(1).strip()
             cleaned = re.sub(r'<think>.*', '', cleaned, flags=re.DOTALL).strip()
 
-    # Strip markdown code fences
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        cleaned = "\n".join(lines).strip()
+    # Strip markdown code fences (more robustly)
+    if "```" in cleaned:
+        # Try to find content inside ```json ... ``` or just ``` ... ```
+        fence_matches = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+        if fence_matches:
+            # If multiple code blocks, join them or pick the largest?
+            # Usually we want the largest or the first one that is valid.
+            # We'll try to process the whole thing below anyway.
+            pass
+        else:
+            # Fallback: just strip all lines starting with ```
+            lines = cleaned.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
     
-    # Find JSON boundaries
-    start_char = ""
-    start_idx = -1
-    for i, char in enumerate(cleaned):
-        if char in "{[":
-            start_idx = i
-            start_char = char
-            break
+    # ---------------------------------------------------------
+    # NEW: Indestructible XML Parsing for Rigid Operating Model
+    # ---------------------------------------------------------
+    # If the prompt used XML tags (e.g. <triples>), we parse it via regex to avoid strict syntax errors.
+    xml_data = []
+    
+    # 1. Triples
+    if "<triple>" in cleaned:
+        for triple_match in re.finditer(r'<triple>(.*?)</triple>', cleaned, re.IGNORECASE | re.DOTALL):
+            t_str = triple_match.group(1)
+            triple = {}
+            for tag in ["subject", "subject_type", "predicate", "object", "object_type", "citation", "confidence"]:
+                m = re.search(fr'<{tag}>(.*?)</{tag}>', t_str, re.IGNORECASE | re.DOTALL)
+                if m:
+                    val = m.group(1).strip()
+                    if tag == "confidence":
+                        try: val = float(val)
+                        except: val = 1.0
+                    triple[tag] = val
+            if "subject" in triple and "object" in triple:
+                xml_data.append(triple)
+        if xml_data: return xml_data, thinking
+
+    # 2. Conflicts / Analogies (generic list of objects)
+    for root_tag, item_tag in [("conflicts", "conflict"), ("analogies", "analogy")]:
+        if f"<{item_tag}>" in cleaned:
+            for match in re.finditer(fr'<{item_tag}>(.*?)</{item_tag}>', cleaned, re.IGNORECASE | re.DOTALL):
+                i_str = match.group(1)
+                item = {}
+                # Extract any child tags generically
+                for tag_match in re.finditer(r'<([a-zA-Z0-9_]+)>(.*?)</\1>', i_str, re.DOTALL):
+                    item[tag_match.group(1).lower()] = tag_match.group(2).strip()
+                if item: xml_data.append(item)
+            if xml_data: return xml_data, thinking
             
-    if start_idx == -1:
-        # Fallback to older logic if no brackets found
-        try:
-            return json.loads(cleaned), thinking
-        except:
-             return [], thinking
+    # 3. Community (single object)
+    if "<community_name>" in cleaned:
+        comm = {}
+        for tag in ["community_name", "justification", "analogous_concept", "mapping"]:
+            m = re.search(fr'<{tag}>(.*?)</{tag}>', cleaned, re.IGNORECASE | re.DOTALL)
+            if m: comm[tag] = m.group(1).strip()
+        if comm: return comm, thinking
 
-    # Find last corresponding bracket
-    end_char = "}" if start_char == "{" else "]"
-    end_idx = cleaned.rfind(end_char)
-    
-    if end_idx != -1:
-        json_str = cleaned[start_idx:end_idx + 1]
-    else:
-        json_str = cleaned[start_idx:]
+    # ---------------------------------------------------------
+    # JSON Parsing Fallback
+    # ---------------------------------------------------------
+    def score_json(data: Any) -> int:
+        """Score JSON based on its complexity/usefulness."""
+        if isinstance(data, list):
+            # Bonus for lists as we usually expect arrays of triples
+            return len(data) * 10 + 5
+        if isinstance(data, dict):
+            return len(data.keys())
+        return 0
 
-    # Clean up trailing commas
-    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+    best_data = []
+    max_score = -1
 
+    # Try parsing the whole thing first
     try:
-        return json.loads(json_str), thinking
-    except json.JSONDecodeError:
-        # Simple recovery for truncated arrays/objects
-        if not (json_str.endswith("}") or json_str.endswith("]")):
-            # Naive close
-            if start_char == "{": json_str += "}"
-            else: json_str += "]"
-            try:
-                return json.loads(json_str), thinking
-            except:
-                pass
+        data = json.loads(cleaned)
+        max_score = score_json(data)
+        best_data = data
+    except:
+        pass
+
+    # Find all possible start positions for JSON objects or arrays
+    for match in re.finditer(r"\{|\[", cleaned):
+        start_idx = match.start()
+        start_char = cleaned[start_idx]
+        end_char = "}" if start_char == "{" else "]"
         
-        logger.warning("Failed to parse JSON from LLM output (%d chars).", len(text))
-        return [], thinking
+        # Look for the last occurrence of the matching end bracket
+        # and work backwards to find the largest valid JSON.
+        end_matches = list(re.finditer(re.escape(end_char), cleaned[start_idx:]))
+        for end_match in reversed(end_matches):
+            current_end_idx = start_idx + end_match.end()
+            json_str = cleaned[start_idx:current_end_idx]
+            
+            # Clean up trailing commas
+            json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+            
+            try:
+                data = json.loads(json_str)
+                score = score_json(data)
+                if score > max_score: 
+                    max_score = score
+                    best_data = data
+            except:
+                continue
+
+    # Final fallback for truncated JSON
+    if max_score <= 5: # If we only found empty lists or dicts, try harder
+        first_start = re.search(r"\{|\[", cleaned)
+        if first_start:
+            start_idx = first_start.start()
+            json_str = cleaned[start_idx:]
+            
+            # Very aggressive truncation recovery: try adding combinations of closing brackets
+            for i in range(1, 6):
+                for trial_suffix in ["}", "]", "}]", "]}", "}}] ", "}]}]"]:
+                    trial = json_str + (trial_suffix * i)
+                    try:
+                        trial_clean = re.sub(r',\s*([\]}])', r'\1', trial)
+                        data = json.loads(trial_clean)
+                        score = score_json(data)
+                        if score > max_score:
+                            max_score = score
+                            best_data = data
+                    except:
+                        continue
+
+    if max_score > -1:
+        return best_data, thinking
+        
+    logger.warning("Failed to parse JSON from LLM output (%d chars).", len(text))
+    # DEBUG: Save failed output to a file for inspection
+    try:
+        debug_path = os.path.join(os.getcwd(), f"failed_llm_output_{int(asyncio.get_event_loop().time())}.txt")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        logger.info("Saved failed LLM output to %s", debug_path)
+    except:
+        pass
+    return [], thinking
 
 
 # =============================================================================
@@ -467,8 +562,9 @@ async def extract_triples(
     """
     cfg = config or SynthesisConfig()
     
-    # Choose prompt
-    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=text[:40000]) # Increased limit for deeper synthesis
+    # Use adaptive chunking to fit the model's context window
+    safe_text = adaptive_truncate(text, cfg.max_context_tokens)
+    prompt = TRIPLE_EXTRACTION_PROMPT.format(text=safe_text)
 
     try:
         # Resolve model_id to track provenance
@@ -662,11 +758,13 @@ async def parallel_extract_triples(
 async def detect_conflicts(
     existing_triples: List[Any],
     new_triples: List[Any],
+    workspace: str = "default",
     provider: str = "lemonade",
     model: str = None,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     run_id: Optional[str] = None
+
 ) -> List[Dict[str, str]]:
     """Detect logical conflicts between existing and new triples."""
     cfg = config or SynthesisConfig()
@@ -693,7 +791,8 @@ async def detect_conflicts(
     )
 
     try:
-        raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
+        raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, workspace=workspace, run_id=run_id)
+
         conflicts, thinking = _parse_json_from_llm(raw)
 
         if thinking and run_id:
@@ -715,17 +814,20 @@ async def detect_conflicts(
 
 async def find_synthesis(
     graph_summary: str,
+    workspace: str = "default",
     provider: str = "lemonade",
     model: str = None,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     run_id: Optional[str] = None
 ) -> List[Dict[str, str]]:
+
     """Find structural isomorphisms in the knowledge graph."""
     cfg = config or SynthesisConfig()
     prompt = SYNTHESIS_PROMPT.format(graph_summary=graph_summary)
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, workspace=workspace, run_id=run_id)
+
     analogies, thinking = _parse_json_from_llm(raw)
 
     if thinking and run_id:
@@ -742,11 +844,14 @@ async def cross_domain_analogy(
     concept: str,
     relationships: str,
     target_domain: str,
+    workspace: str = "default",
     provider: str = "lemonade",
+    model: str = None,
     timeout: Optional[float] = None,
     config: Optional[SynthesisConfig] = None,
     run_id: Optional[str] = None
 ) -> Dict[str, Any]:
+
     """Map a concept into a different domain."""
     cfg = config or SynthesisConfig()
     prompt = CROSS_DOMAIN_PROMPT.format(
@@ -755,7 +860,8 @@ async def cross_domain_analogy(
         target_domain=target_domain
     )
 
-    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, run_id=run_id)
+    raw = await call_llm(prompt, provider=provider, model=model, timeout=timeout, config=cfg, workspace=workspace, run_id=run_id)
+
     result, thinking = _parse_json_from_llm(raw)
 
     if thinking and run_id:

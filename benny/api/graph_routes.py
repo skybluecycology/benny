@@ -1058,6 +1058,7 @@ async def _process_content_to_graph(
         conflicts = await detect_conflicts(
             existing_triples=existing,
             new_triples=triples,
+            workspace=workspace,
             provider=provider,
             model=model,
             timeout=llm_timeout,
@@ -1344,11 +1345,13 @@ async def _background_synthesis(
 
             analogies = await find_synthesis(
                 graph_summary=graph_summary,
+                workspace=workspace,
                 provider=provider,
                 model=model,
                 timeout=llm_timeout,
                 run_id=task_id
             )
+
 
             # 4. Store discovered analogies
             for a in analogies:
@@ -1398,10 +1401,12 @@ async def cross_domain(request: CrossDomainRequest):
             concept=request.concept,
             relationships=relationships,
             target_domain=request.target_domain,
+            workspace=request.workspace,
             provider=request.provider,
             model=request.model,
             timeout=llm_timeout
         )
+
 
         return {
             "concept": request.concept,

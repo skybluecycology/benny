@@ -311,7 +311,9 @@ async def _execute_rag_ingest(workspace: str, **kwargs) -> str:
     import asyncio
     from ..api.graph_routes import _background_ingest_files
     
-    run_id = str(uuid.uuid4())
+    # Reuse existing run_id from swarm if available to ensure manifest-aware model resolution
+    run_id = kwargs.get("run_id") or kwargs.get("execution_id") or str(uuid.uuid4())
+
     files_raw = kwargs.get("files", "[]")
     
     try:
@@ -563,7 +565,8 @@ class SkillRegistry:
         if not handler:
             return f"[!] Unknown skill: {skill_id}"
         try:
-            result = await handler(workspace=workspace, active_nexus_id=active_nexus_id, **kwargs)
+            # Propagate agent_id as run_id to ensure context-aware model resolution (PBR-001 §4.2)
+            result = await handler(workspace=workspace, active_nexus_id=active_nexus_id, run_id=agent_id, **kwargs)
             
             # Context Guard: Protect against massive tool outputs
             from .context_guard import guard_tool_output

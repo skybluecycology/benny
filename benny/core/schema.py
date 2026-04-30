@@ -53,7 +53,7 @@ class SynthesisConfig(BaseModel):
     Can be overridden per-workspace via the manifest.
     """
     # Chunking
-    max_context_tokens: int = Field(default=1500, description="Max tokens per LLM context chunk (~4 chars/token)")
+    max_context_tokens: int = Field(default=4000, description="Max tokens per LLM context chunk (~4 chars/token)")
     min_section_chars: int = Field(default=50, description="Minimum chars for a section to be processed")
 
     # Parallel extraction

@@ -43,8 +43,11 @@ def extract_structured_text(file_path: Path, log_fn: Callable = print) -> str:
         except Exception as e:
             log_fn(f"Warning: Failed to read {file_path.name} as UTF-8: {e}")
     
+    # Force basic extraction to avoid Docling deadlock/hang
+    return _basic_extract(file_path)
+
     try:
-        log_fn(f"[INFO] Using Docling (PyPdfium Backend) to extract structured content from {file_path.name}...")
+        # log_fn(f"[INFO] Using Docling (PyPdfium Backend) to extract structured content from {file_path.name}...")
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions

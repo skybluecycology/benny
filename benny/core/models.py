@@ -232,8 +232,25 @@ def get_model_config(model_id: str) -> Dict[str, Any]:
         "cost_per_1k": 0.0
     }
 
-async def get_active_model(workspace_id: str = "default", role: str = "chat") -> str:
+async def get_active_model(workspace_id: str = "default", role: str = "chat", run_id: Optional[str] = None) -> str:
     """Determine which model is currently 'active' for a role in a workspace."""
+    # Priority 0: Check for an active swarm manifest snapshot in the run_store
+    if run_id:
+        try:
+            from ..persistence.run_store import get_run
+            record = get_run(run_id)
+            if record and record.manifest_snapshot:
+                # SwarmManifest.config.model is the primary override
+                cfg = record.manifest_snapshot.get("config", {})
+                if cfg.get("model"):
+                    return cfg["model"]
+                # Fallback to variables.model
+                vrs = record.manifest_snapshot.get("variables", {})
+                if vrs.get("model"):
+                    return vrs["model"]
+        except Exception as e:
+            logger.debug(f"RunStore lookup failed for {run_id}: {e}")
+
     try:
         from .workspace import load_manifest
         manifest = load_manifest(workspace_id)

@@ -40,6 +40,8 @@ class IngestRequest(BaseModel):
     correlation_top_k: int = 32          # Max symbol matches per concept; caps edge fan-out
     correlation_use_ann: bool = True     # Use HNSW ANN index when hnswlib is installed; falls back to numpy top-K
     force_reingest: bool = False # Whether to force re-processing even if already in DB
+    model: Optional[str] = None # Optional model override for synthesis
+
 
 
 
@@ -198,8 +200,10 @@ async def ingest_files(request: IngestRequest):
                             run_id=run_id, 
                             workspace=request.workspace,
                             strategy=request.strategy,
+                            model=request.model,
                             timeout=300.0,
                             parallel_limit=2
+
                         )
                         print(f"DEBUG: FINISHED Triple Extraction for {file_path.name}: Found {len(triples)} triples")
                         
